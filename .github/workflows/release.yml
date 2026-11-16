@@ -60,9 +60,11 @@ jobs:
             target: '--win'
           - platform: macOS Intel
             os: macos-15-intel
+            arch: x64
             target: '--mac --x64'
           - platform: macOS Apple Silicon
             os: macos-15
+            arch: arm64
             target: '--mac --arm64'
           - platform: Linux
             os: ubuntu-latest
@@ -97,6 +99,25 @@ jobs:
       - name: Package and publish draft (${{ matrix.platform }})
         run: pnpm exec electron-builder ${{ matrix.target }} --publish always
 
+      # 两个 macOS job 各自产出一份 latest-mac.yml，直接上传会互相覆盖，索引里只剩
+      # 最后完成那个架构的产物，arm64 设备就会退回下载 x64 包。这里先按架构留存，
+      # 由下面的 mac-index job 合成一份同时包含两个架构的索引再上传。
+      - name: Keep per-arch update index
+        if: startsWith(matrix.platform, 'macOS')
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: cp dist/latest-mac.yml "dist/latest-mac-${ARCH}.yml"
+
+      - name: Upload per-arch update index
+        if: startsWith(matrix.platform, 'macOS')
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-index-${{ matrix.arch }}
+          path: dist/latest-mac-${{ matrix.arch }}.yml
+          retention-days: 3
+          if-no-files-found: error
+
       # 发布失败时保留产物，方便排查 / 手动补传
       - name: Upload artifacts on failure
         if: failure()
@@ -113,6 +134,35 @@ jobs:
             dist/*.blockmap
           retention-days: 3
           if-no-files-found: ignore
+
+  # 两个 macOS job 各写一份 latest-mac.yml，后上传的覆盖先上传的，线上索引里就只剩
+  # 一个架构；arm64 设备读不到 arm64 条目会退回下载 x64 包。这里把两份合成一份
+  # （files 同时含 mac-x64 与 mac-arm64）再覆盖回草稿 Release。
+  mac-index:
+    name: Merge macOS update index
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download per-arch indexes
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mac-index-*
+          path: mac-index
+          merge-multiple: true
+
+      # 缺任一架构、版本与标签不一致都会直接失败，避免把坏索引传到 Release
+      - name: Merge into latest-mac.yml
+        run: node scripts/merge-mac-update-index.mjs mac-index dist/latest-mac.yml "$GITHUB_REF_NAME"
+
+      - name: Replace latest-mac.yml on the draft release
+        run: gh release upload "$GITHUB_REF_NAME" dist/latest-mac.yml --clobber
 
   notes:
     name: Fill draft release notes

@@ -20,8 +20,9 @@ CI 只上传**草稿**（`electron-builder --publish always`，GitHub 的 `publi
 - [ ] package.json version 与标签一致（如 1.0.1 / v1.0.1）
 - [ ] 提交并 push origin master
 - [ ] annotated tag 推到 origin（触发 Release 工作流）
-- [ ] Actions：Windows + macOS Intel + macOS Apple Silicon + Linux 全绿
+- [ ] Actions：Windows + macOS Intel + macOS Apple Silicon + Linux 全绿，`mac-index` job 也成功
 - [ ] 核对产物文件名（见下方清单）与 latest*.yml
+- [ ] `latest-mac.yml` 的 files 同时含 `mac-x64.zip` 和 `mac-arm64.zip`
 - [ ] gh release edit vX.Y.Z --draft=false
 ```
 
@@ -76,20 +77,27 @@ gh release edit vX.Y.Z --draft=false --title "映盒剧场 vX.Y.Z" --notes-file 
 
 缺 Intel 或 arm64 的 dmg、两个 dmg 同名、缺 `latest*.yml`，视为失败，不要发布。
 
+`latest-mac.yml` 由 `mac-index` job 把两个架构的索引合出来，`files` 里必须同时有
+`mac-x64.zip` 和 `mac-arm64.zip`：只有 x64 时，`MacUpdater.filterFilesForArch` 会让
+Apple Silicon 拿到 Intel 包（能装，但架构不对）。
+
 ## 禁止
 
 - 不要把 [`electron-builder.yml`](electron-builder.yml) 的 `publish.releaseType` 改成 `release`：
   四平台并发上传会拆成多条同 tag Release。
 - 不要在 workflow 里自动 `gh release edit --draft=false`。
 - 不要在单个 macOS job 里跑 `--mac --x64 --arm64`（交叉编译且 dmg 的 arch 会互相覆盖）。
+- 不要让两个 macOS job 直接把 `latest-mac.yml` 传上去：后上传的会覆盖前一个，索引里只剩一个架构；
+  必须保留 `mac-index` job（合并脚本见 `scripts/merge-mac-update-index.mjs`）。
 - 不要重写已有 tag，除非用户明确说清空旧 Release 并重打同一版本。
 - 不要改 `latest*.yml` / `*.blockmap` 的文件名（`electron-updater` 依赖固定名字）。
 
 ## 配置锚点
 
 - Workflow：[`.github/workflows/release.yml`](.github/workflows/release.yml) — tag `v*` 触发；
-  matrix 四平台各跑 `electron-builder --publish always`（草稿）；末尾 notes job 用 CHANGELOG 填草稿；
-  [`ci.yml`](.github/workflows/ci.yml) 在 push / PR 上跑 lint、typecheck、构建。
+  matrix 四平台各跑 `electron-builder --publish always`（草稿）；两个 macOS job 另外把自己的
+  `latest-mac.yml` 按架构存成 artifact，`mac-index` job 合并后覆盖回草稿 Release；
+  末尾 notes job 用 CHANGELOG 填草稿；[`ci.yml`](.github/workflows/ci.yml) 在 push / PR 上跑 lint、typecheck、构建。
 - 产物名：`nsis` / `mac` / `dmg` / `linux` 的 `artifactName` 统一为 `${name}-${version}-<platform>-${arch}.${ext}`。
 - 发布源：`0x2one/cine-box`，仓库需为公开仓库；Electron 二进制走 `npmmirror`（`electronDownload.mirror`）。
 - 本地联调更新：`CINEBOX_DEV_UPDATE=1 pnpm dev`，此时「关于 → 软件更新」会真实请求 GitHub Releases。

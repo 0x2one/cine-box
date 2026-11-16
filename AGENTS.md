@@ -54,6 +54,8 @@ Use the `.agents/skills/cine-box-release` skill for 发版. Constraints the CI `
 
 Tag push builds four platforms and uploads to a **draft** Release; publishing is a manual `gh release edit vX.Y.Z --draft=false`. Do not set `publish.releaseType: release`, rename `latest*.yml` / `*.blockmap`, or build both macOS arches in one job (see the skill for why).
 
+Both macOS jobs write the same `latest-mac.yml`, so they hand their copy to the `mac-index` job, which merges both arches into one `files` list (`scripts/merge-mac-update-index.mjs`) and replaces the file on the draft. Without that step `latest-mac.yml` lists only the arch that finished last, and `MacUpdater.filterFilesForArch` makes Apple Silicon install the Intel build. Keep the merged index in mind when changing the macOS matrix.
+
 ## Conventions
 
 - Branch `master`; Conventional Commits, e.g. `feat(updater): ...`, `fix(renderer): ...`, `chore: release v1.0.1`.
