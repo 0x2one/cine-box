@@ -3,7 +3,6 @@ import {
   BorderOutlined,
   CloseOutlined,
   CompressOutlined,
-  InfoCircleOutlined,
   MinusOutlined,
   SettingOutlined
 } from '@ant-design/icons'
@@ -18,7 +17,8 @@ interface TitleBarProps {
 }
 
 /**
- * 自绘窗口操作栏：左侧 Logo + 标题，右侧 关于 / 设置 / 最小化 / 最大化 / 关闭。
+ * 自绘窗口操作栏：左侧 Logo + 标题，右侧 设置 / 最小化 / 最大化 / 关闭。
+ * 「关于」不再放在操作栏，由设置页的「关于」分区承载。
  * macOS 保留原生红绿灯，因此不再重复绘制窗口按钮。
  */
 function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
@@ -56,21 +56,12 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
       <div className="titlebar-actions">
         <button
           type="button"
-          className={`titlebar-action${view === 'about' ? ' is-active' : ''}`}
-          onClick={() => onNavigate('about')}
-          title="关于"
-        >
-          <InfoCircleOutlined />
-          <span>关于</span>
-        </button>
-        <button
-          type="button"
           className={`titlebar-action${view === 'settings' ? ' is-active' : ''}`}
           onClick={() => onNavigate('settings')}
           title="设置"
+          aria-label="设置"
         >
           <SettingOutlined />
-          <span>设置</span>
         </button>
 
         {!IS_MAC && (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Segmented, Switch } from 'antd'
+import { App, Segmented, Switch, Tooltip } from 'antd'
 import {
   ArrowLeftOutlined,
   BgColorsOutlined,
@@ -34,7 +34,7 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   preferences: { title: '偏好设置', desc: '启动、关闭与更新行为' },
   shortcut: { title: '快捷键', desc: '在任何应用中唤起映盒剧场' },
   appearance: { title: '外观', desc: '明暗主题与强调色' },
-  about: { title: '关于', desc: '版本信息与软件更新' }
+  about: { title: '关于', desc: '应用介绍与软件更新' }
 }
 
 const IS_MAC = window.electron?.process?.platform === 'darwin'
@@ -285,9 +285,16 @@ function ShortcutPanel(): React.JSX.Element {
                 <ThunderboltOutlined />
                 <kbd>{recording ? '请按下组合键…' : value || '未设置'}</kbd>
               </div>
-              <Button size="small" icon={<UndoOutlined />} onClick={reset}>
-                恢复默认
-              </Button>
+              <Tooltip title="恢复默认快捷键">
+                <button
+                  type="button"
+                  className="shortcut-reset"
+                  onClick={reset}
+                  aria-label="恢复默认快捷键"
+                >
+                  <UndoOutlined />
+                </button>
+              </Tooltip>
             </div>
           </SettingRow>
           <div className="settings-note">

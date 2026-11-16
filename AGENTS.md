@@ -34,7 +34,7 @@ Adding a channel takes three edits: `ipcMain.handle` in main, `ipcRenderer.invok
 ## Window and renderer gotchas
 
 - Frameless (`frame: false`) on Windows/Linux, `hiddenInset` + traffic lights on macOS; `TitleBar.tsx` draws its own window buttons only off macOS.
-- Windows double-click-to-maximize is implemented in main with `hookWindowMessage` (drag regions don't emit DOM dblclick). Its hit test hard-codes a 44px title bar, 150px brand zone and 300px actions zone — keep those in sync with any `TitleBar` layout change.
+- Windows double-click-to-maximize is implemented in main with `hookWindowMessage` (drag regions don't emit DOM dblclick). Its hit test hard-codes a 44px title bar, 150px brand zone and 190px actions zone — keep those in sync with any `TitleBar` layout change.
 - Theme is dual-track: `applyAppearance()` in `theme/appearance.ts` writes `data-theme` and CSS vars on `<html>` before first paint, and `ThemeProvider.tsx` maps the same palette into antd tokens. Style with the existing `--bg` / `--surface` / `--text` / `--accent` vars, not hard-coded colors, or one theme will break.
 - Tailwind's `dark:` variant is rebound to `[data-theme='dark']` in `assets/main.css`, not the default `.dark` class.
 - CSP in `src/renderer/index.html` is `default-src 'self'`; do remote HTTP in the main process over IPC, not `fetch` in the renderer.

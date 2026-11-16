@@ -17,12 +17,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
-const PLATFORM_LABELS: Record<string, string> = {
-  win32: 'Windows',
-  darwin: 'macOS',
-  linux: 'Linux'
-}
-
 function describeUpdaterError(raw?: string): string {
   if (!raw) return '未知错误'
   if (/no published versions on github/i.test(raw)) return 'GitHub 上还没有发布版本'
@@ -176,6 +170,10 @@ function UpdateSection({ canUpdate }: { canUpdate: boolean | null }): React.JSX.
   )
 }
 
+/** 应用介绍：关于面板与关于页共用同一段文案 */
+const APP_INTRO =
+  '映盒剧场是一款轻量的桌面影音应用，界面固定为简体中文。无边框窗口配自绘操作栏，常驻系统托盘并支持全局快捷键唤起，可切换浅色 / 深色主题与主题色，内置应用内更新。影音内容界面仍在建设中。'
+
 /** 关于面板：设置页的「关于」分区与独立关于页共用 */
 export function AboutPanel(): React.JSX.Element {
   const [info, setInfo] = useState<AppInfo | null>(null)
@@ -190,8 +188,6 @@ export function AboutPanel(): React.JSX.Element {
     }
   }, [])
 
-  const platform = info ? `${PLATFORM_LABELS[info.platform] ?? info.platform} · ${info.arch}` : '—'
-
   return (
     <section className="about-card">
       <div className="about-head">
@@ -201,11 +197,12 @@ export function AboutPanel(): React.JSX.Element {
           <div className="about-version">版本 v{info?.version ?? '—'}</div>
         </div>
       </div>
-      <div className="about-env">
-        <span>Electron {info?.electron ?? '—'}</span>
-        <span>Chromium {info?.chrome ?? '—'}</span>
-        <span>Node {info?.node ?? '—'}</span>
-        <span>{platform}</span>
+      <p className="about-intro">{APP_INTRO}</p>
+      <div className="about-tags">
+        <span>托盘常驻</span>
+        <span>全局快捷键</span>
+        <span>深浅主题</span>
+        <span>应用内更新</span>
       </div>
       <div className="about-divider" />
       <UpdateSection canUpdate={info?.canUpdate ?? null} />
@@ -221,7 +218,7 @@ function AboutPage({ onBack }: { onBack: () => void }): React.JSX.Element {
         <span>返回</span>
       </button>
       <h1 className="page-title">关于</h1>
-      <p className="page-subtitle">版本信息与软件更新</p>
+      <p className="page-subtitle">应用介绍与软件更新</p>
       <div className="about-page-body">
         <AboutPanel />
       </div>
