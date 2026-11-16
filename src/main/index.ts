@@ -228,7 +228,7 @@ function createWindow(): void {
     const WM_LBUTTONDBLCLK = 0x0203
     const TITLE_BAR_HEIGHT = 44
     const BRAND_ZONE_WIDTH = 150
-    const ACTIONS_ZONE_WIDTH = 190
+    const ACTIONS_ZONE_WIDTH = 222
     mainWindow.hookWindowMessage(WM_LBUTTONDBLCLK, () => {
       if (!mainWindow || mainWindow.isDestroyed()) return
       const cursor = screen.getCursorScreenPoint()

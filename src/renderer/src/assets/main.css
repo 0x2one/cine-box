@@ -365,6 +365,29 @@
   font-size: 12.5px;
 }
 
+/* ── 控制台 ── */
+
+/* 标题、左侧导航、右侧面板沿用设置页的 .page-inner / .settings-* 样式，这里只补空状态 */
+.console-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 56px 24px;
+  text-align: center;
+}
+
+.console-empty-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.console-empty-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 /* ── 设置页 ── */
 
 .settings-layout {

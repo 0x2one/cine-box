@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import TitleBar from './components/TitleBar'
 import Settings from './pages/Settings'
+import Console from './pages/Console'
 import AboutPage from './pages/About'
 import logoUrl from './assets/logo.svg'
 import type { AppView } from './types'
@@ -27,6 +28,7 @@ function App(): React.JSX.Element {
         {/* key 保证切换页面时重放一次轻微的淡入 */}
         <div className="page" key={view}>
           {view === 'home' && <HomeView />}
+          {view === 'console' && <Console onBack={() => setView('home')} />}
           {view === 'settings' && <Settings onBack={() => setView('home')} />}
           {view === 'about' && <AboutPage onBack={() => setView('home')} />}
         </div>
