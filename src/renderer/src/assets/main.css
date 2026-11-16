@@ -662,3 +662,21 @@
   flex: 1;
   margin: 0;
 }
+
+/* 更新说明（Release Notes） */
+.update-notes {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}

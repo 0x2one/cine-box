@@ -17,6 +17,8 @@ interface AppInfo {
   arch: string
   /** 是否已打包（开发模式下不触发自动更新） */
   packaged: boolean
+  /** 是否支持检查更新（开发模式可用 CINEBOX_DEV_UPDATE=1 联调） */
+  canUpdate: boolean
 }
 
 interface AppSettings {

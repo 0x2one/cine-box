@@ -125,6 +125,7 @@ function createTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => showMainWindow() },
+      { label: '检查更新', click: () => updater.checkForUpdates() },
       { type: 'separator' },
       {
         label: '退出',
@@ -325,7 +326,9 @@ ipcMain.handle('app:info', () => ({
   v8: process.versions.v8,
   platform: process.platform,
   arch: process.arch,
-  packaged: app.isPackaged
+  packaged: app.isPackaged,
+  /** 是否支持检查更新（开发模式可用 CINEBOX_DEV_UPDATE=1 打开联调） */
+  canUpdate: updater.canUpdate()
 }))
 
 /* ── IPC：自动更新 ── */
@@ -358,7 +361,7 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(async () => {
-    electronApp.setAppUserModelId('com.electron.app')
+    electronApp.setAppUserModelId('com.0x2one.cinebox')
 
     if (process.platform === 'darwin' && app.dock) {
       app.dock.setIcon(icon)

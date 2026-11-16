@@ -23,7 +23,17 @@ const PLATFORM_LABELS: Record<string, string> = {
   linux: 'Linux'
 }
 
-function UpdateSection({ packaged }: { packaged: boolean | null }): React.JSX.Element {
+function describeUpdaterError(raw?: string): string {
+  if (!raw) return '未知错误'
+  if (/no published versions on github/i.test(raw)) return 'GitHub 上还没有发布版本'
+  if (/404|cannot find latest|not found/i.test(raw)) return '未找到更新信息，可能还没有发布版本'
+  if (/etimedout|enotfound|econnrefused|socket hang up|network|net::/i.test(raw)) {
+    return '网络连接失败，请稍后重试'
+  }
+  return raw
+}
+
+function UpdateSection({ canUpdate }: { canUpdate: boolean | null }): React.JSX.Element {
   const { message } = App.useApp()
   const [status, setStatus] = useState<UpdaterStatus | null>(null)
   const [checking, setChecking] = useState(false)
@@ -42,7 +52,7 @@ function UpdateSection({ packaged }: { packaged: boolean | null }): React.JSX.El
 
   const state = status?.state ?? 'idle'
   const version = status?.version ? `v${status.version}` : ''
-  const disabled = packaged === false
+  const disabled = canUpdate === false
 
   const check = (): void => {
     if (disabled) return
@@ -51,7 +61,9 @@ function UpdateSection({ packaged }: { packaged: boolean | null }): React.JSX.El
       .check()
       .then((value) => {
         setStatus(value)
-        if (value.state === 'error') message.error(value.error || '检查更新失败')
+        if (value.state === 'error') {
+          message.error(`检查更新失败：${describeUpdaterError(value.error)}`)
+        }
       })
       .finally(() => setChecking(false))
   }
@@ -97,7 +109,7 @@ function UpdateSection({ packaged }: { packaged: boolean | null }): React.JSX.El
         )
         break
       case 'downloaded':
-        hint = `新版本 ${version} 已下载，重启后完成安装`
+        hint = `新版本 ${version} 已下载，重启后完成安装（退出应用时也会自动安装）`
         action = (
           <Button
             type="primary"
@@ -117,7 +129,7 @@ function UpdateSection({ packaged }: { packaged: boolean | null }): React.JSX.El
         )
         break
       case 'error':
-        hint = `检查更新失败${status?.error ? `：${status.error}` : ''}`
+        hint = `检查更新失败：${describeUpdaterError(status?.error)}`
         action = (
           <Button icon={<ReloadOutlined />} loading={checking} onClick={check}>
             重试
@@ -143,6 +155,9 @@ function UpdateSection({ packaged }: { packaged: boolean | null }): React.JSX.El
         </div>
         <div className="settings-row-control">{action}</div>
       </div>
+      {state === 'available' && status?.releaseNotes && (
+        <pre className="update-notes">{status.releaseNotes}</pre>
+      )}
       {state === 'downloading' && (
         <div className="update-progress">
           <Progress
@@ -193,7 +208,7 @@ export function AboutPanel(): React.JSX.Element {
         <span>{platform}</span>
       </div>
       <div className="about-divider" />
-      <UpdateSection packaged={info?.packaged ?? null} />
+      <UpdateSection canUpdate={info?.canUpdate ?? null} />
     </section>
   )
 }
