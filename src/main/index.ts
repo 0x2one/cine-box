@@ -13,6 +13,8 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createAppSettingsStore, DEFAULT_SHOW_SHORTCUT } from './app-settings'
+import { fetchSiteCategories } from './site-categories'
+import { createSiteStore, type SiteInput } from './site-store'
 import { createUpdater } from './updater'
 
 const gotTheLock = app.requestSingleInstanceLock()
@@ -25,6 +27,7 @@ let isQuitting = false
 let registeredShortcut: string | null = null
 
 const appSettingsStore = createAppSettingsStore()
+const siteStore = createSiteStore()
 const updater = createUpdater(sendToRenderer, () => appSettingsStore.get().autoDownload)
 
 function sendToRenderer(channel: string, ...args: unknown[]): void {
@@ -315,6 +318,24 @@ ipcMain.handle('settings:resetShowShortcut', () => {
   return result
 })
 
+/* ── IPC：采集站点 ── */
+
+ipcMain.handle('sites:list', () => siteStore.list())
+
+ipcMain.handle('sites:add', (_event, input: SiteInput) => siteStore.add(input))
+
+ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) =>
+  siteStore.update(String(id), input)
+)
+
+ipcMain.handle('sites:remove', (_event, id: string) => siteStore.remove(String(id)))
+
+ipcMain.handle('sites:categories', (_event, id: string) => {
+  const site = siteStore.list().find((item) => item.id === String(id))
+  if (!site) return { ok: false, error: 'NOT_FOUND' }
+  return fetchSiteCategories(site)
+})
+
 /* ── IPC：应用信息 ── */
 
 ipcMain.handle('app:info', () => ({
@@ -372,6 +393,7 @@ if (!gotTheLock) {
     })
 
     await appSettingsStore.init().catch(() => {})
+    await siteStore.init().catch(() => {})
 
     const savedShortcut = appSettingsStore.get().showShortcut
     if (savedShortcut) tryRegisterAccel(savedShortcut)

@@ -388,6 +388,184 @@
   font-size: 12px;
 }
 
+/* ── 控制台：站点 ── */
+
+.sites-header {
+  padding: 0 2px 12px;
+}
+
+.sites-head {
+  display: flex;
+  /* 与设置页的标题行等高（14px × 1.5）：按钮比行高时上下居中溢出，不把描述和卡片推低 */
+  height: 21px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sites-count {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.sites-count::before {
+  content: '·';
+  margin: 0 6px;
+}
+
+.sites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.site-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent);
+  transition: border-color 120ms ease;
+}
+
+.site-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+.site-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.site-card-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.site-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.site-card-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-card-format {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.site-card-alias,
+.site-card-remark,
+.site-card-meta {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.site-card-address {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-card-remark {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.site-card-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分类弹窗 */
+.categories-summary {
+  margin-bottom: 10px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.categories-list {
+  display: flex;
+  max-height: 320px;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.category-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.categories-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 0;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.categories-error {
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.sites-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 44px 24px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.sites-empty-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.sites-empty-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 /* ── 设置页 ── */
 
 .settings-layout {

@@ -19,6 +19,15 @@ const api = {
     resetShowShortcut: (): Promise<SetShortcutResult> =>
       ipcRenderer.invoke('settings:resetShowShortcut')
   },
+  sites: {
+    list: (): Promise<Site[]> => ipcRenderer.invoke('sites:list'),
+    add: (input: SiteInput): Promise<AddSiteResult> => ipcRenderer.invoke('sites:add', input),
+    update: (id: string, input: SiteInput): Promise<UpdateSiteResult> =>
+      ipcRenderer.invoke('sites:update', id, input),
+    remove: (id: string): Promise<RemoveSiteResult> => ipcRenderer.invoke('sites:remove', id),
+    categories: (id: string): Promise<SiteCategoriesResult> =>
+      ipcRenderer.invoke('sites:categories', id)
+  },
   updater: {
     check: (): Promise<UpdaterStatus> => ipcRenderer.invoke('updater:check'),
     download: (): Promise<UpdaterStatus> => ipcRenderer.invoke('updater:download'),
