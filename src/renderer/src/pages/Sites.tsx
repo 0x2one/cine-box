@@ -376,7 +376,7 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
         open={Boolean(categorySite)}
         onCancel={closeCategories}
         footer={<Button onClick={closeCategories}>关闭</Button>}
-        width={520}
+        width={720}
       >
         {categoriesLoading ? (
           <div className="categories-state">
