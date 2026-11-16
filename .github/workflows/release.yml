@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Verify release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 标签、package.json 版本、更新源三者必须一致，否则 electron-updater 拉不到更新
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          echo "tag=v$tag package=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::标签 v$tag 与 package.json 的版本 $version 不一致"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Windows
+            os: windows-latest
+            target: '--win'
+          - platform: macOS Intel
+            os: macos-15-intel
+            target: '--mac --x64'
+          - platform: macOS Apple Silicon
+            os: macos-15
+            target: '--mac --arm64'
+          - platform: Linux
+            os: ubuntu-latest
+            target: '--linux AppImage deb'
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 未配置签名证书时跳过 macOS 自动发现，避免构建失败
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck & build
+        run: pnpm build
+
+      # 打包并发布到 GitHub Releases（安装包 + latest*.yml + blockmap）
+      - name: Package and publish (${{ matrix.platform }})
+        run: pnpm exec electron-builder ${{ matrix.target }} --publish always
+
+      # 发布失败时保留产物，方便排查 / 手动补传
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest*.yml
+            dist/*.blockmap
+          retention-days: 3
+          if-no-files-found: ignore
