@@ -55,19 +55,33 @@ Logo 源文件为 `build/icon.svg`，同一份副本放在 `src/renderer/src/ass
 
 打包与发布交给 GitHub Actions：
 
-| 工作流                          | 触发                                | 作用                                                                                                          |
-| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`      | push 到 `master` / `main`、PR、手动 | 安装依赖、lint、typecheck + 生产构建                                                                          |
-| `.github/workflows/release.yml` | 推送 `v*` 标签、手动                | Windows（NSIS）/ macOS（Intel、Apple Silicon，dmg + zip）/ Linux（AppImage、deb）打包并发布到 GitHub Releases |
+| 工作流                          | 触发                                | 作用                                                                           |
+| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| `.github/workflows/ci.yml`      | push 到 `master` / `main`、PR、手动 | 安装依赖、lint、typecheck + 生产构建                                           |
+| `.github/workflows/release.yml` | 推送 `v*` 标签、手动                | 四平台打包并上传到 GitHub Releases **草稿**，再用 CHANGELOG 填好草稿标题与说明 |
 
-发版步骤：
+发版步骤（完整清单见 [`.agents/skills/cine-box-release/SKILL.md`](.agents/skills/cine-box-release/SKILL.md)）：
 
-1. 修改 `package.json` 的 `version`（例如 `1.1.0`）；
-2. 提交后打标签：`git tag v1.1.0 && git push origin v1.1.0`；
-3. 工作流会先校验标签与 `package.json` 版本一致，再把安装包、`latest*.yml`、`.blockmap` 上传到对应 Release。
+1. 在 [`CHANGELOG.md`](CHANGELOG.md) 顶部新增 `## 映盒剧场 vX.Y.Z` 小节；
+2. 修改 `package.json` 的 `version` 为同一版本；
+3. 提交后 `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`；
+4. 工作流先校验「标签 = package.json 版本」且 CHANGELOG 小节存在，四平台全绿后产出草稿 Release；
+5. 人工确认产物齐全后发布：`gh release edit vX.Y.Z --draft=false -R 0x2one/cine-box`。
+
+产物命名统一为 `cine-box-<version>-<platform>-<arch>.<ext>`：
+
+| 文件                                                 | 说明                                      |
+| ---------------------------------------------------- | ----------------------------------------- |
+| `cine-box-<ver>-win-x64.exe`                         | Windows NSIS 安装包                       |
+| `cine-box-<ver>-mac-x64.dmg` / `.zip`                | Intel                                     |
+| `cine-box-<ver>-mac-arm64.dmg` / `.zip`              | Apple Silicon（`zip` 是自动更新必需产物） |
+| `cine-box-<ver>-linux-x86_64.AppImage`               | Linux                                     |
+| `cine-box-<ver>-linux-amd64.deb`                     | Linux                                     |
+| `latest.yml` / `latest-mac.yml` / `latest-linux.yml` | 自动更新索引，文件名固定不可改            |
 
 应用内更新由 `electron-updater` 读取 `electron-builder.yml` 的 `publish`（GitHub `0x2one/cine-box`），
-因此 Release 必须是**已发布**状态（草稿检测不到），且仓库为公开仓库。
+因此 Release 必须是**已发布**状态（草稿检测不到），且仓库为公开仓库。草稿是有意为之：
+四个平台并发上传时，`releaseType: release` 会被拆成多条同 tag 的 Release。
 
 本地联调更新流程（开发模式默认禁用更新检查）：
 
@@ -79,6 +93,13 @@ CINEBOX_DEV_UPDATE=1 pnpm dev
 ```
 
 此时「关于 → 软件更新」会真实请求 GitHub Releases（配置见 `dev-app-update.yml`）。
+
+国内网络打包时，若卡在下载 Electron 或 electron-builder 的二进制资源，可补一个镜像环境变量：
+
+```bash
+# Windows PowerShell
+$env:ELECTRON_BUILDER_BINARIES_MIRROR='https://npmmirror.com/mirrors/electron-builder-binaries/'
+```
 
 平台说明：
 

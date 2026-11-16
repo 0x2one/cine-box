@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 标签、package.json 版本、更新源三者必须一致，否则 electron-updater 拉不到更新
+      # 标签与 package.json 版本必须一致，否则 electron-updater 拿到的版本与产物对不上
       - name: Check tag matches package.json version
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
@@ -32,6 +32,17 @@ jobs:
           echo "tag=v$tag package=$version"
           if [ "$tag" != "$version" ]; then
             echo "::error::标签 v$tag 与 package.json 的版本 $version 不一致"
+            exit 1
+          fi
+
+      # 发版必须带 CHANGELOG 小节，它同时是 Release 说明和客户端更新说明
+      - name: Check CHANGELOG entry
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -qF "## 映盒剧场 v${version}" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md 缺少「## 映盒剧场 v${version}」小节"
             exit 1
           fi
 
@@ -81,8 +92,9 @@ jobs:
       - name: Typecheck & build
         run: pnpm build
 
-      # 打包并发布到 GitHub Releases（安装包 + latest*.yml + blockmap）
-      - name: Package and publish (${{ matrix.platform }})
+      # 发布到 GitHub Releases 草稿（publish.releaseType 保持默认 draft，
+      # 四个平台并发上传才会始终落到同一条 Release 上）
+      - name: Package and publish draft (${{ matrix.platform }})
         run: pnpm exec electron-builder ${{ matrix.target }} --publish always
 
       # 发布失败时保留产物，方便排查 / 手动补传
@@ -101,3 +113,41 @@ jobs:
             dist/*.blockmap
           retention-days: 3
           if-no-files-found: ignore
+
+  notes:
+    name: Fill draft release notes
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract release notes from CHANGELOG
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            index($0, "## 映盒剧场 v" ver) == 1 { capture = 1; next }
+            capture && /^## / { exit }
+            capture && /^---[[:space:]]*$/ { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          # 去掉开头的空行
+          sed -i '/./,$!d' release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::CHANGELOG 中 v${version} 小节为空"
+            printf '暂无更新说明。\n' > release-notes.md
+          fi
+          echo '--- release notes ---'
+          cat release-notes.md
+
+      # 只填草稿的标题与说明，是否正式发布由发版人执行 gh release edit --draft=false
+      - name: Fill draft release
+        run: |
+          gh release edit "$GITHUB_REF_NAME" \
+            --title "映盒剧场 ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md

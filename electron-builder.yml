@@ -13,10 +13,14 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,pnpm-workspace.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-  - '!{.github,build,dist}/**'
+  - '!{.github,.agents,build,dist,docs}/**'
 
 asarUnpack:
   - resources/**
+
+# 国内网络直连 GitHub 拉 Electron 二进制很慢，统一切到镜像（CI 上同样可用）
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
 
 # 界面仅有中文，顺带裁掉用不到的 Chromium 语言包
 electronLanguages:
@@ -40,7 +44,7 @@ nsis:
   uninstallDisplayName: 映盒剧场
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: ${name}-${version}-win-${arch}.${ext}
   deleteAppDataOnUninstall: false
 
 mac:
@@ -61,7 +65,7 @@ mac:
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
 
 dmg:
-  artifactName: ${name}-${version}-${arch}.${ext}
+  artifactName: ${name}-${version}-mac-${arch}.${ext}
 
 linux:
   icon: build/icon.png
@@ -78,9 +82,10 @@ linux:
 
 npmRebuild: false
 
-# 应用内更新（electron-updater）与 CI 发布都读取这里
+# 应用内更新（electron-updater）与 CI 发布都读取这里。
+# 刻意保持 GitHub 默认的 draft：四个平台并发上传同一个 tag 时，
+# 显式 releaseType: release 会被拆成多条 Release。正式发布由发版 skill 人工完成。
 publish:
   provider: github
   owner: 0x2one
   repo: cine-box
-  releaseType: release
