@@ -22,7 +22,9 @@ asarUnpack:
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
 
-# 界面仅有中文，顺带裁掉用不到的 Chromium 语言包
+# 这里裁的是 Electron/Chromium 原生文案包（locales/*.pak），界面文案走渲染层的 antd 中文包。
+# 保留 en-US 只为回退兜底：系统 locale 不是中文时 Chromium 会退到 en-US，
+# 否则 macOS 应用菜单、崩溃弹窗等原生字符串可能为空（electron#52307 也提示 locales 不能删空）。
 electronLanguages:
   - zh-CN
   - en-US
