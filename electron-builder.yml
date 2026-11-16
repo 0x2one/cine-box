@@ -1,48 +1,86 @@
-appId: com.electron.app
+appId: com.0x2one.cinebox
 productName: cine-box
+copyright: Copyright © 2026 0x2one
+
 directories:
   buildResources: build
+  output: dist
+
 files:
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
-  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml,pnpm-workspace.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{.github,build,dist}/**'
+
 asarUnpack:
   - resources/**
+
+# 界面仅有中文，顺带裁掉用不到的 Chromium 语言包
+electronLanguages:
+  - zh-CN
+  - en-US
+
 win:
   executableName: cine-box
   icon: build/icon.ico
+  target:
+    - nsis
+
 nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: 映盒剧场
+  uninstallDisplayName: 映盒剧场
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
   artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
+  deleteAppDataOnUninstall: false
+
 mac:
   icon: build/icon.icns
+  category: public.app-category.entertainment
+  # dmg 供人工安装，zip 是 macOS 自动更新（Squirrel.Mac）必需产物
+  target:
+    - dmg
+    - zip
+  artifactName: ${name}-${version}-mac-${arch}.${ext}
   entitlementsInherit: build/entitlements.mac.plist
+  gatekeeperAssess: false
+  notarize: false
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
-  notarize: false
+
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
+
 linux:
   icon: build/icon.png
+  category: AudioVideo
+  maintainer: 0x2one <0x2one@users.noreply.github.com>
   target:
     - AppImage
-    - snap
     - deb
-  maintainer: electronjs.org
-  category: Utility
-appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-linux-${arch}.${ext}
+  desktop:
+    entry:
+      Name: 映盒剧场
+      Comment: 映盒剧场
+
 npmRebuild: false
+
+# 应用内更新（electron-updater）与 CI 发布都读取这里
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  provider: github
+  owner: 0x2one
+  repo: cine-box
+  releaseType: release

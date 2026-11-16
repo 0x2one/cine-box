@@ -5,7 +5,15 @@
   "main": "./out/main/index.js",
   "license": "MIT",
   "author": "zero2one",
-  "homepage": "https://electron-vite.org",
+  "private": true,
+  "homepage": "https://github.com/0x2one/cine-box",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0x2one/cine-box.git"
+  },
+  "bugs": {
+    "url": "https://github.com/0x2one/cine-box/issues"
+  },
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
@@ -18,8 +26,11 @@
     "postinstall": "install-electron && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:linux": "npm run build && electron-builder --linux",
+    "release:win": "npm run build && electron-builder --win --publish always",
+    "release:mac": "npm run build && electron-builder --mac --publish always",
+    "release:linux": "npm run build && electron-builder --linux --publish always"
   },
   "dependencies": {
     "@ant-design/icons": "~6.3.4",
