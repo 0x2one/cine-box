@@ -9,6 +9,7 @@ import {
   Popconfirm,
   Row,
   Select,
+  Space,
   Spin,
   Tag,
   Tooltip
@@ -84,6 +85,12 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
   const [categories, setCategories] = useState<SiteCategory[]>([])
   const [categoriesLoading, setCategoriesLoading] = useState(false)
   const [categoriesError, setCategoriesError] = useState('')
+  /** 「重新获取」是否进行中 */
+  const [refreshing, setRefreshing] = useState(false)
+  /** 非空表示「分类有变更」确认弹窗打开，并记录待写入的站点与差异 */
+  const [pendingSite, setPendingSite] = useState<Site | null>(null)
+  const [pendingDiff, setPendingDiff] = useState<SiteCategoryDiff | null>(null)
+  const [applying, setApplying] = useState<'incremental' | 'full' | null>(null)
   /** 只认最后一次请求，避免快速切换站点时旧响应覆盖新结果 */
   const categoryRequest = useRef(0)
 
@@ -199,12 +206,77 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
       })
   }
 
+  /** 关闭「分类有变更」确认弹窗 */
+  const closeDiff = (): void => {
+    setPendingSite(null)
+    setPendingDiff(null)
+    setApplying(null)
+  }
+
   const closeCategories = (): void => {
     categoryRequest.current += 1
     setCategorySite(null)
     setCategories([])
     setCategoriesError('')
     setCategoriesLoading(false)
+    setRefreshing(false)
+    closeDiff()
+  }
+
+  /** 重新抓取：只对比不写库；没有变化直接提示，有变化弹确认窗让用户选更新方式 */
+  const refreshCategories = (site: Site): void => {
+    const requestId = categoryRequest.current
+    setRefreshing(true)
+    void window.api.sites
+      .refreshCategories(site.id)
+      .then((result) => {
+        if (categoryRequest.current !== requestId) return
+        if (!result.ok) {
+          message.error(CATEGORY_ERRORS[result.error ?? ''] ?? '重新获取失败，请重试')
+          return
+        }
+        if (!result.hasChanges || !result.diff) {
+          message.success('分类无变化')
+          return
+        }
+        setPendingSite(site)
+        setPendingDiff(result.diff)
+      })
+      .catch(() => {
+        if (categoryRequest.current === requestId) message.error('重新获取失败，请重试')
+      })
+      .finally(() => {
+        if (categoryRequest.current === requestId) setRefreshing(false)
+      })
+  }
+
+  /** 按用户选择的方式，把待确认的抓取结果写入数据库 */
+  const applyCategoryUpdate = (mode: 'incremental' | 'full'): void => {
+    if (!pendingSite) return
+    setApplying(mode)
+    void window.api.sites
+      .applyCategories(pendingSite.id, mode)
+      .then((result) => {
+        if (!result.ok) {
+          if (result.error === 'EXPIRED') {
+            closeDiff()
+            message.error('抓取结果已过期，请重新获取')
+            return
+          }
+          if (result.error === 'NOT_FOUND') {
+            closeDiff()
+            message.error('站点不存在，可能已被删除')
+            return
+          }
+          message.error('更新分类失败，请重试')
+          return
+        }
+        setCategories(result.categories ?? [])
+        closeDiff()
+        message.success(mode === 'full' ? '已按全量更新分类' : '已按增量更新分类')
+      })
+      .catch(() => message.error('更新分类失败，请重试'))
+      .finally(() => setApplying(null))
   }
 
   return (
@@ -375,7 +447,19 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
         title={categorySite ? `「${siteLabel(categorySite)}」的视频分类` : '视频分类'}
         open={Boolean(categorySite)}
         onCancel={closeCategories}
-        footer={<Button onClick={closeCategories}>关闭</Button>}
+        footer={
+          <Space>
+            <Button
+              icon={<ReloadOutlined />}
+              loading={refreshing}
+              disabled={!categorySite}
+              onClick={() => categorySite && refreshCategories(categorySite)}
+            >
+              重新获取
+            </Button>
+            <Button onClick={closeCategories}>关闭</Button>
+          </Space>
+        }
         width={720}
       >
         {categoriesLoading ? (
@@ -411,6 +495,88 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
               ))}
             </div>
           </>
+        )}
+      </Modal>
+
+      <Modal
+        title={pendingSite ? `「${siteLabel(pendingSite)}」分类有变更` : '分类有变更'}
+        open={Boolean(pendingDiff)}
+        onCancel={closeDiff}
+        width={640}
+        footer={
+          <Space>
+            <Button onClick={closeDiff} disabled={Boolean(applying)}>
+              取消
+            </Button>
+            <Button
+              onClick={() => applyCategoryUpdate('incremental')}
+              loading={applying === 'incremental'}
+              disabled={!pendingDiff || (!pendingDiff.added.length && !pendingDiff.renamed.length)}
+            >
+              增量更新
+            </Button>
+            <Button
+              type="primary"
+              onClick={() => applyCategoryUpdate('full')}
+              loading={applying === 'full'}
+            >
+              全量更新
+            </Button>
+          </Space>
+        }
+      >
+        {pendingDiff && (
+          <div className="category-diff">
+            <p className="category-diff-hint">
+              增量更新只新增和改名，保留库中多出来的分类；全量更新以本次抓取结果为准，会删除多出来的分类。
+            </p>
+            {pendingDiff.added.length > 0 && (
+              <section className="category-diff-section">
+                <h4>新增 {pendingDiff.added.length} 个</h4>
+                <div className="categories-list">
+                  {pendingDiff.added.map((item) => (
+                    <span
+                      className="category-chip"
+                      key={item.sourceId}
+                      title={`ID ${item.sourceId}`}
+                    >
+                      {item.name}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+            {pendingDiff.renamed.length > 0 && (
+              <section className="category-diff-section">
+                <h4>改名 {pendingDiff.renamed.length} 个</h4>
+                <div className="category-diff-renamed">
+                  {pendingDiff.renamed.map((item) => (
+                    <div className="category-diff-rename-row" key={item.sourceId}>
+                      <span className="category-diff-from">{item.from}</span>
+                      <span className="category-diff-arrow">→</span>
+                      <span className="category-diff-to">{item.to}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+            {pendingDiff.removed.length > 0 && (
+              <section className="category-diff-section">
+                <h4>本次未返回 {pendingDiff.removed.length} 个（全量更新会删除）</h4>
+                <div className="categories-list">
+                  {pendingDiff.removed.map((item) => (
+                    <span
+                      className="category-chip category-chip-removed"
+                      key={item.sourceId}
+                      title={`ID ${item.sourceId}`}
+                    >
+                      {item.name}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
         )}
       </Modal>
     </>

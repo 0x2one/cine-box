@@ -66,7 +66,7 @@ IPC 接口新增要改三处：主进程 `ipcMain.handle`、`src/preload/index.t
 | `showShortcut` | 全局快捷键，空字符串表示未启用                 | `Ctrl+Shift+Space` |
 
 - 外观偏好存在渲染层 `localStorage`：`theme`（`system` / `light` / `dark`）与 `accent`（主题色 key）。
-- 控制台站点存 `app.getPath('userData')/Data/cine-box.db`（SQLite，`sites` 表，WAL 模式），新增时由主进程生成 32 位 UUID（UUID 去掉横线）与 ISO 8601 创建 / 更新时间；字段缺失或手工改坏时按默认值兜底。每次抓取到的视频分类写入 `site_categories` 表，通过 `site_id` 关联站点，同样带 32 位 ID 与创建 / 更新时间，同一站点内按采集接口的分类 ID 去重。
+- 控制台站点存 `app.getPath('userData')/Data/cine-box.db`（SQLite，`sites` 表，WAL 模式），新增时由主进程生成 32 位 UUID（UUID 去掉横线）与 ISO 8601 创建 / 更新时间；字段缺失或手工改坏时按默认值兜底。视频分类存 `site_categories` 表，通过 `site_id` 关联站点，同样带 32 位 ID 与创建 / 更新时间；打开分类弹窗直接读库（没有数据时才抓取 `ac=list` 并入库），「重新获取」会对比出新增 / 改名 / 消失的分类，由用户选择增量（保留消失项）或全量（以本次结果为准）更新。
 
 ## 自动更新
 

@@ -15,7 +15,12 @@ import icon from '../../resources/icon.png?asset'
 import { createAppSettingsStore, DEFAULT_SHOW_SHORTCUT } from './app-settings'
 import { createCacheManager } from './app-cache'
 import { fetchSiteCategories } from './site-categories'
-import { createSiteStore, type SiteInput } from './site-store'
+import {
+  createSiteStore,
+  type CategoryUpdateMode,
+  type SiteCategoryInput,
+  type SiteInput
+} from './site-store'
 import { createUpdater } from './updater'
 
 const gotTheLock = app.requestSingleInstanceLock()
@@ -30,6 +35,9 @@ let registeredShortcut: string | null = null
 const appSettingsStore = createAppSettingsStore()
 // 站点数据存 SQLite：userData/Data/cine-box.db
 const siteStore = createSiteStore(join(app.getPath('userData'), 'Data', 'cine-box.db'))
+/** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
+const pendingCategoryRefresh = new Map<string, { categories: SiteCategoryInput[]; at: number }>()
+const PENDING_CATEGORY_TTL = 5 * 60 * 1000
 const updater = createUpdater(sendToRenderer, () => appSettingsStore.get().autoDownload)
 const cacheManager = createCacheManager()
 
@@ -341,19 +349,52 @@ ipcMain.handle('sites:list', () => siteStore.list())
 
 ipcMain.handle('sites:add', (_event, input: SiteInput) => siteStore.add(input))
 
-ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) =>
-  siteStore.update(String(id), input)
-)
+ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
+  // 地址 / 格式可能变化，之前抓取的待确认结果随之作废
+  pendingCategoryRefresh.delete(String(id))
+  return siteStore.update(String(id), input)
+})
 
-ipcMain.handle('sites:remove', (_event, id: string) => siteStore.remove(String(id)))
+ipcMain.handle('sites:remove', (_event, id: string) => {
+  pendingCategoryRefresh.delete(String(id))
+  return siteStore.remove(String(id))
+})
 
 ipcMain.handle('sites:categories', async (_event, id: string) => {
   const site = siteStore.list().find((item) => item.id === String(id))
   if (!site) return { ok: false, error: 'NOT_FOUND' }
+  // 已入库的直接读库，不再请求采集站
+  const stored = siteStore.listCategories(site.id)
+  if (stored.length > 0) return { ok: true, categories: stored }
   const result = await fetchSiteCategories(site)
   if (!result.ok) return result
-  // 抓取成功后同步入库，返回带主键与时间戳的库内数据
-  return { ok: true, categories: siteStore.syncCategories(site.id, result.categories) }
+  // 首次抓取：全量入库后返回带主键与时间戳的数据
+  return { ok: true, categories: siteStore.applyCategories(site.id, result.categories, 'full') }
+})
+
+ipcMain.handle('sites:categories:refresh', async (_event, id: string) => {
+  const site = siteStore.list().find((item) => item.id === String(id))
+  if (!site) return { ok: false, error: 'NOT_FOUND' }
+  const result = await fetchSiteCategories(site)
+  if (!result.ok) return result
+  const diff = siteStore.previewCategories(site.id, result.categories)
+  const hasChanges = diff.added.length + diff.renamed.length + diff.removed.length > 0
+  // 只缓存，等用户确认更新方式后再落库
+  pendingCategoryRefresh.set(site.id, { categories: result.categories, at: Date.now() })
+  return { ok: true, hasChanges, diff }
+})
+
+ipcMain.handle('sites:categories:apply', (_event, id: string, mode: CategoryUpdateMode) => {
+  const site = siteStore.list().find((item) => item.id === String(id))
+  if (!site) return { ok: false, error: 'NOT_FOUND' }
+  if (mode !== 'incremental' && mode !== 'full') return { ok: false, error: 'INVALID_MODE' }
+  const pending = pendingCategoryRefresh.get(site.id)
+  if (!pending || Date.now() - pending.at > PENDING_CATEGORY_TTL) {
+    pendingCategoryRefresh.delete(site.id)
+    return { ok: false, error: 'EXPIRED' }
+  }
+  pendingCategoryRefresh.delete(site.id)
+  return { ok: true, categories: siteStore.applyCategories(site.id, pending.categories, mode) }
 })
 
 /* ── IPC：应用信息 ── */

@@ -113,13 +113,59 @@ interface SiteCategoriesResult {
   categories?: SiteCategory[]
 }
 
+/** 新增 / 消失的分类 */
+interface SiteCategoryChange {
+  /** 采集接口返回的分类 ID */
+  sourceId: string
+  name: string
+}
+
+/** 来源 ID 不变、名称变化的分类 */
+interface SiteCategoryRename {
+  sourceId: string
+  /** 库内原名称 */
+  from: string
+  /** 本次抓取的新名称 */
+  to: string
+}
+
+interface SiteCategoryDiff {
+  /** 新增：库中没有、本次抓取到 */
+  added: SiteCategoryChange[]
+  /** 消失：库中有、本次未返回（增量更新时保留） */
+  removed: SiteCategoryChange[]
+  /** 改名 */
+  renamed: SiteCategoryRename[]
+}
+
+interface SiteCategoriesRefreshResult {
+  ok: boolean
+  /** NOT_FOUND：站点已被删除；NETWORK / HTTP / PARSE：抓取失败 */
+  error?: 'NOT_FOUND' | 'NETWORK' | 'HTTP' | 'PARSE'
+  message?: string
+  /** 与库内数据相比是否有变化 */
+  hasChanges?: boolean
+  diff?: SiteCategoryDiff
+}
+
+interface SiteCategoriesApplyResult {
+  ok: boolean
+  /** EXPIRED：抓取结果已过期，需要重新获取；INVALID_MODE：更新方式不合法；NOT_FOUND：站点已删除 */
+  error?: 'EXPIRED' | 'INVALID_MODE' | 'NOT_FOUND'
+  categories?: SiteCategory[]
+}
+
 interface SitesApi {
   list: () => Promise<Site[]>
   add: (input: SiteInput) => Promise<AddSiteResult>
   update: (id: string, input: SiteInput) => Promise<UpdateSiteResult>
   remove: (id: string) => Promise<RemoveSiteResult>
-  /** 按站点保存的格式请求 ac=list，返回该站点的视频分类 */
+  /** 已入库就直接读库；库里没有时抓取 ac=list 并全量入库 */
   categories: (id: string) => Promise<SiteCategoriesResult>
+  /** 重新抓取并与库内对比，只返回差异，不写库 */
+  refreshCategories: (id: string) => Promise<SiteCategoriesRefreshResult>
+  /** 用户确认后按增量 / 全量写入 */
+  applyCategories: (id: string, mode: 'incremental' | 'full') => Promise<SiteCategoriesApplyResult>
 }
 
 type CachePhase = 'enumerate' | 'measure' | 'clear'

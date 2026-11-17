@@ -544,6 +544,60 @@
   text-align: center;
 }
 
+/* 分类变更确认弹窗 */
+.category-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.category-diff-hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.category-diff-section h4 {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.category-diff-renamed {
+  display: flex;
+  max-height: 220px;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.category-diff-rename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.category-diff-from {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.category-diff-arrow {
+  color: var(--text-faint);
+}
+
+.category-diff-to {
+  color: var(--text);
+}
+
+.category-chip-removed {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
 .sites-placeholder {
   display: flex;
   flex-direction: column;

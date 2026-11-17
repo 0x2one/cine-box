@@ -26,7 +26,13 @@ const api = {
       ipcRenderer.invoke('sites:update', id, input),
     remove: (id: string): Promise<RemoveSiteResult> => ipcRenderer.invoke('sites:remove', id),
     categories: (id: string): Promise<SiteCategoriesResult> =>
-      ipcRenderer.invoke('sites:categories', id)
+      ipcRenderer.invoke('sites:categories', id),
+    refreshCategories: (id: string): Promise<SiteCategoriesRefreshResult> =>
+      ipcRenderer.invoke('sites:categories:refresh', id),
+    applyCategories: (
+      id: string,
+      mode: 'incremental' | 'full'
+    ): Promise<SiteCategoriesApplyResult> => ipcRenderer.invoke('sites:categories:apply', id, mode)
   },
   cache: {
     scan: (): Promise<CacheSummary> => ipcRenderer.invoke('cache:scan'),

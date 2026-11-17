@@ -66,6 +66,35 @@ export interface SiteCategoryRecord {
   updatedAt: string
 }
 
+/** 新增 / 消失的分类 */
+export interface SiteCategoryChange {
+  /** 采集接口返回的分类 ID */
+  sourceId: string
+  name: string
+}
+
+/** 来源 ID 不变、名称变化的分类 */
+export interface SiteCategoryRename {
+  sourceId: string
+  /** 库内原名称 */
+  from: string
+  /** 本次抓取的新名称 */
+  to: string
+}
+
+/** 重新抓取后与库内数据的差异，未写入前仅供确认弹窗展示 */
+export interface SiteCategoryDiff {
+  /** 库中没有、本次新增 */
+  added: SiteCategoryChange[]
+  /** 库中有、本次未返回（增量更新时保留） */
+  removed: SiteCategoryChange[]
+  /** 来源 ID 相同但名称变化 */
+  renamed: SiteCategoryRename[]
+}
+
+/** 全量更新：以本次抓取为准（删除未返回的分类）；增量更新：只新增和改名 */
+export type CategoryUpdateMode = 'incremental' | 'full'
+
 export interface SiteStore {
   init: () => Promise<void>
   list: () => Site[]
@@ -74,8 +103,14 @@ export interface SiteStore {
   remove: (id: string) => RemoveSiteResult
   /** 读取站点已保存的视频分类，按入库顺序返回 */
   listCategories: (siteId: string) => SiteCategoryRecord[]
-  /** 用本次抓取结果同步分类：已有行保留 id / createdAt，仅名称变化时刷新 updatedAt */
-  syncCategories: (siteId: string, categories: SiteCategoryInput[]) => SiteCategoryRecord[]
+  /** 计算本次抓取结果与库内分类的差异，不写库 */
+  previewCategories: (siteId: string, categories: SiteCategoryInput[]) => SiteCategoryDiff
+  /** 按指定方式写入：已有行保留 id / createdAt，仅名称变化时刷新 updatedAt */
+  applyCategories: (
+    siteId: string,
+    categories: SiteCategoryInput[],
+    mode: CategoryUpdateMode
+  ) => SiteCategoryRecord[]
   /** 关闭数据库连接（应用退出时调用，触发 WAL checkpoint） */
   close: () => void
 }
@@ -213,6 +248,21 @@ function rowToCategory(row: unknown): SiteCategoryRecord | null {
   }
 }
 
+/** 去重、去空并截断名称，保持采集接口返回的顺序 */
+function normalizeCategories(categories: SiteCategoryInput[]): Map<string, string> {
+  const normalized = new Map<string, string>()
+  for (const item of categories) {
+    const sourceId = String(item?.id ?? '').trim()
+    const name = String(item?.name ?? '')
+      .trim()
+      .slice(0, MAX_NAME)
+    // 没有来源 ID 或名称为空的行无法和采集接口对应，直接跳过
+    if (!sourceId || !name) continue
+    normalized.set(sourceId, name)
+  }
+  return normalized
+}
+
 /** 校验并归一化渲染层提交的字段 */
 function validateSiteInput(
   input: SiteInput
@@ -278,21 +328,33 @@ export function createSiteStore(file: string): SiteStore {
       .filter((category): category is SiteCategoryRecord => category !== null)
   }
 
-  /** 以最近一次抓取的结果为准：新增、改名、删除未返回的分类，未变化的行保持原 id 与 createdAt */
-  function syncCategories(
-    siteId: string,
-    categories: SiteCategoryInput[]
-  ): SiteCategoryRecord[] {
-    const incoming = new Map<string, string>()
-    for (const item of categories) {
-      const sourceId = String(item?.id ?? '').trim()
-      const name = String(item?.name ?? '')
-        .trim()
-        .slice(0, MAX_NAME)
-      // 没有来源 ID 或名称为空的行无法和采集接口对应，直接跳过
-      if (!sourceId || !name) continue
-      incoming.set(sourceId, name)
+  /** 本次抓取结果里读不出来源 ID / 名称的行无法与库对应，直接跳过 */
+  function previewCategories(siteId: string, categories: SiteCategoryInput[]): SiteCategoryDiff {
+    const incoming = normalizeCategories(categories)
+    const stored = new Map(listCategories(siteId).map((row) => [row.sourceId, row]))
+    const diff: SiteCategoryDiff = { added: [], removed: [], renamed: [] }
+
+    for (const [sourceId, name] of incoming) {
+      const row = stored.get(sourceId)
+      if (!row) {
+        diff.added.push({ sourceId, name })
+      } else if (row.name !== name) {
+        diff.renamed.push({ sourceId, from: row.name, to: name })
+      }
     }
+    for (const row of stored.values()) {
+      if (!incoming.has(row.sourceId)) diff.removed.push({ sourceId: row.sourceId, name: row.name })
+    }
+    return diff
+  }
+
+  /** 增量只写新增 / 改名；全量还会删除本次未返回的分类 */
+  function applyCategories(
+    siteId: string,
+    categories: SiteCategoryInput[],
+    mode: CategoryUpdateMode
+  ): SiteCategoryRecord[] {
+    const incoming = normalizeCategories(categories)
     const sourceIds = [...incoming.keys()]
     const now = new Date().toISOString()
 
@@ -301,6 +363,7 @@ export function createSiteStore(file: string): SiteStore {
       for (const [sourceId, name] of incoming) {
         upsert.run(randomUUID().replace(/-/g, ''), siteId, sourceId, name, now, now)
       }
+      if (mode === 'incremental') return
       if (sourceIds.length === 0) {
         connection.prepare('DELETE FROM site_categories WHERE site_id = ?').run(siteId)
         return
@@ -396,7 +459,8 @@ export function createSiteStore(file: string): SiteStore {
       return { ok: removed, sites: listSites() }
     },
     listCategories,
-    syncCategories,
+    previewCategories,
+    applyCategories,
     close: () => {
       if (!db) return
       try {
