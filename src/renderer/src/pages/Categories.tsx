@@ -16,6 +16,7 @@ import type { TreeProps } from 'antd'
 import {
   CloseOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -731,6 +732,7 @@ function CategoriesPanel({
                   selectable={false}
                   draggable
                   treeData={tree}
+                  switcherIcon={<DownOutlined className="category-switcher-icon" />}
                   titleRender={(node) => renderTitle(node as CategoryTreeNode)}
                   expandedKeys={expandedKeys}
                   onExpand={(keys) => setExpandedKeys(keys.map(String))}

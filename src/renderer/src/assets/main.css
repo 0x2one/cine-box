@@ -815,14 +815,37 @@
   padding: 0;
 }
 
+/* 展开 / 收起：换成更清晰的箭头，扩大点击区并补上悬停反馈 */
 .category-tree .ant-tree-switcher {
   display: flex;
-  width: 20px;
+  width: 24px;
   height: 34px;
-  flex: 0 0 20px;
+  flex: 0 0 24px;
   align-items: center;
   justify-content: center;
   color: var(--text-faint);
+  transition: color 120ms ease;
+}
+
+.category-tree .ant-tree-switcher:not(.ant-tree-switcher-noop):hover {
+  color: var(--text);
+}
+
+/* antd 的悬停底色按 24px 高度算，行高 34px 时把它垂直居中 */
+.category-tree .ant-tree-switcher:not(.ant-tree-switcher-noop)::before {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.category-tree .category-switcher-icon {
+  /* 悬停底色主题里是实色，图标要盖在 ::before 之上，否则鼠标移上去箭头会消失 */
+  position: relative;
+  z-index: 1;
+  font-size: 12px;
+}
+
+.category-tree .category-switcher-icon svg {
+  transition: transform 160ms ease;
 }
 
 .category-tree .ant-tree-indent-unit {
