@@ -93,8 +93,16 @@ interface RemoveSiteResult {
 }
 
 interface SiteCategory {
+  /** 主进程生成的 32 位十六进制 ID */
   id: string
+  /** 所属站点 ID */
+  siteId: string
+  /** 采集接口返回的分类 ID（苹果 CMS type_id / RSS <ty id>） */
+  sourceId: string
   name: string
+  /** 创建 / 更新时间，ISO 8601 */
+  createdAt: string
+  updatedAt: string
 }
 
 interface SiteCategoriesResult {
@@ -112,6 +120,45 @@ interface SitesApi {
   remove: (id: string) => Promise<RemoveSiteResult>
   /** 按站点保存的格式请求 ac=list，返回该站点的视频分类 */
   categories: (id: string) => Promise<SiteCategoriesResult>
+}
+
+type CachePhase = 'enumerate' | 'measure' | 'clear'
+
+interface CacheProgress {
+  /** enumerate：统计文件数量；measure：计算体积；clear：正在清理 */
+  phase: CachePhase
+  /** 0-100，enumerate 阶段没有总量，固定为 0 */
+  percent: number
+  /** 已统计到的缓存体积（字节） */
+  bytes: number
+  /** 已处理的文件数（enumerate 阶段为已发现的文件数） */
+  files: number
+  /** 当前缓存目录的中文名称 */
+  current: string
+}
+
+interface CacheSummary {
+  /** 缓存总字节数 */
+  size: number
+  /** 缓存文件总数 */
+  files: number
+  /** ISO 8601，本次扫描完成时间 */
+  scannedAt: string
+}
+
+interface CacheClearResult extends CacheSummary {
+  /** 本次清理掉的字节数 */
+  freed: number
+  /** 清理失败、仍被占用的缓存目录数 */
+  locked: number
+}
+
+interface CacheApi {
+  /** 扫描缓存目录并返回体积，过程中通过 onProgress 推送进度 */
+  scan: () => Promise<CacheSummary>
+  /** 清理全部缓存，返回清理后的体积与释放量 */
+  clear: () => Promise<CacheClearResult>
+  onProgress: (callback: (progress: CacheProgress) => void) => () => void
 }
 
 type UpdaterState =
@@ -144,6 +191,7 @@ interface Api {
   app: { info: () => Promise<AppInfo> }
   settings: SettingsApi
   sites: SitesApi
+  cache: CacheApi
   updater: UpdaterApi
   windowControls: WindowControls
 }

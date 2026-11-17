@@ -405,7 +405,7 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
             <div className="categories-summary">共 {categories.length} 个分类</div>
             <div className="categories-list">
               {categories.map((category) => (
-                <span className="category-chip" key={category.id} title={`ID ${category.id}`}>
+                <span className="category-chip" key={category.id} title={`ID ${category.sourceId}`}>
                   {category.name}
                 </span>
               ))}

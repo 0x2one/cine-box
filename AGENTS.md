@@ -43,7 +43,7 @@ Adding a channel takes three edits: `ipcMain.handle` in main, `ipcRenderer.invok
 ## Persistence and updates
 
 - Settings are a plain JSON file at `app.getPath('userData')/app-settings.json` handled by `src/main/app-settings.ts` (no electron-store). `openAtLogin` is re-read from the OS on every read because users can change it outside the app.
-- Console sites live in `app.getPath('userData')/sites.json` (`{ version: 1, sites: [...] }`), handled by `src/main/site-store.ts`. The main process assigns the id (`randomUUID()` with dashes stripped) and the ISO timestamps; the renderer only submits name/display/address/format/remark for add/update, and `updatedAt` is refreshed only by `sites:update`.
+- Console sites live in a SQLite database at `app.getPath('userData')/Data/cine-box.db` (the `sites` and `site_categories` tables), opened with Node's built-in `node:sqlite` (`DatabaseSync`, WAL mode) in `src/main/site-store.ts`. The main process assigns the id (`randomUUID()` with dashes stripped) and the ISO timestamps; the renderer only submits name/display/address/format/remark for add/update, and `updatedAt` is refreshed only by `sites:update`. Categories fetched over `ac=list` are upserted per site (`site_categories`, unique `site_id` + `source_id`) and rows missing from the latest response are deleted; deleting a site also deletes its categories. Back up `-wal` / `-shm` sidecar files together with the `.db`.
 - `electron-updater` is disabled unless packaged. To exercise it in dev: PowerShell `$env:CINEBOX_DEV_UPDATE='1'; pnpm dev` (else `CINEBOX_DEV_UPDATE=1 pnpm dev`), which reads `dev-app-update.yml`. Draft releases are invisible to the updater.
 
 ## Release

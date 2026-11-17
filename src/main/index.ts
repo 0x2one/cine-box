@@ -13,6 +13,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createAppSettingsStore, DEFAULT_SHOW_SHORTCUT } from './app-settings'
+import { createCacheManager } from './app-cache'
 import { fetchSiteCategories } from './site-categories'
 import { createSiteStore, type SiteInput } from './site-store'
 import { createUpdater } from './updater'
@@ -27,8 +28,10 @@ let isQuitting = false
 let registeredShortcut: string | null = null
 
 const appSettingsStore = createAppSettingsStore()
-const siteStore = createSiteStore()
+// 站点数据存 SQLite：userData/Data/cine-box.db
+const siteStore = createSiteStore(join(app.getPath('userData'), 'Data', 'cine-box.db'))
 const updater = createUpdater(sendToRenderer, () => appSettingsStore.get().autoDownload)
+const cacheManager = createCacheManager()
 
 function sendToRenderer(channel: string, ...args: unknown[]): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -318,6 +321,20 @@ ipcMain.handle('settings:resetShowShortcut', () => {
   return result
 })
 
+/* ── IPC：缓存管理 ── */
+
+ipcMain.handle('cache:scan', (event) =>
+  cacheManager.scan((progress) => {
+    if (!event.sender.isDestroyed()) event.sender.send('cache:progress', progress)
+  })
+)
+
+ipcMain.handle('cache:clear', (event) =>
+  cacheManager.clear((progress) => {
+    if (!event.sender.isDestroyed()) event.sender.send('cache:progress', progress)
+  })
+)
+
 /* ── IPC：采集站点 ── */
 
 ipcMain.handle('sites:list', () => siteStore.list())
@@ -330,10 +347,13 @@ ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) =>
 
 ipcMain.handle('sites:remove', (_event, id: string) => siteStore.remove(String(id)))
 
-ipcMain.handle('sites:categories', (_event, id: string) => {
+ipcMain.handle('sites:categories', async (_event, id: string) => {
   const site = siteStore.list().find((item) => item.id === String(id))
   if (!site) return { ok: false, error: 'NOT_FOUND' }
-  return fetchSiteCategories(site)
+  const result = await fetchSiteCategories(site)
+  if (!result.ok) return result
+  // 抓取成功后同步入库，返回带主键与时间戳的库内数据
+  return { ok: true, categories: siteStore.syncCategories(site.id, result.categories) }
 })
 
 /* ── IPC：应用信息 ── */
@@ -417,6 +437,8 @@ if (!gotTheLock) {
     destroyTray()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护
     if (app.isReady()) globalShortcut.unregisterAll()
+    // 关闭数据库连接，触发 WAL checkpoint 并清掉 -wal / -shm 附属文件
+    siteStore.close()
   })
 
   app.on('window-all-closed', () => {

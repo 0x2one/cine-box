@@ -28,6 +28,18 @@ const api = {
     categories: (id: string): Promise<SiteCategoriesResult> =>
       ipcRenderer.invoke('sites:categories', id)
   },
+  cache: {
+    scan: (): Promise<CacheSummary> => ipcRenderer.invoke('cache:scan'),
+    clear: (): Promise<CacheClearResult> => ipcRenderer.invoke('cache:clear'),
+    onProgress: (callback: (progress: CacheProgress) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: CacheProgress): void =>
+        callback(progress)
+      ipcRenderer.on('cache:progress', handler)
+      return () => {
+        ipcRenderer.removeListener('cache:progress', handler)
+      }
+    }
+  },
   updater: {
     check: (): Promise<UpdaterStatus> => ipcRenderer.invoke('updater:check'),
     download: (): Promise<UpdaterStatus> => ipcRenderer.invoke('updater:download'),
