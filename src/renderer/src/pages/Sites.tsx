@@ -353,6 +353,20 @@ function SitesPanel({
     onStartBinding(target)
   }
 
+  /** 卡片上的「绑定」快捷入口：还没存过分类时先打开分类弹窗取一次，免得进去是空的 */
+  const startBindingFromCard = (site: Site): void => {
+    void window.api.sites
+      .categories(site.id)
+      .then((result) => {
+        if (result.ok && (result.categories?.length ?? 0) > 0) {
+          onStartBinding({ id: site.id, name: siteLabel(site) })
+          return
+        }
+        loadCategories(site)
+      })
+      .catch(() => message.error('读取站点分类失败，请重试'))
+  }
+
   return (
     <>
       <div className="settings-panel-head has-actions">
@@ -406,6 +420,15 @@ function SitesPanel({
                       icon={<TagsOutlined />}
                       onClick={() => loadCategories(site)}
                       aria-label={`获取 ${siteLabel(site)} 的视频分类`}
+                    />
+                  </Tooltip>
+                  <Tooltip title="绑定在线分类">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<LinkOutlined />}
+                      onClick={() => startBindingFromCard(site)}
+                      aria-label={`绑定 ${siteLabel(site)} 的在线分类`}
                     />
                   </Tooltip>
                   <Tooltip title="编辑">

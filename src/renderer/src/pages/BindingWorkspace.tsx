@@ -55,7 +55,9 @@ function BindingWorkspace({
           draggingId === item.id ? ' is-dragging' : ''
         }${selectedId === item.id ? ' is-selected' : ''}`}
         draggable
-        title={binding ? `${item.name} → ${binding.categoryPath}` : `${item.name}（ID ${item.sourceId}）`}
+        title={
+          binding ? `${item.name} → ${binding.categoryPath}` : `${item.name}（ID ${item.sourceId}）`
+        }
         onDragStart={(event) => {
           // 落点判断用外层 ref，这里只是为了能拖起来
           event.dataTransfer.setData('application/x-cinebox-online', item.id)
@@ -66,13 +68,11 @@ function BindingWorkspace({
         onClick={() => onSelect(item)}
       >
         <span className="workspace-card-name">{item.name}</span>
-        {path ? (
+        {path && (
           <span className="workspace-card-path">
             {path.parent && <span className="workspace-card-path-parent">{path.parent} / </span>}
             <span>{path.leaf}</span>
           </span>
-        ) : (
-          <span className="workspace-card-id">{item.sourceId}</span>
         )}
         {binding && (
           <button

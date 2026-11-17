@@ -895,12 +895,26 @@
   opacity: 0;
 }
 
-/* 分类页：映射模式左右两栏，两栏高度都跟着内容走，由页面整体滚动 */
+/* 分类页：映射模式左右两栏 */
 .category-body.is-binding {
   display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  /* 左栏守住树行的宽度，右栏吃掉剩余空间；窗口窄时左栏先缩，右栏仍能保持两列卡片 */
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   align-items: start;
   gap: 14px;
+}
+
+/*
+ * 两栏各自撑满窗口剩余高度（100px = 标题栏 + 面板头，44px = 页面底部留白），
+ * 内容超出时各出一条自己的滚动条，页面本身不再滚动。
+ */
+.category-body.is-binding .category-card,
+.binding-workspace {
+  max-height: calc(100vh - 144px);
+}
+
+.category-body.is-binding .category-card {
+  overflow-y: auto;
 }
 
 /* 拖拽落点高亮 */
@@ -910,19 +924,28 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
+/* 拖拽提示：贴在树卡片底部，卡片滚动时也不挡视线、不改变布局高度 */
 .drop-hint {
-  margin: 8px 2px 0;
+  position: sticky;
+  bottom: 0;
+  margin: 6px 2px 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   color: var(--accent);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
-/* 右侧映射工作区 */
+/* 右侧映射工作区：头部固定，下面两组分类自己滚动 */
 .binding-workspace {
+  display: flex;
   min-width: 0;
+  flex-direction: column;
 }
 
 .workspace-head {
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   gap: 16px;
   padding: 14px 16px 12px;
@@ -959,19 +982,24 @@
   color: var(--text);
 }
 
-/* 两组分类之间留白，整体高度跟着内容走，不做内部滚动 */
+/* 只在这里滚动，两组标题用 sticky 钉在顶部 */
 .workspace-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 12px 14px 14px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 12px 14px;
 }
 
 .workspace-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 0 4px;
+  margin: 0;
+  padding: 14px 0 6px;
+  background: var(--surface);
   color: var(--text-faint);
   font-size: 11.5px;
   font-weight: 500;
@@ -989,7 +1017,7 @@
 /* 在线分类卡片：列数随宽度自适应，一行多个 */
 .workspace-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -1001,8 +1029,9 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
+  justify-content: center;
   gap: 3px;
-  padding: 9px 26px 9px 11px;
+  padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -1028,6 +1057,7 @@
 
 /* 已绑定：淡强调色底 + 强调色描边，和站点弹窗里的卡片保持一致 */
 .workspace-card.is-bound {
+  padding-right: 26px;
   border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
@@ -1061,15 +1091,6 @@
 
 .workspace-card-path-parent {
   color: var(--text-faint);
-}
-
-.workspace-card-id {
-  overflow: hidden;
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 悬停才出现的圆形 × 解绑按钮 */
@@ -1142,37 +1163,35 @@
   line-height: 16px;
 }
 
-.binding-items {
-  margin: 0;
+/* 明细里的卡片沿用上面的 .binding-list / .binding-row 网格，这里只取消内层再滚动一次 */
+.binding-group .binding-list {
+  max-height: none;
+  overflow: visible;
   padding: 0;
-  list-style: none;
 }
 
-.binding-item {
-  display: flex;
+/* 明细卡片：一行名称，右侧常驻的解绑图标 */
+.binding-group .binding-row {
+  flex-direction: row;
   align-items: center;
-  gap: 10px;
-  padding: 5px 2px 5px 0;
-  border-bottom: 1px solid var(--border);
+  gap: 4px;
+  padding: 7px 6px 7px 12px;
 }
 
-.binding-item:last-child {
-  border-bottom: 0;
-}
-
-.binding-item-name {
-  overflow: hidden;
+.binding-group .binding-name {
   flex: 1;
-  color: var(--text);
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.binding-item-id {
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  font-size: 11px;
+.binding-group .binding-unbind {
+  position: static;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  opacity: 1;
+}
+
+.binding-group .binding-unbind:disabled {
+  opacity: 0.45;
 }
 
 /* 全量更新时会解绑的分类角标 */

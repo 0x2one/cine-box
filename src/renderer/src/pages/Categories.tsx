@@ -13,7 +13,13 @@ import {
   TreeSelect
 } from 'antd'
 import type { TreeProps } from 'antd'
-import { DeleteOutlined, EditOutlined, LinkOutlined, PlusOutlined } from '@ant-design/icons'
+import {
+  CloseOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  LinkOutlined,
+  PlusOutlined
+} from '@ant-design/icons'
 import BindingWorkspace from './BindingWorkspace'
 import {
   buildCategoryTree,
@@ -113,7 +119,8 @@ function CategoriesPanel({
   const dragging = useRef<{ id: string; subtree: Set<string> } | null>(null)
   /** 接收原生拖拽事件的容器（含分类树与右侧工作区） */
   const bodyRef = useRef<HTMLDivElement | null>(null)
-  const expandedOnce = useRef(false)
+  /** 当前展开策略对应的模式（true = 绑定模式），null 表示还没按模式展开过 */
+  const expandedMode = useRef<boolean | null>(null)
   /** 每个本地分类已绑定的在线分类数量，未绑定的不出现 */
   const [counts, setCounts] = useState<Record<string, number>>({})
   /** 非空表示绑定明细弹窗打开，并记录当前查看的分类 */
@@ -130,6 +137,8 @@ function CategoriesPanel({
   const [selectedItem, setSelectedItem] = useState<SiteCategory | null>(null)
   const [dropTargetId, setDropTargetId] = useState<string | null>(null)
   const [binding, setBinding] = useState(false)
+  /** 是否处于「把在线分类拖到本地分类上」的绑定模式 */
+  const bindingMode = Boolean(bindingSite)
 
   const refreshCounts = (): void => {
     void window.api.bindings
@@ -204,16 +213,19 @@ function CategoriesPanel({
     }
   }, [message])
 
-  // 首次拿到数据时展开全部有子分类的节点，之后尊重用户的折叠状态
+  // 平时默认收起，进入绑定模式时默认展开全部有子分类的节点；之后尊重用户自己的折叠状态
   useEffect(() => {
-    if (expandedOnce.current || categories.length === 0) return
-    expandedOnce.current = true
+    if (categories.length === 0) return
+    if (expandedMode.current === bindingMode) return
+    expandedMode.current = bindingMode
     setExpandedKeys(
-      categories
-        .filter((row) => categories.some((child) => child.parentId === row.id))
-        .map((row) => row.id)
+      bindingMode
+        ? categories
+            .filter((row) => categories.some((child) => child.parentId === row.id))
+            .map((row) => row.id)
+        : []
     )
-  }, [categories])
+  }, [bindingMode, categories])
 
   // 弹窗打开后再回填：Form 要等 Modal 首次渲染才挂载
   useEffect(() => {
@@ -679,14 +691,14 @@ function CategoriesPanel({
                   }}
                   onDrop={handleDrop}
                 />
+                {draggingItem && (
+                  <p className="drop-hint">
+                    {dropTargetId
+                      ? `松开即绑定到「${categoryPathOf(categories, dropTargetId)}」`
+                      : '把在线分类拖到左侧任意分类上'}
+                  </p>
+                )}
               </div>
-              {draggingItem && (
-                <p className="drop-hint">
-                  {dropTargetId
-                    ? `松开即绑定到「${categoryPathOf(categories, dropTargetId)}」`
-                    : '把在线分类拖到左侧任意分类上'}
-                </p>
-              )}
             </>
           )}
         </div>
@@ -797,21 +809,20 @@ function CategoriesPanel({
                   {group.siteName}
                   <span className="binding-group-count">{group.items.length}</span>
                 </h4>
-                <ul className="binding-items">
+                <ul className="binding-list">
                   {group.items.map((item) => (
-                    <li className="binding-item" key={item.id}>
-                      <span className="binding-item-name">{item.name}</span>
-                      <span className="binding-item-id" title={`在线分类 ID ${item.sourceId}`}>
-                        {item.sourceId}
-                      </span>
-                      <Button
-                        type="text"
-                        size="small"
-                        loading={unbinding}
+                    <li className="binding-row is-bound" key={item.id}>
+                      <span className="binding-name">{item.name}</span>
+                      <button
+                        type="button"
+                        className="binding-unbind"
+                        title="解绑"
+                        aria-label={`解绑「${item.name}」`}
+                        disabled={unbinding}
                         onClick={() => unbind([toTarget(item)])}
                       >
-                        解绑
-                      </Button>
+                        <CloseOutlined />
+                      </button>
                     </li>
                   ))}
                 </ul>
