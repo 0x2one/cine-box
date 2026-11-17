@@ -895,17 +895,12 @@
   opacity: 0;
 }
 
-/* 分类页：映射模式左右两栏 */
+/* 分类页：映射模式左右两栏，两栏高度都跟着内容走，由页面整体滚动 */
 .category-body.is-binding {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
   align-items: start;
   gap: 14px;
-}
-
-.category-body.is-binding .category-card {
-  max-height: calc(100vh - 250px);
-  overflow-y: auto;
 }
 
 /* 拖拽落点高亮 */
@@ -991,74 +986,100 @@
   line-height: 16px;
 }
 
-.workspace-items {
+/* 在线分类卡片：列数随宽度自适应，一行多个 */
+.workspace-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.workspace-item {
+.workspace-card {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 26px 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
   cursor: grab;
   transition:
-    background-color 120ms ease,
     border-color 120ms ease,
+    background-color 120ms ease,
     opacity 120ms ease;
 }
 
-.workspace-item:hover {
-  background: var(--surface-muted);
+.workspace-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
 }
 
-.workspace-item:active {
+.workspace-card:active {
   cursor: grabbing;
 }
 
-.workspace-item.is-selected {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.workspace-item.is-dragging {
+.workspace-card.is-dragging {
   opacity: 0.45;
 }
 
-.workspace-item-name {
+/* 已绑定：淡强调色底 + 强调色描边，和站点弹窗里的卡片保持一致 */
+.workspace-card.is-bound {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.workspace-card.is-bound:hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+}
+
+/* 选中态放在已绑定之后，两种状态叠加时描边仍是强调色 */
+.workspace-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.workspace-card-name {
   overflow: hidden;
-  flex: 1;
   color: var(--text);
   font-size: 12.5px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.workspace-item-path {
-  flex: 0 0 auto;
+.workspace-card-path {
+  overflow: hidden;
   color: var(--accent);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.workspace-path-parent {
+.workspace-card-path-parent {
   color: var(--text-faint);
 }
 
-.workspace-item-id {
-  flex: 0 0 auto;
+.workspace-card-id {
+  overflow: hidden;
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.workspace-unbind {
+/* 悬停才出现的圆形 × 解绑按钮 */
+.workspace-card-unbind {
+  position: absolute;
+  top: 5px;
+  right: 5px;
   display: inline-flex;
-  width: 20px;
-  height: 20px;
-  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -1066,7 +1087,7 @@
   border-radius: 50%;
   background: transparent;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0;
   cursor: default;
   transition:
@@ -1075,19 +1096,19 @@
     color 120ms ease;
 }
 
-.workspace-item:hover .workspace-unbind,
-.workspace-unbind:focus-visible {
+.workspace-card:hover .workspace-card-unbind,
+.workspace-card-unbind:focus-visible {
   opacity: 1;
 }
 
-.workspace-unbind:hover {
+.workspace-card-unbind:hover {
   background: var(--border);
   color: var(--text);
 }
 
 .workspace-empty {
   margin: 0;
-  padding: 10px 0;
+  padding: 2px 0 0;
   color: var(--text-faint);
   font-size: 11.5px;
 }
