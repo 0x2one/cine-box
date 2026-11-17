@@ -422,6 +422,10 @@ ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInp
   categoryStore.update(String(id), input)
 )
 
+ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) =>
+  categoryStore.setVisible(String(id), Boolean(visible))
+)
+
 ipcMain.handle(
   'categories:move',
   (_event, id: string, targetId: string | null, placement: CategoryPlacement) =>

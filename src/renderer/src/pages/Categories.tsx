@@ -17,6 +17,8 @@ import {
   CloseOutlined,
   DeleteOutlined,
   EditOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
   LinkOutlined,
   PlusOutlined
 } from '@ant-design/icons'
@@ -26,6 +28,7 @@ import {
   categoryPathOf,
   categorySubtreeIds,
   toCategoryOptions,
+  visibleCategoryIds,
   type CategoryTreeNode
 } from '../lib/category-tree'
 
@@ -114,6 +117,10 @@ function CategoriesPanel({
   /** 新增时预选的上级分类（行内「+」按钮带过来的） */
   const [draftParent, setDraftParent] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  /** 正在切换显示状态的分类，用于按钮 loading */
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+  /** 快速连续切换时只采纳最后一次结果，避免旧响应覆盖新状态 */
+  const toggleToken = useRef(0)
   const [form] = Form.useForm<CategoryFormValues>()
   /** 正在拖拽的节点及其子树，用于阻止把分类拖进自己的后代 */
   const dragging = useRef<{ id: string; subtree: Set<string> } | null>(null)
@@ -254,6 +261,9 @@ function CategoriesPanel({
       ),
     [tree, categories, editing]
   )
+  /** 展示端可见的分类：父分类隐藏时整棵子树一起隐藏 */
+  const visibleIds = useMemo(() => visibleCategoryIds(categories), [categories])
+  const hiddenCount = categories.length - visibleIds.size
   const bindingGroups = useMemo(() => groupBindings(bindingItems), [bindingItems])
 
   // 映射模式下只在数据属于当前站点时才展示，否则视为加载中
@@ -341,6 +351,22 @@ function CategoriesPanel({
         message.success('分类已删除')
       })
       .catch(() => message.error('删除失败，请重试'))
+  }
+
+  /** 请求返回前按钮保持 loading；调用本身抛错（如预加载脚本尚未更新）也要复位，避免一直等待中 */
+  const toggleVisible = async (category: VideoCategory, visible: boolean): Promise<void> => {
+    const token = ++toggleToken.current
+    setTogglingId(category.id)
+    try {
+      const result = await window.api.categories.setVisible(category.id, visible)
+      if (token === toggleToken.current) applyResult(result)
+    } catch (error) {
+      message.error(
+        error instanceof TypeError ? '切换失败，请重启应用后重试' : '切换显示状态失败，请重试'
+      )
+    } finally {
+      if (token === toggleToken.current) setTogglingId(null)
+    }
   }
 
   const openBindings = (category: VideoCategory): void => {
@@ -538,9 +564,19 @@ function CategoriesPanel({
     const bound = counts[node.key] ?? 0
     const category = categories.find((row) => row.id === node.key)
     const isDropTarget = dropTargetId === node.key
+    const ownVisible = category?.visible !== false
+    // 有效隐藏：自身关闭，或任一上级关闭
+    const hidden = !visibleIds.has(node.key)
+    const visibilityTitle = !ownVisible
+      ? '已隐藏，点击显示'
+      : hidden
+        ? '上级分类已隐藏，当前分类也不会显示；点击可单独隐藏'
+        : '在展示端显示，点击隐藏'
     return (
       <span
-        className={`category-row${isDropTarget ? ' is-drop-target' : ''}`}
+        className={`category-row${hidden ? ' is-hidden' : ''}${
+          isDropTarget ? ' is-drop-target' : ''
+        }`}
         data-category-id={node.key}
         onClick={() => {
           // 映射模式下选中了在线分类时，点分类即绑定
@@ -569,6 +605,19 @@ function CategoriesPanel({
           onClick={(event) => event.stopPropagation()}
           onMouseDown={(event) => event.stopPropagation()}
         >
+          <Tooltip title={visibilityTitle}>
+            <Button
+              type="text"
+              size="small"
+              className={`category-visible${ownVisible ? '' : ' is-off'}`}
+              icon={ownVisible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+              loading={togglingId === node.key}
+              onClick={() => {
+                if (category) void toggleVisible(category, !ownVisible)
+              }}
+              aria-label={ownVisible ? `隐藏「${node.title}」` : `显示「${node.title}」`}
+            />
+          </Tooltip>
           <Tooltip title={bound > 0 ? `已绑定 ${bound} 个在线分类` : '绑定在线分类'}>
             <Button
               type="text"
@@ -636,7 +685,10 @@ function CategoriesPanel({
         <span className="settings-panel-sep">·</span>
         <p className="settings-panel-desc">
           {desc}
-          <span className="sites-count">共 {categories.length} 个分类</span>
+          <span className="sites-count">
+            共 {categories.length} 个分类
+            {hiddenCount > 0 ? ` · ${hiddenCount} 个已隐藏` : ''}
+          </span>
         </p>
         <div className="settings-panel-actions">
           <Tooltip title="新增分类">
@@ -668,7 +720,8 @@ function CategoriesPanel({
             <>
               {!bindingSite && (
                 <p className="category-tip">
-                  拖拽分类可调整层级与顺序，行内 + 可在该分类下新增子分类。
+                  拖拽分类可调整层级与顺序，行内 +
+                  可在该分类下新增子分类；行尾眼睛按钮控制是否在展示端显示，关闭父分类会连同子分类一起隐藏。
                 </p>
               )}
               <div className="settings-card category-card">

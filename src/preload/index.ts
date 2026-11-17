@@ -40,6 +40,8 @@ const api = {
       ipcRenderer.invoke('categories:create', input),
     update: (id: string, input: VideoCategoryInput): Promise<VideoCategoryResult> =>
       ipcRenderer.invoke('categories:update', id, input),
+    setVisible: (id: string, visible: boolean): Promise<VideoCategoryResult> =>
+      ipcRenderer.invoke('categories:setVisible', id, visible),
     move: (
       id: string,
       targetId: string | null,

@@ -11,6 +11,8 @@ export interface VideoCategory {
   name: string
   /** 同级排序，从 0 开始连续编号 */
   sortOrder: number
+  /** 是否在展示端显示：关闭后该分类及其整棵子树都不再展示，管理页仍会列出 */
+  visible: boolean
   /** 创建 / 更新时间，ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -41,6 +43,8 @@ export interface CategoryStore {
   list: () => VideoCategory[]
   create: (input: VideoCategoryInput) => CategoryResult
   update: (id: string, input: VideoCategoryInput) => CategoryResult
+  /** 切换展示端的显示状态；关闭父分类会让整棵子树在展示端一起隐藏 */
+  setVisible: (id: string, visible: boolean) => CategoryResult
   /** 拖拽移动：改变上级并插入到指定位置 */
   move: (id: string, targetId: string | null, placement: CategoryPlacement) => CategoryResult
   /** 删除分类及其所有子分类 */
@@ -57,14 +61,19 @@ CREATE TABLE IF NOT EXISTS video_categories (
   parent_id TEXT REFERENCES video_categories (id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
+  visible INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_video_categories_parent ON video_categories (parent_id, sort_order);
 `
 
+/** 旧库没有 visible 列，启动时补上；已有分类默认显示 */
+const ADD_VISIBLE_COLUMN =
+  'ALTER TABLE video_categories ADD COLUMN visible INTEGER NOT NULL DEFAULT 1'
+
 const SELECT_ALL = `
-SELECT id, parent_id, name, sort_order, created_at, updated_at
+SELECT id, parent_id, name, sort_order, visible, created_at, updated_at
 FROM video_categories
 ORDER BY sort_order ASC, created_at ASC, rowid ASC
 `
@@ -79,6 +88,8 @@ UPDATE video_categories
 SET name = ?, parent_id = ?, sort_order = ?, updated_at = ?
 WHERE id = ?
 `
+
+const UPDATE_VISIBLE = 'UPDATE video_categories SET visible = ?, updated_at = ? WHERE id = ?'
 
 /** 只改排序，不动 updatedAt（同级整体压紧不算内容变更） */
 const UPDATE_ORDER = 'UPDATE video_categories SET sort_order = ? WHERE id = ?'
@@ -114,6 +125,8 @@ function rowToCategory(row: unknown): VideoCategory | null {
     parentId: typeof raw.parent_id === 'string' && raw.parent_id ? raw.parent_id : null,
     name: raw.name,
     sortOrder: typeof raw.sort_order === 'number' ? raw.sort_order : 0,
+    // node:sqlite 返回整数 0 / 1，缺列时按显示处理
+    visible: Number(raw.visible ?? 1) !== 0,
     createdAt,
     updatedAt: typeof raw.updated_at === 'string' ? raw.updated_at : createdAt
   }
@@ -221,6 +234,18 @@ export function createCategoryStore(file: string): CategoryStore {
     return { ok: true, categories: queryAll() }
   }
 
+  function setVisible(id: string, visible: boolean): CategoryResult {
+    const rows = queryAll()
+    const existing = rows.find((row) => row.id === id)
+    if (!existing) return { ok: false, error: 'NOT_FOUND' }
+    // 值没变就不刷 updatedAt
+    if (existing.visible === visible) return { ok: true, categories: rows }
+    database()
+      .prepare(UPDATE_VISIBLE)
+      .run(visible ? 1 : 0, new Date().toISOString(), id)
+    return { ok: true, categories: queryAll() }
+  }
+
   function move(id: string, targetId: string | null, placement: CategoryPlacement): CategoryResult {
     if (placement !== 'before' && placement !== 'inside' && placement !== 'after') {
       return { ok: false, error: 'INVALID_PLACEMENT' }
@@ -299,6 +324,12 @@ export function createCategoryStore(file: string): CategoryStore {
       const connection = openDatabase(file)
       try {
         connection.exec(CREATE_TABLE)
+        // 旧库的建表语句不会补列，这里单独迁移一次
+        const columns = connection
+          .prepare("SELECT name FROM pragma_table_info('video_categories')")
+          .all()
+          .map((row) => String((row as Record<string, unknown>).name ?? ''))
+        if (!columns.includes('visible')) connection.exec(ADD_VISIBLE_COLUMN)
         db = connection
       } catch (error) {
         db = null
@@ -308,6 +339,7 @@ export function createCategoryStore(file: string): CategoryStore {
     list: queryAll,
     create,
     update,
+    setVisible,
     move,
     remove,
     close: () => {

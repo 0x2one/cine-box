@@ -885,6 +885,20 @@
   opacity: 1;
 }
 
+/* 已隐藏的分类：开关图标弱化，和行内其它操作按钮一起悬停出现 */
+.category-actions .category-visible.is-off {
+  color: var(--text-faint);
+}
+
+/* 有效隐藏（自身或上级关闭）：弱化名称与绑定徽标，但仍可正常操作 */
+.category-row.is-hidden .category-name {
+  color: var(--text-faint);
+}
+
+.category-row.is-hidden .category-bound {
+  opacity: 0.6;
+}
+
 /* ── 控制台：分类绑定 ── */
 
 /* 树行上的绑定数量徽标 */

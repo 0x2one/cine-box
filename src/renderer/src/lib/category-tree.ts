@@ -62,6 +62,38 @@ export function categorySubtreeIds(rows: VideoCategory[], id: string): Set<strin
   return ids
 }
 
+/**
+ * 展示端可见的分类：自身开关打开，且所有上级都打开。
+ * 隐藏父分类会连带隐藏整棵子树，但子分类自己的 visible 不会被改写，
+ * 所以父分类重新打开后各自恢复。父级缺失按一级分类处理，数据成环时按隐藏处理。
+ */
+export function visibleCategoryIds(rows: VideoCategory[]): Set<string> {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const visible = new Set<string>()
+  for (const row of rows) {
+    const chain: string[] = []
+    const seen = new Set<string>()
+    let cursor: VideoCategory | undefined = row
+    let ok = true
+    while (cursor) {
+      if (seen.has(cursor.id)) {
+        // 手工改坏的数据成环：按不可见处理，也避免死循环
+        ok = false
+        break
+      }
+      seen.add(cursor.id)
+      if (!cursor.visible) {
+        ok = false
+        break
+      }
+      chain.push(cursor.id)
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
+    }
+    if (ok) for (const id of chain) visible.add(id)
+  }
+  return visible
+}
+
 /** 某个分类的完整路径，如「电影 / 动作片」 */
 export function categoryPathOf(rows: VideoCategory[], id: string): string {
   const byId = new Map(rows.map((row) => [row.id, row]))

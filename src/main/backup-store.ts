@@ -73,6 +73,8 @@ interface VideoCategoryRow {
   parentId: string | null
   name: string
   sortOrder: number
+  /** 展示端是否显示；旧备份没有该字段时按显示处理 */
+  visible: boolean
   createdAt: string
   updatedAt: string
 }
@@ -184,7 +186,7 @@ ORDER BY rowid
 `
 
 const SELECT_VIDEO_CATEGORIES = `
-SELECT id, parent_id, name, sort_order, created_at, updated_at
+SELECT id, parent_id, name, sort_order, visible, created_at, updated_at
 FROM video_categories
 ORDER BY sort_order ASC, rowid ASC
 `
@@ -206,8 +208,8 @@ VALUES (?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_VIDEO_CATEGORY = `
-INSERT INTO video_categories (id, parent_id, name, sort_order, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO video_categories (id, parent_id, name, sort_order, visible, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_BINDING = `
@@ -326,6 +328,8 @@ function parseVideoCategories(value: unknown): VideoCategoryRow[] | null {
     const parentId =
       item.parentId === null || item.parentId === undefined ? null : requiredText(item.parentId, 64)
     if (!id || !name || parents.has(id) || parentId === id) return null
+    // 旧备份没有 visible（默认显示），有的话必须是布尔值，否则说明文件被改坏了
+    if (item.visible !== undefined && typeof item.visible !== 'boolean') return null
     const createdAt = timestamp(item.createdAt, new Date().toISOString())
     parents.set(id, parentId)
     rows.push({
@@ -334,6 +338,7 @@ function parseVideoCategories(value: unknown): VideoCategoryRow[] | null {
       name,
       sortOrder:
         typeof item.sortOrder === 'number' && Number.isFinite(item.sortOrder) ? item.sortOrder : 0,
+      visible: item.visible !== false,
       createdAt,
       updatedAt: timestamp(item.updatedAt, createdAt)
     })
@@ -484,6 +489,7 @@ function readState(database: DatabaseSync): BackupData {
         parentId: typeof raw.parent_id === 'string' && raw.parent_id ? raw.parent_id : null,
         name: String(raw.name ?? ''),
         sortOrder: Number(raw.sort_order ?? 0),
+        visible: Number(raw.visible ?? 1) !== 0,
         createdAt,
         updatedAt: timestamp(raw.updated_at, createdAt)
       }
@@ -567,6 +573,7 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.parentId,
         row.name,
         row.sortOrder,
+        row.visible ? 1 : 0,
         row.createdAt,
         row.updatedAt
       )

@@ -177,6 +177,8 @@ interface VideoCategory {
   name: string
   /** 同级排序，从 0 开始连续编号 */
   sortOrder: number
+  /** 是否在展示端显示：关闭后该分类及其整棵子树都不再展示，管理页仍会列出 */
+  visible: boolean
   /** 创建 / 更新时间，ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -210,6 +212,8 @@ interface CategoriesApi {
   list: () => Promise<VideoCategory[]>
   create: (input: VideoCategoryInput) => Promise<VideoCategoryResult>
   update: (id: string, input: VideoCategoryInput) => Promise<VideoCategoryResult>
+  /** 切换展示端的显示状态：关闭父分类会让整棵子树一起隐藏（管理页始终返回全部分类） */
+  setVisible: (id: string, visible: boolean) => Promise<VideoCategoryResult>
   /** 拖拽移动：改变上级并插入到指定位置 */
   move: (
     id: string,
