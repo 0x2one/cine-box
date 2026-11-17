@@ -267,6 +267,99 @@ interface BindingsApi {
   unbind: (items: BindingTarget[]) => Promise<BindingResult>
 }
 
+/** 一份备份里包含的数据量 */
+interface BackupCounts {
+  sites: number
+  siteCategories: number
+  categories: number
+  bindings: number
+}
+
+/** 备份记录：备份目录里的一个 JSON 文件 */
+interface BackupRecord {
+  /** 备份文件名，同时作为记录 ID */
+  id: string
+  /** 生成备份的时间，ISO 8601 */
+  createdAt: string
+  /** 生成备份时的应用版本 */
+  appVersion: string
+  /** 文件大小（字节） */
+  size: number
+  counts: BackupCounts
+  /** 恢复前自动生成的安全备份 */
+  auto: boolean
+}
+
+interface BackupListResult {
+  /** 备份目录绝对路径 */
+  directory: string
+  records: BackupRecord[]
+}
+
+interface BackupCreateResult {
+  ok: boolean
+  /** EMPTY：当前没有可备份的数据；WRITE_FAILED：写入备份文件失败 */
+  error?: 'EMPTY' | 'WRITE_FAILED'
+  record?: BackupRecord
+}
+
+interface BackupRemoveResult {
+  ok: boolean
+}
+
+interface BackupExportResult {
+  ok: boolean
+  /** 用户取消了保存对话框 */
+  canceled?: boolean
+  /** NOT_FOUND：记录已不存在；WRITE_FAILED：复制失败 */
+  error?: 'NOT_FOUND' | 'WRITE_FAILED'
+  /** 用户选择的目标路径 */
+  path?: string
+}
+
+interface BackupPickResult {
+  ok: boolean
+  /** 用户取消了选择对话框 */
+  canceled?: boolean
+  /** NOT_FOUND：文件不存在；INVALID：不是有效备份；UNSUPPORTED：备份版本更高；READ_FAILED：读取失败 */
+  error?: 'NOT_FOUND' | 'INVALID' | 'UNSUPPORTED' | 'READ_FAILED'
+  /** 用户选中的文件绝对路径，确认恢复时原样传回 */
+  path?: string
+  record?: BackupRecord
+}
+
+interface BackupRestoreResult {
+  ok: boolean
+  /** NOT_FOUND：记录或文件不存在；INVALID：文件内容不合法；UNSUPPORTED：版本更高；
+   * READ_FAILED：读取失败；WRITE_FAILED：写入备份或恢复前备份失败 */
+  error?: 'NOT_FOUND' | 'INVALID' | 'UNSUPPORTED' | 'READ_FAILED' | 'WRITE_FAILED'
+  /** 备份里的数据量，用于恢复成功的提示 */
+  counts?: BackupCounts
+  /** 恢复前自动备份的当前数据；当前库为空时没有 */
+  safety?: BackupRecord
+}
+
+/** 恢复来源：库内备份记录，或用户自定义的文件路径 */
+interface RestoreSource {
+  id?: string
+  path?: string
+}
+
+interface BackupApi {
+  list: () => Promise<BackupListResult>
+  /** 把当前站点、在线分类、本地分类与绑定关系写成一份备份 */
+  create: () => Promise<BackupCreateResult>
+  remove: (id: string) => Promise<BackupRemoveResult>
+  /** 另存到用户选择的位置，便于分享 */
+  export: (id: string) => Promise<BackupExportResult>
+  /** 打开备份目录 */
+  openFolder: () => Promise<boolean>
+  /** 选择自定义备份文件并解析，不写库 */
+  pick: () => Promise<BackupPickResult>
+  /** 用备份覆盖当前数据，恢复前自动备份现状 */
+  restore: (source: RestoreSource) => Promise<BackupRestoreResult>
+}
+
 type CachePhase = 'enumerate' | 'measure' | 'clear'
 
 interface CacheProgress {
@@ -338,6 +431,7 @@ interface Api {
   sites: SitesApi
   categories: CategoriesApi
   bindings: BindingsApi
+  backup: BackupApi
   cache: CacheApi
   updater: UpdaterApi
   windowControls: WindowControls

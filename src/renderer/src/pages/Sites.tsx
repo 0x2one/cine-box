@@ -24,6 +24,7 @@ import {
   TagsOutlined
 } from '@ant-design/icons'
 import { splitCategoryPath } from '../lib/category-tree'
+import { formatDateTime } from '../utils/format'
 
 interface SiteFormValues {
   name: string
@@ -57,14 +58,7 @@ const FORMAT_OPTIONS: { value: SiteFormat; label: string }[] = [
   { value: 'json', label: 'JSON' }
 ]
 
-/** 卡片里统一显示到分钟，避免秒级噪音 */
-function formatTime(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return '—'
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
+/** 卡片标题：优先显示显示名 */
 function siteLabel(site: Site): string {
   return site.display || site.name
 }
@@ -466,8 +460,8 @@ function SitesPanel({
                 {site.address}
               </span>
               {site.remark && <span className="site-card-remark">{site.remark}</span>}
-              <span className="site-card-meta" title={`创建于 ${formatTime(site.createdAt)}`}>
-                更新于 {formatTime(site.updatedAt)}
+              <span className="site-card-meta" title={`创建于 ${formatDateTime(site.createdAt)}`}>
+                更新于 {formatDateTime(site.updatedAt)}
               </span>
             </article>
           ))}

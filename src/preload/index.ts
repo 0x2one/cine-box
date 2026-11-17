@@ -60,6 +60,16 @@ const api = {
     unbind: (items: BindingTarget[]): Promise<BindingResult> =>
       ipcRenderer.invoke('bindings:unbind', items)
   },
+  backup: {
+    list: (): Promise<BackupListResult> => ipcRenderer.invoke('backup:list'),
+    create: (): Promise<BackupCreateResult> => ipcRenderer.invoke('backup:create'),
+    remove: (id: string): Promise<BackupRemoveResult> => ipcRenderer.invoke('backup:remove', id),
+    export: (id: string): Promise<BackupExportResult> => ipcRenderer.invoke('backup:export', id),
+    openFolder: (): Promise<boolean> => ipcRenderer.invoke('backup:openFolder'),
+    pick: (): Promise<BackupPickResult> => ipcRenderer.invoke('backup:pick'),
+    restore: (source: RestoreSource): Promise<BackupRestoreResult> =>
+      ipcRenderer.invoke('backup:restore', source)
+  },
   cache: {
     scan: (): Promise<CacheSummary> => ipcRenderer.invoke('cache:scan'),
     clear: (): Promise<CacheClearResult> => ipcRenderer.invoke('cache:clear'),

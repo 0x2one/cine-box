@@ -5,17 +5,20 @@ import {
   DashboardOutlined,
   FileTextOutlined,
   GlobalOutlined,
+  SaveOutlined,
   UnorderedListOutlined
 } from '@ant-design/icons'
+import BackupPanel from './Backup'
 import CategoriesPanel from './Categories'
 import SitesPanel from './Sites'
 
-type ConsoleSection = 'overview' | 'sites' | 'categories' | 'tasks' | 'logs'
+type ConsoleSection = 'overview' | 'sites' | 'categories' | 'backup' | 'tasks' | 'logs'
 
 const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOutlined }[] = [
   { key: 'overview', label: '概览', icon: DashboardOutlined },
   { key: 'sites', label: '站点', icon: GlobalOutlined },
   { key: 'categories', label: '分类', icon: ApartmentOutlined },
+  { key: 'backup', label: '备份', icon: SaveOutlined },
   { key: 'tasks', label: '任务', icon: UnorderedListOutlined },
   { key: 'logs', label: '日志', icon: FileTextOutlined }
 ]
@@ -24,6 +27,7 @@ const SECTION_META: Record<ConsoleSection, { title: string; desc: string; empty?
   overview: { title: '概览', desc: '运行状态与统计', empty: '暂无数据' },
   sites: { title: '站点', desc: '管理采集站点' },
   categories: { title: '视频分类', desc: '层级管理本地分类' },
+  backup: { title: '备份', desc: '导出与恢复站点、分类和绑定关系' },
   tasks: { title: '任务', desc: '任务列表与执行进度', empty: '暂无任务' },
   logs: { title: '日志', desc: '运行日志', empty: '暂无日志' }
 }
@@ -92,6 +96,8 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
               bindingSite={bindingSite}
               onExitBinding={() => setBindingSite(null)}
             />
+          ) : section === 'backup' ? (
+            <BackupPanel title={meta.title} desc={meta.desc} />
           ) : (
             <>
               <div className="settings-panel-head">

@@ -1,6 +1,7 @@
 import {
   app,
   shell,
+  dialog,
   BrowserWindow,
   ipcMain,
   nativeImage,
@@ -14,6 +15,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createAppSettingsStore, DEFAULT_SHOW_SHORTCUT } from './app-settings'
 import { createCacheManager } from './app-cache'
+import { createBackupStore, type RestoreSource } from './backup-store'
 import { createBindingStore, type BindingTarget } from './binding-store'
 import {
   createCategoryStore,
@@ -44,6 +46,8 @@ const databaseFile = join(app.getPath('userData'), 'Data', 'cine-box.db')
 const siteStore = createSiteStore(databaseFile)
 const categoryStore = createCategoryStore(databaseFile)
 const bindingStore = createBindingStore(databaseFile)
+// 备份文件与数据库同目录：userData/Data/Backups
+const backupStore = createBackupStore(databaseFile, app.getVersion())
 /** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
 const pendingCategoryRefresh = new Map<string, { categories: SiteCategoryInput[]; at: number }>()
 const PENDING_CATEGORY_TTL = 5 * 60 * 1000
@@ -446,6 +450,58 @@ ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: str
 
 ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => bindingStore.unbind(items))
 
+/* ── IPC：备份与恢复 ── */
+
+ipcMain.handle('backup:list', () => backupStore.list())
+
+ipcMain.handle('backup:create', () => backupStore.create())
+
+ipcMain.handle('backup:remove', (_event, id: string) => backupStore.remove(String(id)))
+
+ipcMain.handle('backup:openFolder', async () => {
+  // openPath 成功时返回空字符串，失败时返回错误描述
+  const error = await shell.openPath(backupStore.directory())
+  return error === ''
+})
+
+ipcMain.handle('backup:export', async (_event, id: string) => {
+  const record = backupStore.list().records.find((item) => item.id === String(id))
+  if (!record) return { ok: false, error: 'NOT_FOUND' }
+  const options: Electron.SaveDialogOptions = {
+    title: '保存备份文件',
+    defaultPath: join(app.getPath('downloads'), record.id),
+    filters: [{ name: '映盒剧场备份', extensions: ['json'] }]
+  }
+  const result = mainWindow
+    ? await dialog.showSaveDialog(mainWindow, options)
+    : await dialog.showSaveDialog(options)
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+  return backupStore.exportTo(record.id, result.filePath)
+})
+
+ipcMain.handle('backup:pick', async () => {
+  const options: Electron.OpenDialogOptions = {
+    title: '选择备份文件',
+    properties: ['openFile'],
+    filters: [
+      { name: '映盒剧场备份', extensions: ['json'] },
+      { name: '所有文件', extensions: ['*'] }
+    ]
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
+  return backupStore.inspect(result.filePaths[0])
+})
+
+ipcMain.handle('backup:restore', (_event, source: RestoreSource) => {
+  const result = backupStore.restore(source)
+  // 站点分类被整体替换，之前「重新获取」的待确认结果全部作废
+  if (result.ok) pendingCategoryRefresh.clear()
+  return result
+})
+
 /* ── IPC：应用信息 ── */
 
 ipcMain.handle('app:info', () => ({
@@ -506,6 +562,7 @@ if (!gotTheLock) {
     await siteStore.init().catch(() => {})
     await categoryStore.init().catch(() => {})
     await bindingStore.init().catch(() => {})
+    await backupStore.init().catch(() => {})
 
     const savedShortcut = appSettingsStore.get().showShortcut
     if (savedShortcut) tryRegisterAccel(savedShortcut)
