@@ -691,13 +691,6 @@ function CategoriesPanel({
                   }}
                   onDrop={handleDrop}
                 />
-                {draggingItem && (
-                  <p className="drop-hint">
-                    {dropTargetId
-                      ? `松开即绑定到「${categoryPathOf(categories, dropTargetId)}」`
-                      : '把在线分类拖到左侧任意分类上'}
-                  </p>
-                )}
               </div>
             </>
           )}
@@ -706,6 +699,13 @@ function CategoriesPanel({
         {bindingSite && (
           <BindingWorkspace
             siteName={bindingSite.name}
+            hint={
+              draggingItem
+                ? dropTargetId
+                  ? `松开即绑定到「${categoryPathOf(categories, dropTargetId)}」`
+                  : '把在线分类拖到左侧任意分类上'
+                : ''
+            }
             categories={online}
             bindings={onlineBindings}
             loading={onlineLoading}

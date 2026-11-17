@@ -5,6 +5,8 @@ import { splitCategoryPath } from '../lib/category-tree'
 interface BindingWorkspaceProps {
   /** 当前在绑定的站点名 */
   siteName: string
+  /** 拖拽中的落点提示，非空时替换掉头部的说明文字 */
+  hint: string
   /** 该站点的在线分类 */
   categories: SiteCategory[]
   /** siteCategoryId → 绑定的本地分类 */
@@ -29,6 +31,7 @@ interface BindingWorkspaceProps {
  */
 function BindingWorkspace({
   siteName,
+  hint,
   categories,
   bindings,
   loading,
@@ -97,7 +100,9 @@ function BindingWorkspace({
       <header className="workspace-head">
         <div className="workspace-head-text">
           <span className="workspace-title">正在从「{siteName}」绑定</span>
-          <span className="workspace-desc">拖到左侧分类上即可绑定，也可以先选中再点左侧分类</span>
+          <span className={`workspace-desc${hint ? ' is-hint' : ''}`}>
+            {hint || '拖到左侧分类上即可绑定，也可以先选中再点左侧分类'}
+          </span>
         </div>
         <Tooltip title="退出绑定">
           <Button

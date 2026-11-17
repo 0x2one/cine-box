@@ -895,25 +895,29 @@
   opacity: 0;
 }
 
-/* 分类页：映射模式左右两栏 */
+/*
+ * 分类页映射模式：容器按窗口剩余高度定高（100px = 标题栏 + 面板头，44px = 页面底部留白），
+ * 两栏行高拉满、各自内部滚动，所以两栏永远等高，页面本身也不再滚动。
+ */
 .category-body.is-binding {
   display: grid;
+  height: calc(100vh - 144px);
   /* 左栏守住树行的宽度，右栏吃掉剩余空间；窗口窄时左栏先缩，右栏仍能保持两列卡片 */
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
-  align-items: start;
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
 }
 
-/*
- * 两栏各自撑满窗口剩余高度（100px = 标题栏 + 面板头，44px = 页面底部留白），
- * 内容超出时各出一条自己的滚动条，页面本身不再滚动。
- */
-.category-body.is-binding .category-card,
-.binding-workspace {
-  max-height: calc(100vh - 144px);
+/* 左栏：树卡片吃掉整列高度，树长了就在卡片里滚 */
+.category-body.is-binding .category-body-main {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .category-body.is-binding .category-card {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -924,19 +928,9 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
-/* 拖拽提示：贴在树卡片底部，卡片滚动时也不挡视线、不改变布局高度 */
-.drop-hint {
-  position: sticky;
-  bottom: 0;
-  margin: 6px 2px 0;
-  padding: 7px 9px;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  color: var(--accent);
-  font-size: 11.5px;
-}
-
-/* 右侧映射工作区：头部固定，下面两组分类自己滚动 */
+/**
+ * 右侧映射工作区：拉满整列高度，头部固定，下面两组分类自己滚动
+ */
 .binding-workspace {
   display: flex;
   min-width: 0;
@@ -970,6 +964,12 @@
   color: var(--text-muted);
   font-size: 11.5px;
   line-height: 1.6;
+}
+
+/* 拖拽中把说明换成落点提示 */
+.workspace-desc.is-hint {
+  color: var(--accent);
+  font-weight: 500;
 }
 
 .workspace-exit {
