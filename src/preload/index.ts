@@ -34,6 +34,32 @@ const api = {
       mode: 'incremental' | 'full'
     ): Promise<SiteCategoriesApplyResult> => ipcRenderer.invoke('sites:categories:apply', id, mode)
   },
+  categories: {
+    list: (): Promise<VideoCategory[]> => ipcRenderer.invoke('categories:list'),
+    create: (input: VideoCategoryInput): Promise<VideoCategoryResult> =>
+      ipcRenderer.invoke('categories:create', input),
+    update: (id: string, input: VideoCategoryInput): Promise<VideoCategoryResult> =>
+      ipcRenderer.invoke('categories:update', id, input),
+    move: (
+      id: string,
+      targetId: string | null,
+      placement: CategoryPlacement
+    ): Promise<VideoCategoryResult> =>
+      ipcRenderer.invoke('categories:move', id, targetId, placement),
+    remove: (id: string): Promise<VideoCategoryResult> =>
+      ipcRenderer.invoke('categories:remove', id)
+  },
+  bindings: {
+    forSite: (siteId: string): Promise<SiteCategoryBinding[]> =>
+      ipcRenderer.invoke('bindings:forSite', siteId),
+    forCategory: (categoryId: string): Promise<CategoryBinding[]> =>
+      ipcRenderer.invoke('bindings:forCategory', categoryId),
+    counts: (): Promise<Record<string, number>> => ipcRenderer.invoke('bindings:counts'),
+    bind: (items: BindingTarget[], categoryId: string): Promise<BindingResult> =>
+      ipcRenderer.invoke('bindings:bind', items, categoryId),
+    unbind: (items: BindingTarget[]): Promise<BindingResult> =>
+      ipcRenderer.invoke('bindings:unbind', items)
+  },
   cache: {
     scan: (): Promise<CacheSummary> => ipcRenderer.invoke('cache:scan'),
     clear: (): Promise<CacheClearResult> => ipcRenderer.invoke('cache:clear'),

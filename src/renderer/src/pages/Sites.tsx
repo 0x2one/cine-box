@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   App,
   Button,
@@ -15,12 +15,15 @@ import {
   Tooltip
 } from 'antd'
 import {
+  CloseOutlined,
   DeleteOutlined,
   EditOutlined,
+  LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
   TagsOutlined
 } from '@ant-design/icons'
+import { splitCategoryPath } from '../lib/category-tree'
 
 interface SiteFormValues {
   name: string
@@ -42,6 +45,11 @@ const CATEGORY_ERRORS: Record<string, string> = {
   NETWORK: '连接站点失败，请检查地址或网络后重试',
   HTTP: '站点返回了错误状态，请确认采集接口是否可用',
   PARSE: '站点返回的内容无法解析，请确认采集格式是否选对'
+}
+
+const BINDING_ERRORS: Record<string, string> = {
+  INVALID_INPUT: '绑定信息已失效，请刷新后重试',
+  NOT_FOUND: '分类已被删除，请重新获取后重试'
 }
 
 const FORMAT_OPTIONS: { value: SiteFormat; label: string }[] = [
@@ -71,7 +79,16 @@ function isHttpAddress(value: string): boolean {
 }
 
 /** 控制台「站点」分区：采集站点以卡片形式展示，支持新增、编辑与删除 */
-function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX.Element {
+function SitesPanel({
+  title,
+  desc,
+  onStartBinding
+}: {
+  title: string
+  desc: string
+  /** 跳转到分类页，把该站点的在线分类拖到本地分类上完成绑定 */
+  onStartBinding: (site: { id: string; name: string }) => void
+}): React.JSX.Element {
   const { message } = App.useApp()
   const [sites, setSites] = useState<Site[]>([])
   const [loading, setLoading] = useState(true)
@@ -87,6 +104,9 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
   const [categoriesError, setCategoriesError] = useState('')
   /** 「重新获取」是否进行中 */
   const [refreshing, setRefreshing] = useState(false)
+  /** 当前站点的绑定关系：siteCategoryId → 绑定的本地分类 */
+  const [bindings, setBindings] = useState<Map<string, SiteCategoryBinding>>(new Map())
+  const [unbinding, setUnbinding] = useState(false)
   /** 非空表示「分类有变更」确认弹窗打开，并记录待写入的站点与差异 */
   const [pendingSite, setPendingSite] = useState<Site | null>(null)
   const [pendingDiff, setPendingDiff] = useState<SiteCategoryDiff | null>(null)
@@ -181,6 +201,13 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
       .catch(() => message.error('删除失败，请重试'))
   }
 
+  const loadBindings = (siteId: string): void => {
+    void window.api.bindings
+      .forSite(siteId)
+      .then((rows) => setBindings(new Map(rows.map((row) => [row.siteCategoryId, row]))))
+      .catch(() => {})
+  }
+
   const loadCategories = (site: Site): void => {
     const requestId = categoryRequest.current + 1
     categoryRequest.current = requestId
@@ -188,6 +215,7 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
     setCategories([])
     setCategoriesError('')
     setCategoriesLoading(true)
+    setBindings(new Map())
     void window.api.sites
       .categories(site.id)
       .then((result) => {
@@ -204,6 +232,7 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
       .finally(() => {
         if (categoryRequest.current === requestId) setCategoriesLoading(false)
       })
+    loadBindings(site.id)
   }
 
   /** 关闭「分类有变更」确认弹窗 */
@@ -220,6 +249,8 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
     setCategoriesError('')
     setCategoriesLoading(false)
     setRefreshing(false)
+    setBindings(new Map())
+    setUnbinding(false)
     closeDiff()
   }
 
@@ -272,6 +303,8 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
           return
         }
         setCategories(result.categories ?? [])
+        // 全量更新可能删掉已绑定的在线分类，绑定关系会跟着级联清理，这里重新拉一次
+        loadBindings(pendingSite.id)
         closeDiff()
         message.success(mode === 'full' ? '已按全量更新分类' : '已按增量更新分类')
       })
@@ -279,9 +312,50 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
       .finally(() => setApplying(null))
   }
 
+  /** 已绑定在线分类对应的采集端 ID，用来说明全量更新会解绑哪些 */
+  const boundSourceIds = useMemo(() => {
+    const sourceById = new Map(categories.map((item) => [item.id, item.sourceId]))
+    const result = new Set<string>()
+    for (const id of bindings.keys()) {
+      const sourceId = sourceById.get(id)
+      if (sourceId) result.add(sourceId)
+    }
+    return result
+  }, [categories, bindings])
+
+  /** 全量更新会连带解绑的数量 */
+  const removedBoundCount = pendingDiff
+    ? pendingDiff.removed.filter((item) => boundSourceIds.has(item.sourceId)).length
+    : 0
+
+  /** 弹窗里只做单条解绑；绑定在分类页的映射模式里完成 */
+  const unbindOne = (siteCategoryId: string): void => {
+    if (!categorySite) return
+    setUnbinding(true)
+    void window.api.bindings
+      .unbind([{ siteId: categorySite.id, siteCategoryId }])
+      .then((result) => {
+        if (!result.ok) {
+          message.error(BINDING_ERRORS[result.error ?? ''] ?? '解绑失败，请重试')
+          return
+        }
+        loadBindings(categorySite.id)
+        message.success('已解绑')
+      })
+      .catch(() => message.error('解绑失败，请重试'))
+      .finally(() => setUnbinding(false))
+  }
+
+  const startBinding = (): void => {
+    if (!categorySite) return
+    const target = { id: categorySite.id, name: siteLabel(categorySite) }
+    closeCategories()
+    onStartBinding(target)
+  }
+
   return (
     <>
-      <div className="settings-panel-head sites-head-row">
+      <div className="settings-panel-head has-actions">
         <h2 className="settings-panel-title">{title}</h2>
         <span className="settings-panel-sep">·</span>
         <p className="settings-panel-desc">
@@ -458,6 +532,13 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
             >
               重新获取
             </Button>
+            <Button
+              type="primary"
+              disabled={!categorySite || categories.length === 0}
+              onClick={startBinding}
+            >
+              绑定
+            </Button>
             <Button onClick={closeCategories}>关闭</Button>
           </Space>
         }
@@ -487,14 +568,46 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
           </div>
         ) : (
           <>
-            <div className="categories-summary">共 {categories.length} 个分类</div>
-            <div className="categories-list">
-              {categories.map((category) => (
-                <span className="category-chip" key={category.id} title={`ID ${category.sourceId}`}>
-                  {category.name}
-                </span>
-              ))}
+            <div className="binding-summary">
+              共 {categories.length} 个分类 · 已绑定 {bindings.size} 个
             </div>
+            <ul className="binding-list">
+              {categories.map((category) => {
+                const bound = bindings.get(category.id)
+                const path = bound ? splitCategoryPath(bound.categoryPath) : null
+                return (
+                  <li className={`binding-row${bound ? ' is-bound' : ''}`} key={category.id}>
+                    <span className="binding-name" title={`ID ${category.sourceId}`}>
+                      {category.name}
+                    </span>
+                    {bound && path ? (
+                      <span className="binding-state is-bound" title={bound.categoryPath}>
+                        {path.parent && (
+                          <span className="binding-path-parent">{path.parent} / </span>
+                        )}
+                        <span className="binding-path-leaf">{path.leaf}</span>
+                      </span>
+                    ) : (
+                      <span className="binding-state">未绑定</span>
+                    )}
+                    {bound && <LinkOutlined className="binding-mark" aria-hidden />}
+                    {bound && (
+                      <Tooltip title="解除绑定">
+                        <button
+                          type="button"
+                          className="binding-unbind"
+                          disabled={unbinding}
+                          onClick={() => unbindOne(category.id)}
+                          aria-label={`解除「${category.name}」的绑定`}
+                        >
+                          <CloseOutlined />
+                        </button>
+                      </Tooltip>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
           </>
         )}
       </Modal>
@@ -529,7 +642,7 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
         {pendingDiff && (
           <div className="category-diff">
             <p className="category-diff-hint">
-              增量更新只新增和改名，保留库中多出来的分类；全量更新以本次抓取结果为准，会删除多出来的分类。
+              增量更新只新增和改名，保留库中多出来的分类；全量更新以本次抓取结果为准，会删除多出来的分类，已绑定的分类会一并解除绑定。
             </p>
             {pendingDiff.added.length > 0 && (
               <section className="category-diff-section">
@@ -563,7 +676,10 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
             )}
             {pendingDiff.removed.length > 0 && (
               <section className="category-diff-section">
-                <h4>本次未返回 {pendingDiff.removed.length} 个（全量更新会删除）</h4>
+                <h4>
+                  本次未返回 {pendingDiff.removed.length} 个（全量更新会删除
+                  {removedBoundCount > 0 ? `，其中 ${removedBoundCount} 个已绑定` : ''}）
+                </h4>
                 <div className="categories-list">
                   {pendingDiff.removed.map((item) => (
                     <span
@@ -572,6 +688,9 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
                       title={`ID ${item.sourceId}`}
                     >
                       {item.name}
+                      {boundSourceIds.has(item.sourceId) && (
+                        <span className="category-chip-flag">已绑定</span>
+                      )}
                     </span>
                   ))}
                 </div>

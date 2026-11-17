@@ -413,7 +413,7 @@
 
 /* ── 控制台：站点 ── */
 
-.settings-panel-head.sites-head-row {
+.settings-panel-head.has-actions {
   align-items: center;
 }
 
@@ -632,6 +632,536 @@
 .sites-empty-hint {
   color: var(--text-faint);
   font-size: 12px;
+}
+
+/* ── 控制台：视频分类 ── */
+
+.category-tip {
+  margin: 0 2px 10px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.category-card {
+  padding: 6px 4px;
+}
+
+.category-tree {
+  color: var(--text);
+  background: transparent;
+}
+
+/* 整行当行：展开箭头的点击区域也跟着行高走 */
+.category-tree .ant-tree-treenode {
+  width: 100%;
+  align-items: center;
+  padding: 0;
+}
+
+.category-tree .ant-tree-switcher {
+  display: flex;
+  width: 20px;
+  height: 34px;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.category-tree .ant-tree-indent-unit {
+  width: 18px;
+}
+
+.category-tree .ant-tree-node-content-wrapper {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.category-tree .ant-tree-node-content-wrapper:hover {
+  background: var(--surface-muted);
+}
+
+/* 行内不再做选中态，点击整行不改变样式 */
+.category-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+  background: transparent;
+}
+
+.category-row {
+  display: flex;
+  min-width: 0;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+}
+
+.category-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-count {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 操作按钮悬停才出现，避免每一行都很吵 */
+.category-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.category-row:hover .category-actions,
+.category-actions:focus-within {
+  opacity: 1;
+}
+
+/* ── 控制台：分类绑定 ── */
+
+/* 树行上的绑定数量徽标 */
+.category-bound {
+  display: inline-flex;
+  height: 19px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  transition: background-color 120ms ease;
+}
+
+.category-bound:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.category-bound .anticon {
+  font-size: 11px;
+}
+
+/* 站点分类弹窗：卡片网格，列数随宽度自适应 */
+.binding-summary {
+  margin-bottom: 10px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.binding-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+  max-height: 420px;
+  margin: 0;
+  overflow-y: auto;
+  padding: 2px 6px 8px 2px;
+  list-style: none;
+}
+
+.binding-row {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 28px 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.binding-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+/* 已绑定的卡片：淡强调色底 + 强调色描边，一眼能扫出哪些已经归好类 */
+.binding-row.is-bound {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.binding-row.is-bound:hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+}
+
+.binding-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binding-state {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binding-state.is-bound {
+  color: var(--accent);
+}
+
+/* 上级用弱化色，自身用强调色，路径长了一层层读 */
+.binding-path-parent {
+  color: var(--text-faint);
+}
+
+.binding-path-leaf {
+  color: var(--accent);
+}
+
+/* 已绑定的常驻链接角标，悬停时让位给 × */
+.binding-mark {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  font-size: 11px;
+  opacity: 0.8;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.binding-row:hover .binding-mark,
+.binding-row:focus-within .binding-mark {
+  opacity: 0;
+}
+
+/* 悬停才出现的圆形 × 解绑按钮，绝对定位避免行内容跳动 */
+.binding-unbind {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  opacity: 0;
+  cursor: default;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.binding-row:hover .binding-unbind,
+.binding-unbind:focus-visible {
+  opacity: 1;
+}
+
+.binding-unbind:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.binding-unbind:disabled {
+  opacity: 0;
+}
+
+/* 分类页：映射模式左右两栏 */
+.category-body.is-binding {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.category-body.is-binding .category-card {
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
+}
+
+/* 拖拽落点高亮 */
+.category-row.is-drop-target {
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.drop-hint {
+  margin: 8px 2px 0;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+/* 右侧映射工作区 */
+.binding-workspace {
+  min-width: 0;
+}
+
+.workspace-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-head-text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workspace-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workspace-desc {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.workspace-exit {
+  flex: 0 0 auto;
+  margin: -4px -6px 0 0;
+  color: var(--text-faint);
+}
+
+.workspace-exit:hover {
+  color: var(--text);
+}
+
+/* 两组分类之间留白，整体高度跟着内容走，不做内部滚动 */
+.workspace-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 14px 14px;
+}
+
+.workspace-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.workspace-group-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-faint);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.workspace-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: grab;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease;
+}
+
+.workspace-item:hover {
+  background: var(--surface-muted);
+}
+
+.workspace-item:active {
+  cursor: grabbing;
+}
+
+.workspace-item.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.workspace-item.is-dragging {
+  opacity: 0.45;
+}
+
+.workspace-item-name {
+  overflow: hidden;
+  flex: 1;
+  color: var(--text);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-item-path {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.workspace-path-parent {
+  color: var(--text-faint);
+}
+
+.workspace-item-id {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.workspace-unbind {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 10px;
+  opacity: 0;
+  cursor: default;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.workspace-item:hover .workspace-unbind,
+.workspace-unbind:focus-visible {
+  opacity: 1;
+}
+
+.workspace-unbind:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.workspace-empty {
+  margin: 0;
+  padding: 10px 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+/* 分类页的只读绑定明细 */
+.binding-groups {
+  display: flex;
+  max-height: 380px;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.binding-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.binding-group-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.binding-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.binding-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 2px 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.binding-item:last-child {
+  border-bottom: 0;
+}
+
+.binding-item-name {
+  overflow: hidden;
+  flex: 1;
+  color: var(--text);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binding-item-id {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* 全量更新时会解绑的分类角标 */
+.category-chip-flag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
 }
 
 /* ── 设置页 ── */

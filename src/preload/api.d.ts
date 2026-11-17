@@ -168,6 +168,105 @@ interface SitesApi {
   applyCategories: (id: string, mode: 'incremental' | 'full') => Promise<SiteCategoriesApplyResult>
 }
 
+/** 本地视频分类：树形结构，parentId 为空表示一级分类 */
+interface VideoCategory {
+  /** 主进程生成的 32 位十六进制 ID */
+  id: string
+  /** 上级分类 ID，一级分类为 null */
+  parentId: string | null
+  name: string
+  /** 同级排序，从 0 开始连续编号 */
+  sortOrder: number
+  /** 创建 / 更新时间，ISO 8601 */
+  createdAt: string
+  updatedAt: string
+}
+
+interface VideoCategoryInput {
+  name: string
+  /** 上级分类：新增时不传即一级分类；编辑时不传表示保持原样，传 null 表示移到一级分类 */
+  parentId?: string | null
+}
+
+/** 拖拽落点：目标之前 / 成为目标的子分类 / 目标之后 */
+type CategoryPlacement = 'before' | 'inside' | 'after'
+
+interface VideoCategoryResult {
+  ok: boolean
+  /** INVALID_NAME：名称为空；INVALID_PARENT：上级不存在；INVALID_PLACEMENT：落点不合法；
+   * DUPLICATE_NAME：同级同名；CYCLE：移动到自己的子分类下；NOT_FOUND：分类已被删除 */
+  error?:
+    | 'INVALID_NAME'
+    | 'INVALID_PARENT'
+    | 'INVALID_PLACEMENT'
+    | 'DUPLICATE_NAME'
+    | 'CYCLE'
+    | 'NOT_FOUND'
+  /** 变更后的完整分类列表，已按同级顺序排好 */
+  categories?: VideoCategory[]
+}
+
+interface CategoriesApi {
+  list: () => Promise<VideoCategory[]>
+  create: (input: VideoCategoryInput) => Promise<VideoCategoryResult>
+  update: (id: string, input: VideoCategoryInput) => Promise<VideoCategoryResult>
+  /** 拖拽移动：改变上级并插入到指定位置 */
+  move: (
+    id: string,
+    targetId: string | null,
+    placement: CategoryPlacement
+  ) => Promise<VideoCategoryResult>
+  /** 删除分类及其所有子分类 */
+  remove: (id: string) => Promise<VideoCategoryResult>
+}
+
+/** 绑定定位：站点 + 在线分类，唯一键就是这两个字段的组合 */
+interface BindingTarget {
+  siteId: string
+  siteCategoryId: string
+}
+
+/** 站点分类弹窗用：某个在线分类绑到了哪个本地分类 */
+interface SiteCategoryBinding {
+  siteCategoryId: string
+  /** 绑定的本地分类 */
+  categoryId: string
+  /** 本地分类完整路径，如「电影 / 动作片」 */
+  categoryPath: string
+}
+
+/** 分类页只读列表用：某个本地分类收了哪些在线分类 */
+interface CategoryBinding {
+  id: string
+  siteId: string
+  /** 站点显示名（display 为空时取 name） */
+  siteName: string
+  siteCategoryId: string
+  /** 采集接口返回的分类 ID */
+  sourceId: string
+  /** 在线分类名，读取时 join 取最新值 */
+  name: string
+  createdAt: string
+}
+
+interface BindingResult {
+  ok: boolean
+  /** INVALID_INPUT：入参不合法，或 siteId 与在线分类对不上；NOT_FOUND：本地分类 / 在线分类已被删除 */
+  error?: 'INVALID_INPUT' | 'NOT_FOUND'
+}
+
+interface BindingsApi {
+  /** 某个站点已绑定的在线分类 */
+  forSite: (siteId: string) => Promise<SiteCategoryBinding[]>
+  /** 某个本地分类已绑定的在线分类 */
+  forCategory: (categoryId: string) => Promise<CategoryBinding[]>
+  /** 每个本地分类的绑定数量，未绑定的不出现 */
+  counts: () => Promise<Record<string, number>>
+  /** 把一批在线分类绑到指定本地分类，已绑定的直接改绑 */
+  bind: (items: BindingTarget[], categoryId: string) => Promise<BindingResult>
+  unbind: (items: BindingTarget[]) => Promise<BindingResult>
+}
+
 type CachePhase = 'enumerate' | 'measure' | 'clear'
 
 interface CacheProgress {
@@ -237,6 +336,8 @@ interface Api {
   app: { info: () => Promise<AppInfo> }
   settings: SettingsApi
   sites: SitesApi
+  categories: CategoriesApi
+  bindings: BindingsApi
   cache: CacheApi
   updater: UpdaterApi
   windowControls: WindowControls

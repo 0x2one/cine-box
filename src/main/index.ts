@@ -14,6 +14,12 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createAppSettingsStore, DEFAULT_SHOW_SHORTCUT } from './app-settings'
 import { createCacheManager } from './app-cache'
+import { createBindingStore, type BindingTarget } from './binding-store'
+import {
+  createCategoryStore,
+  type CategoryPlacement,
+  type VideoCategoryInput
+} from './category-store'
 import { fetchSiteCategories } from './site-categories'
 import {
   createSiteStore,
@@ -33,8 +39,11 @@ let isQuitting = false
 let registeredShortcut: string | null = null
 
 const appSettingsStore = createAppSettingsStore()
-// 站点数据存 SQLite：userData/Data/cine-box.db
-const siteStore = createSiteStore(join(app.getPath('userData'), 'Data', 'cine-box.db'))
+// 应用数据存 SQLite：userData/Data/cine-box.db，站点与视频分类共用这一个库
+const databaseFile = join(app.getPath('userData'), 'Data', 'cine-box.db')
+const siteStore = createSiteStore(databaseFile)
+const categoryStore = createCategoryStore(databaseFile)
+const bindingStore = createBindingStore(databaseFile)
 /** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
 const pendingCategoryRefresh = new Map<string, { categories: SiteCategoryInput[]; at: number }>()
 const PENDING_CATEGORY_TTL = 5 * 60 * 1000
@@ -397,6 +406,46 @@ ipcMain.handle('sites:categories:apply', (_event, id: string, mode: CategoryUpda
   return { ok: true, categories: siteStore.applyCategories(site.id, pending.categories, mode) }
 })
 
+/* ── IPC：视频分类 ── */
+
+ipcMain.handle('categories:list', () => categoryStore.list())
+
+ipcMain.handle('categories:create', (_event, input: VideoCategoryInput) =>
+  categoryStore.create(input)
+)
+
+ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInput) =>
+  categoryStore.update(String(id), input)
+)
+
+ipcMain.handle(
+  'categories:move',
+  (_event, id: string, targetId: string | null, placement: CategoryPlacement) =>
+    categoryStore.move(
+      String(id),
+      targetId === null || targetId === undefined ? null : String(targetId),
+      placement
+    )
+)
+
+ipcMain.handle('categories:remove', (_event, id: string) => categoryStore.remove(String(id)))
+
+/* ── IPC：在线分类与本地分类的绑定 ── */
+
+ipcMain.handle('bindings:forSite', (_event, siteId: string) => bindingStore.forSite(String(siteId)))
+
+ipcMain.handle('bindings:forCategory', (_event, categoryId: string) =>
+  bindingStore.forCategory(String(categoryId))
+)
+
+ipcMain.handle('bindings:counts', () => bindingStore.counts())
+
+ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: string) =>
+  bindingStore.bind(items, String(categoryId))
+)
+
+ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => bindingStore.unbind(items))
+
 /* ── IPC：应用信息 ── */
 
 ipcMain.handle('app:info', () => ({
@@ -455,6 +504,8 @@ if (!gotTheLock) {
 
     await appSettingsStore.init().catch(() => {})
     await siteStore.init().catch(() => {})
+    await categoryStore.init().catch(() => {})
+    await bindingStore.init().catch(() => {})
 
     const savedShortcut = appSettingsStore.get().showShortcut
     if (savedShortcut) tryRegisterAccel(savedShortcut)
@@ -480,6 +531,8 @@ if (!gotTheLock) {
     if (app.isReady()) globalShortcut.unregisterAll()
     // 关闭数据库连接，触发 WAL checkpoint 并清掉 -wal / -shm 附属文件
     siteStore.close()
+    categoryStore.close()
+    bindingStore.close()
   })
 
   app.on('window-all-closed', () => {

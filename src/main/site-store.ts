@@ -1,7 +1,6 @@
 import { randomUUID } from 'crypto'
-import { mkdirSync } from 'fs'
-import { dirname } from 'path'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
+import { closeDatabase, inTransaction, openDatabase } from './database'
 
 /** 采集接口输出格式 */
 export type SiteFormat = 'xml' | 'json'
@@ -291,7 +290,7 @@ function validateSiteInput(
   }
 }
 
-/** 站点数据存 SQLite，file 为数据库文件绝对路径 */
+/** 站点数据存 SQLite，file 为数据库文件绝对路径（与其它模块共用同一个连接） */
 export function createSiteStore(file: string): SiteStore {
   let db: DatabaseSync | null = null
 
@@ -306,18 +305,6 @@ export function createSiteStore(file: string): SiteStore {
       .all()
       .map(rowToSite)
       .filter((site): site is Site => site !== null)
-  }
-
-  function withTransaction(work: (connection: DatabaseSync) => void): void {
-    const connection = database()
-    connection.exec('BEGIN')
-    try {
-      work(connection)
-      connection.exec('COMMIT')
-    } catch (error) {
-      connection.exec('ROLLBACK')
-      throw error
-    }
   }
 
   function listCategories(siteId: string): SiteCategoryRecord[] {
@@ -358,7 +345,7 @@ export function createSiteStore(file: string): SiteStore {
     const sourceIds = [...incoming.keys()]
     const now = new Date().toISOString()
 
-    withTransaction((connection) => {
+    inTransaction(database(), (connection) => {
       const upsert = connection.prepare(UPSERT_CATEGORY)
       for (const [sourceId, name] of incoming) {
         upsert.run(randomUUID().replace(/-/g, ''), siteId, sourceId, name, now, now)
@@ -382,21 +369,12 @@ export function createSiteStore(file: string): SiteStore {
   return {
     init: async () => {
       if (db) return
-      mkdirSync(dirname(file), { recursive: true })
-      const database = new DatabaseSync(file, { timeout: 5000 })
+      const connection = openDatabase(file)
       try {
-        // WAL 兼顾读写并发与崩溃恢复；NORMAL 在 WAL 下不会丢已提交事务
-        database.exec('PRAGMA journal_mode = WAL')
-        database.exec('PRAGMA synchronous = NORMAL')
-        database.exec(CREATE_TABLE)
-        db = database
+        connection.exec(CREATE_TABLE)
+        db = connection
       } catch (error) {
         db = null
-        try {
-          database.close()
-        } catch {
-          // 打开阶段失败的连接无需再处理
-        }
         throw error
       }
     },
@@ -450,7 +428,7 @@ export function createSiteStore(file: string): SiteStore {
     },
     remove: (id) => {
       let removed = false
-      withTransaction((connection) => {
+      inTransaction(database(), (connection) => {
         // 显式清理子表，避免依赖连接上的 foreign_keys 开关
         connection.prepare('DELETE FROM site_categories WHERE site_id = ?').run(id)
         const result = connection.prepare('DELETE FROM sites WHERE id = ?').run(id)
@@ -462,12 +440,7 @@ export function createSiteStore(file: string): SiteStore {
     previewCategories,
     applyCategories,
     close: () => {
-      if (!db) return
-      try {
-        db.close()
-      } catch {
-        // 已关闭或关闭失败都不影响退出流程
-      }
+      closeDatabase(file)
       db = null
     }
   }
