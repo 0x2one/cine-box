@@ -281,9 +281,14 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
 
   return (
     <>
-      <div className="sites-header">
-        <div className="sites-head">
-          <h2 className="settings-panel-title">{title}</h2>
+      <div className="settings-panel-head sites-head-row">
+        <h2 className="settings-panel-title">{title}</h2>
+        <span className="settings-panel-sep">·</span>
+        <p className="settings-panel-desc">
+          {desc}
+          <span className="sites-count">共 {sites.length} 个站点</span>
+        </p>
+        <div className="settings-panel-actions">
           <Tooltip title="新增站点">
             <Button
               type="primary"
@@ -293,10 +298,6 @@ function SitesPanel({ title, desc }: { title: string; desc: string }): React.JSX
             />
           </Tooltip>
         </div>
-        <p className="settings-panel-desc">
-          {desc}
-          <span className="sites-count">共 {sites.length} 个站点</span>
-        </p>
       </div>
 
       {loading ? (

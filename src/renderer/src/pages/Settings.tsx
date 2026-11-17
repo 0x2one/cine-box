@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { App, Button, Popconfirm, Progress, Segmented, Spin, Switch, Tooltip } from 'antd'
 import {
   ArrowLeftOutlined,
-  BgColorsOutlined,
   CheckOutlined,
   DeleteOutlined,
   HddOutlined,
@@ -21,7 +20,7 @@ import type { ThemeMode } from '../theme/appearance'
 import { formatBytes } from '../utils/format'
 import { AboutPanel } from './About'
 
-type SettingsSection = 'preferences' | 'shortcut' | 'appearance' | 'storage' | 'about'
+type SettingsSection = 'preferences' | 'shortcut' | 'storage' | 'about'
 
 const NAV_ITEMS: {
   key: SettingsSection
@@ -30,15 +29,13 @@ const NAV_ITEMS: {
 }[] = [
   { key: 'preferences', label: '偏好设置', icon: SettingOutlined },
   { key: 'shortcut', label: '快捷键', icon: ThunderboltOutlined },
-  { key: 'appearance', label: '外观', icon: BgColorsOutlined },
   { key: 'storage', label: '存储', icon: HddOutlined },
   { key: 'about', label: '关于', icon: InfoCircleOutlined }
 ]
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
-  preferences: { title: '偏好设置', desc: '启动、关闭与更新行为' },
+  preferences: { title: '偏好设置', desc: '启动、关闭、更新与外观' },
   shortcut: { title: '快捷键', desc: '在任何应用中唤起映盒剧场' },
-  appearance: { title: '外观', desc: '明暗主题与强调色' },
   storage: { title: '存储', desc: '本地缓存占用与清理' },
   about: { title: '关于', desc: '应用介绍与软件更新' }
 }
@@ -117,20 +114,63 @@ function ToggleRow({
 }
 
 function PreferencesPanel(): React.JSX.Element {
+  const { mode, setMode, accent, setAccent } = useTheme()
+
   return (
-    <SettingsCard>
-      <ToggleRow field="openAtLogin" title="开机自启" description="登录系统后自动启动映盒剧场" />
-      <ToggleRow
-        field="closeToTray"
-        title="关闭时最小化到托盘"
-        description="点击关闭按钮时隐藏到托盘，可从托盘图标重新打开"
-      />
-      <ToggleRow
-        field="autoDownload"
-        title="自动下载更新"
-        description="检测到新版本后自动下载，安装前仍会征求你的确认"
-      />
-    </SettingsCard>
+    <>
+      {/* 外观合并进偏好设置：主题、主题色、界面语言排在启动 / 关闭等开关之前 */}
+      <SettingsCard>
+        <SettingRow title="主题" description="跟随系统时，明暗会随操作系统自动切换">
+          <Segmented
+            value={mode}
+            onChange={(value) => setMode(value as ThemeMode)}
+            options={[
+              { value: 'system', label: '跟随系统', icon: <LaptopOutlined /> },
+              { value: 'light', label: '浅色', icon: <SunOutlined /> },
+              { value: 'dark', label: '深色', icon: <MoonOutlined /> }
+            ]}
+          />
+        </SettingRow>
+        <SettingRow stacked title="强调色" description="按钮、选中态与链接使用的主色">
+          <div className="accent-swatches">
+            {ACCENTS.map((item) => {
+              const selected = item.key === accent.key
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`accent-swatch${selected ? ' is-active' : ''}`}
+                  style={{ background: item.light }}
+                  title={item.name}
+                  aria-label={item.name}
+                  aria-pressed={selected}
+                  onClick={() => setAccent(item.key)}
+                >
+                  {selected && <CheckOutlined />}
+                </button>
+              )
+            })}
+          </div>
+        </SettingRow>
+        <SettingRow title="界面语言" description="映盒剧场仅提供简体中文界面">
+          <span className="settings-static">简体中文</span>
+        </SettingRow>
+      </SettingsCard>
+
+      <SettingsCard>
+        <ToggleRow field="openAtLogin" title="开机自启" description="登录系统后自动启动映盒剧场" />
+        <ToggleRow
+          field="closeToTray"
+          title="关闭时最小化到托盘"
+          description="点击关闭按钮时隐藏到托盘，可从托盘图标重新打开"
+        />
+        <ToggleRow
+          field="autoDownload"
+          title="自动下载更新"
+          description="检测到新版本后自动下载，安装前仍会征求你的确认"
+        />
+      </SettingsCard>
+    </>
   )
 }
 
@@ -308,52 +348,6 @@ function ShortcutPanel(): React.JSX.Element {
           </div>
         </>
       )}
-    </SettingsCard>
-  )
-}
-
-/* ── 外观 ── */
-
-function AppearancePanel(): React.JSX.Element {
-  const { mode, setMode, accent, setAccent } = useTheme()
-
-  return (
-    <SettingsCard>
-      <SettingRow title="主题" description="跟随系统时，明暗会随操作系统自动切换">
-        <Segmented
-          value={mode}
-          onChange={(value) => setMode(value as ThemeMode)}
-          options={[
-            { value: 'system', label: '跟随系统', icon: <LaptopOutlined /> },
-            { value: 'light', label: '浅色', icon: <SunOutlined /> },
-            { value: 'dark', label: '深色', icon: <MoonOutlined /> }
-          ]}
-        />
-      </SettingRow>
-      <SettingRow stacked title="主题色" description="默认使用 Logo 的蓝色，可切换为其它强调色">
-        <div className="accent-swatches">
-          {ACCENTS.map((item) => {
-            const selected = item.key === accent.key
-            return (
-              <button
-                key={item.key}
-                type="button"
-                className={`accent-swatch${selected ? ' is-active' : ''}`}
-                style={{ background: item.light }}
-                title={item.name}
-                aria-label={item.name}
-                aria-pressed={selected}
-                onClick={() => setAccent(item.key)}
-              >
-                {selected && <CheckOutlined />}
-              </button>
-            )
-          })}
-        </div>
-      </SettingRow>
-      <SettingRow title="界面语言" description="映盒剧场仅提供简体中文界面">
-        <span className="settings-static">简体中文</span>
-      </SettingRow>
     </SettingsCard>
   )
 }
@@ -595,16 +589,18 @@ function Settings({ onBack }: { onBack: () => void }): React.JSX.Element {
   const meta = SECTION_META[section]
 
   return (
-    <div className="page-inner">
-      <button type="button" className="page-back" onClick={onBack}>
-        <ArrowLeftOutlined />
-        <span>返回</span>
-      </button>
-      <h1 className="page-title">设置</h1>
-      <p className="page-subtitle">偏好设置、快捷键、外观与存储</p>
+    <div className="page-inner page-inner--rail">
+      {/* 视觉上不再显示页面大标题，保留给屏幕阅读器 */}
+      <h1 className="visually-hidden">设置</h1>
 
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="设置分类">
+          <button type="button" className="settings-back" onClick={onBack}>
+            <ArrowLeftOutlined />
+            <span>返回</span>
+          </button>
+          <div className="settings-nav-divider" />
+
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon
             const active = item.key === section
@@ -625,11 +621,11 @@ function Settings({ onBack }: { onBack: () => void }): React.JSX.Element {
         <div className="settings-panel">
           <div className="settings-panel-head">
             <h2 className="settings-panel-title">{meta.title}</h2>
+            <span className="settings-panel-sep">·</span>
             <p className="settings-panel-desc">{meta.desc}</p>
           </div>
           {section === 'preferences' && <PreferencesPanel />}
           {section === 'shortcut' && <ShortcutPanel />}
-          {section === 'appearance' && <AppearancePanel />}
           {section === 'storage' && <StoragePanel />}
           {section === 'about' && <AboutPanel />}
         </div>
