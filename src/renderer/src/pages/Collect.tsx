@@ -373,17 +373,6 @@ function CollectPanel({
                   >
                     定时
                   </Button>
-                  {busy && (
-                    <Tooltip title="取消当前采集 / 排队">
-                      <Button
-                        size="small"
-                        danger
-                        icon={<StopOutlined />}
-                        loading={cancelling}
-                        onClick={() => current && void cancelCollect(site.id, current)}
-                      />
-                    </Tooltip>
-                  )}
                   <Button
                     type="link"
                     size="small"
@@ -392,6 +381,19 @@ function CollectPanel({
                   >
                     进度
                   </Button>
+                  {/* 取消按钮排在「进度」右边，采集中才出现，避免误点 */}
+                  {busy && (
+                    <Tooltip title="取消当前采集 / 排队">
+                      <Button
+                        size="small"
+                        danger
+                        icon={<StopOutlined />}
+                        loading={cancelling}
+                        aria-label="取消当前采集 / 排队"
+                        onClick={() => current && void cancelCollect(site.id, current)}
+                      />
+                    </Tooltip>
+                  )}
                 </div>
               </article>
             )
