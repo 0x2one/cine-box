@@ -2789,6 +2789,14 @@
   margin-bottom: 14px;
 }
 
+/* 字段标题行：提示跟着「封面」一起走，不再挤在候选图旁边 */
+.video-edit-field-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .video-edit-label {
   color: var(--text);
   font-size: 12.5px;

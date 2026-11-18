@@ -489,9 +489,16 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
       <Modal
         title="编辑视频信息"
         open={editOpen}
-        width={580}
+        width={760}
         onCancel={() => setEditOpen(false)}
         destroyOnHidden
+        classNames={{ body: 'video-edit-scroll' }}
+        afterOpenChange={(open) => {
+          // 弹窗主体是复用的，上次滚到哪就停在哪，重新打开时拉回顶部
+          if (!open) return
+          const scroller = document.querySelector('.video-edit-scroll')
+          if (scroller instanceof HTMLElement) scroller.scrollTop = 0
+        }}
         styles={{ body: { maxHeight: 'calc(100vh - 260px)', overflowY: 'auto', paddingRight: 6 } }}
         footer={[
           editTarget?.edited ? (
@@ -515,7 +522,14 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
       >
         <Spin spinning={editLoading}>
           <Form form={form} layout="vertical" className="video-edit-form" requiredMark={false}>
-            <Form.Item label="名称" extra="名称来自采集、参与合并去重，不可修改">
+            <Form.Item
+              label={
+                <span className="video-edit-field-head">
+                  <span>名称</span>
+                  <span className="video-edit-hint">名称来自采集、参与合并去重，不可修改</span>
+                </span>
+              }
+            >
               <Input value={editTarget?.name ?? ''} disabled />
             </Form.Item>
             <div className="video-edit-row">
@@ -534,7 +548,14 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
             </Form.Item>
 
             <div className="video-edit-field">
-              <span className="video-edit-label">封面</span>
+              <div className="video-edit-field-head">
+                <span className="video-edit-label">封面</span>
+                {coverOptions.length <= 1 && (
+                  <span className="video-edit-hint">
+                    这个视频只有主来源的预览图，接入更多站点后可以在这里换图
+                  </span>
+                )}
+              </div>
               <div className="video-cover-picker">
                 <button
                   type="button"
@@ -559,11 +580,6 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                     <span className="video-cover-site">{option.siteName}</span>
                   </button>
                 ))}
-                {coverOptions.length <= 1 && (
-                  <span className="video-edit-hint">
-                    这个视频只有主来源的预览图，接入更多站点后可以在这里换图
-                  </span>
-                )}
               </div>
             </div>
 
