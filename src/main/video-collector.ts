@@ -289,7 +289,10 @@ export function createVideoCollector(options: {
       return
     }
 
-    progress = store.updateProgress(progress.id, { status: 'running', error: '' }) ?? progress
+    // 继续采集时清掉上一次的结束时间，否则界面会一直显示旧的「结束」
+    progress =
+      store.updateProgress(progress.id, { status: 'running', error: '', finishedAt: '' }) ??
+      progress
     emit(progress)
     log('info', item, '开始采集', item.origin === 'schedule' ? '定时触发' : '手动触发')
 

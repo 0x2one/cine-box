@@ -24,9 +24,14 @@ import {
 import dayjs, { type Dayjs } from 'dayjs'
 import { formatDateTime } from '../utils/format'
 import {
+  COLLECT_ERRORS,
   COLLECT_STATUS_COLOR,
   COLLECT_STATUS_TEXT,
+  MANUAL_CACHE_DETAIL_KEY,
+  collectProgressKey,
   formatScheduleTiming,
+  isResumableStatus,
+  manualCacheDetail,
   siteLabel
 } from '../utils/collect'
 
@@ -50,9 +55,6 @@ const INTERVAL_OPTIONS = [
   { value: 1440, label: '24 小时' }
 ]
 
-/** 上次手动采集是否勾了「同时生成详情缓存」，没记录过就按勾选处理 */
-const MANUAL_CACHE_DETAIL_KEY = 'collect-manual-cache-detail'
-
 interface ManualValues {
   mode: CollectMode
   fetchRange: FetchRange
@@ -70,14 +72,6 @@ interface ScheduleValues {
   cacheDetail: boolean
 }
 
-const COLLECT_ERRORS: Record<string, string> = {
-  ALREADY_QUEUED: '同一模式与采集方式已在队列中，请稍后查看进度',
-  INVALID_INPUT: '采集参数不合法',
-  NOT_FOUND: '站点不存在，可能已被删除',
-  CACHE_UNAVAILABLE: '缓存库不可用，请重启应用后重试',
-  BUSY: '缓存正在清理，请稍后再试'
-}
-
 /** 控制台「采集」：按站点发起手动采集、设置定时计划 */
 function CollectPanel({
   title,
@@ -90,22 +84,25 @@ function CollectPanel({
 }): React.JSX.Element {
   const { message } = App.useApp()
   const [sites, setSites] = useState<Site[]>([])
-  const [progress, setProgress] = useState<Map<string, VideoCollectProgress>>(new Map())
+  const [progressRows, setProgressRows] = useState<VideoCollectProgress[]>([])
   const [schedules, setSchedules] = useState<Map<string, VideoSchedule>>(new Map())
   const [loading, setLoading] = useState(true)
   const [manualTarget, setManualTarget] = useState<Site | null>(null)
   const [scheduleTarget, setScheduleTarget] = useState<Site | null>(null)
   const [saving, setSaving] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  // 弹窗里选中「重新采集」的进度 id；默认（null / 不匹配）是继续采集
+  const [restartChoice, setRestartChoice] = useState<string | null>(null)
   const [manualForm] = Form.useForm<ManualValues>()
   const [scheduleForm] = Form.useForm<ScheduleValues>()
   const manualMode = Form.useWatch('mode', manualForm) ?? 'incremental'
+  const manualFetchRange = Form.useWatch('fetchRange', manualForm) ?? '24h'
   const scheduleMode = Form.useWatch('mode', scheduleForm) ?? 'incremental'
   const scheduleTiming = Form.useWatch('timing', scheduleForm) ?? 'interval'
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const [siteRows, scheduleResult, progressRows] = await Promise.all([
+      const [siteRows, scheduleResult, rows] = await Promise.all([
         window.api.sites.list(),
         window.api.videos.schedules(),
         window.api.videos.progress()
@@ -114,12 +111,7 @@ function CollectPanel({
       setSchedules(
         new Map((scheduleResult.schedules ?? []).map((schedule) => [schedule.siteId, schedule]))
       )
-      const map = new Map<string, VideoCollectProgress>()
-      for (const item of progressRows) {
-        const previous = map.get(item.siteId)
-        if (!previous || previous.updatedAt < item.updatedAt) map.set(item.siteId, item)
-      }
-      setProgress(map)
+      setProgressRows(rows)
     } catch {
       message.error('读取采集状态失败')
     } finally {
@@ -132,15 +124,37 @@ function CollectPanel({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
     return window.api.videos.onProgress((next) => {
-      setProgress((previous) => {
-        const current = previous.get(next.siteId)
-        if (current && current.updatedAt > next.updatedAt) return previous
-        const updated = new Map(previous)
-        updated.set(next.siteId, next)
+      setProgressRows((previous) => {
+        const index = previous.findIndex((row) => row.id === next.id)
+        if (index === -1) return [next, ...previous]
+        if (previous[index].updatedAt > next.updatedAt) return previous
+        const updated = [...previous]
+        updated[index] = next
         return updated
       })
     })
   }, [load])
+
+  /** 每个站点最新的一条进度：卡片状态与取消按钮用 */
+  const latestBySite = useMemo(() => {
+    const map = new Map<string, VideoCollectProgress>()
+    for (const row of progressRows) {
+      const previous = map.get(row.siteId)
+      if (!previous || previous.updatedAt < row.updatedAt) map.set(row.siteId, row)
+    }
+    return map
+  }, [progressRows])
+
+  /** 弹窗里选中模式 + 采集方式对应的那条进度，用来判断是否已有暂停 / 出错的任务 */
+  const manualResumeRow = useMemo(() => {
+    if (!manualTarget) return null
+    const range: FetchRange = manualMode === 'full' ? 'all' : manualFetchRange
+    const key = collectProgressKey(manualTarget.id, manualMode, range)
+    const row = progressRows.find((item) => item.id === key)
+    return row && isResumableStatus(row.status) ? row : null
+  }, [manualTarget, manualMode, manualFetchRange, progressRows])
+
+  const resumeFromStart = Boolean(manualResumeRow && restartChoice === manualResumeRow.id)
 
   useEffect(() => {
     if (!manualTarget) return
@@ -149,7 +163,7 @@ function CollectPanel({
       fetchRange: '24h',
       allowEmpty: false,
       // 记住上一次手动采集时是否勾了「同时生成详情缓存」，没记录过就默认勾选
-      cacheDetail: localStorage.getItem(MANUAL_CACHE_DETAIL_KEY) !== '0'
+      cacheDetail: manualCacheDetail()
     })
   }, [manualTarget, manualForm])
 
@@ -183,6 +197,8 @@ function CollectPanel({
         siteId: manualTarget.id,
         mode: values.mode,
         fetchRange: values.mode === 'full' ? 'all' : values.fetchRange,
+        // 只有已经存在暂停 / 出错的任务时才有意义：不传则按库里的状态自动续采或重来
+        restart: manualResumeRow ? resumeFromStart : undefined,
         allowEmpty: values.allowEmpty,
         cacheDetail: values.cacheDetail
       })
@@ -191,8 +207,15 @@ function CollectPanel({
         return
       }
       setManualTarget(null)
+      setRestartChoice(null)
       await load()
-      message.success('已加入采集队列，可在「进度」查看')
+      if (manualResumeRow && !resumeFromStart) {
+        message.success(`已继续采集，从第 ${manualResumeRow.page + 1} 页开始`)
+      } else if (manualResumeRow) {
+        message.success('已重新加入队列，从第 1 页开始')
+      } else {
+        message.success('已加入采集队列，可在「进度」查看')
+      }
     } catch {
       message.error('发起采集失败，请重试')
     } finally {
@@ -315,7 +338,7 @@ function CollectPanel({
       ) : (
         <div className="sites-grid">
           {sortedSites.map((site) => {
-            const current = progress.get(site.id)
+            const current = latestBySite.get(site.id)
             const schedule = schedules.get(site.id)
             const status = current?.status ?? 'idle'
             const busy = status === 'running' || status === 'queued' || status === 'replacing'
@@ -408,10 +431,13 @@ function CollectPanel({
         cancelText="取消"
         confirmLoading={saving}
         onOk={() => void startCollect()}
-        onCancel={() => setManualTarget(null)}
+        onCancel={() => {
+          setManualTarget(null)
+          setRestartChoice(null)
+        }}
         width={460}
       >
-        <Form form={manualForm} layout="vertical" requiredMark={false}>
+        <Form form={manualForm} layout="vertical" requiredMark={false} className="collect-form">
           <Form.Item name="mode" label="模式" rules={[{ required: true }]}>
             <Select options={MODE_OPTIONS} />
           </Form.Item>
@@ -421,6 +447,25 @@ function CollectPanel({
               disabled={manualMode === 'full'}
             />
           </Form.Item>
+          {manualResumeRow && (
+            <Form.Item
+              label={`上次采集${manualResumeRow.status === 'error' ? '出错' : '已暂停'}`}
+              extra="继续会接着上次中断 / 失败的页码抓，保留已入库的数据；重新会清空这条进度与计数，从第 1 页开始。"
+            >
+              <Radio.Group
+                value={resumeFromStart ? 'restart' : 'resume'}
+                onChange={(event) =>
+                  setRestartChoice(event.target.value === 'restart' ? manualResumeRow.id : null)
+                }
+              >
+                <Radio value="resume">
+                  继续采集
+                  {manualResumeRow.page > 0 ? `（第 ${manualResumeRow.page + 1} 页起）` : ''}
+                </Radio>
+                <Radio value="restart">重新采集（第 1 页起）</Radio>
+              </Radio.Group>
+            </Form.Item>
+          )}
           <Form.Item
             name="cacheDetail"
             valuePropName="checked"
@@ -469,7 +514,12 @@ function CollectPanel({
           </Space>
         }
       >
-        <Form form={scheduleForm} layout="vertical" requiredMark={false} className="schedule-form">
+        <Form
+          form={scheduleForm}
+          layout="vertical"
+          requiredMark={false}
+          className="collect-form schedule-form"
+        >
           <Form.Item name="enabled" valuePropName="checked">
             <Checkbox>启用定时采集，按下面的计划自动入队</Checkbox>
           </Form.Item>

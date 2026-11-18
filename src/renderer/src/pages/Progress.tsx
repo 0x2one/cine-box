@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { App, Button, Popconfirm, Spin, Tag, Tooltip } from 'antd'
-import { CloudDownloadOutlined, FileTextOutlined, StopOutlined } from '@ant-design/icons'
+import {
+  CloudDownloadOutlined,
+  FileTextOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
+  StopOutlined
+} from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
 import {
+  COLLECT_ERRORS,
   COLLECT_STATUS_COLOR,
   COLLECT_STATUS_ORDER,
   COLLECT_STATUS_TEXT,
+  isResumableStatus,
+  manualCacheDetail,
   siteLabel
 } from '../utils/collect'
 
@@ -35,6 +44,8 @@ function ProgressPanel({
   const [rows, setRows] = useState<VideoCollectProgress[]>([])
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState<string | null>(null)
+  // 暂停 / 出错的记录可以直接续采或重采；用 `${id}:${动作}` 标记按钮加载态
+  const [acting, setActing] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -94,6 +105,33 @@ function ProgressPanel({
       message.error('取消失败，请重试')
     } finally {
       setCancelling(null)
+    }
+  }
+
+  /** fromStart = true 时清空进度重来，false 时从断点（失败页）接着采 */
+  const runCollect = async (item: VideoCollectProgress, fromStart: boolean): Promise<void> => {
+    setActing(`${item.id}:${fromStart ? 'restart' : 'resume'}`)
+    try {
+      const result = await window.api.videos.collect({
+        siteId: item.siteId,
+        mode: item.mode,
+        fetchRange: item.fetchRange,
+        restart: fromStart,
+        // 续采不带弹窗，详情缓存沿用上次手动采集的选择
+        cacheDetail: manualCacheDetail()
+      })
+      if (!result.ok) {
+        message.warning(COLLECT_ERRORS[result.error ?? ''] ?? '发起采集失败，请重试')
+        return
+      }
+      await load()
+      message.success(
+        fromStart ? '已重新入队，从第 1 页开始' : `已继续采集，从第 ${item.page + 1} 页开始`
+      )
+    } catch {
+      message.error('发起采集失败，请重试')
+    } finally {
+      setActing(null)
     }
   }
 
@@ -178,15 +216,51 @@ function ProgressPanel({
                         aria-label="查看该站点日志"
                       />
                     </Tooltip>
-                    <Tooltip title="重新发起采集">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<CloudDownloadOutlined />}
-                        onClick={onOpenCollect}
-                        aria-label="重新发起采集"
-                      />
-                    </Tooltip>
+                    {isResumableStatus(item.status) ? (
+                      <>
+                        <Tooltip
+                          title={
+                            item.page > 0 ? `从第 ${item.page + 1} 页接着采集` : '继续这条采集'
+                          }
+                        >
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<PlayCircleOutlined />}
+                            loading={acting === `${item.id}:resume`}
+                            onClick={() => void runCollect(item, false)}
+                          >
+                            继续采集
+                          </Button>
+                        </Tooltip>
+                        <Popconfirm
+                          title="重新采集"
+                          description="清空这条进度和计数，从第 1 页重新开始。"
+                          okText="重新采集"
+                          cancelText="取消"
+                          onConfirm={() => void runCollect(item, true)}
+                        >
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={acting === `${item.id}:restart`}
+                          >
+                            重新采集
+                          </Button>
+                        </Popconfirm>
+                      </>
+                    ) : (
+                      <Tooltip title="重新发起采集">
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<CloudDownloadOutlined />}
+                          onClick={onOpenCollect}
+                          aria-label="重新发起采集"
+                        />
+                      </Tooltip>
+                    )}
                     {(item.status === 'running' ||
                       item.status === 'queued' ||
                       item.status === 'replacing') && (

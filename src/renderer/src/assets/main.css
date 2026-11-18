@@ -2204,6 +2204,14 @@
   margin-bottom: 4px;
 }
 
+/* 采集 / 定时采集弹窗：说明文字比正文小一号、用弱色，长段提示不跟正文抢眼 */
+body .collect-form .ant-form-item-extra {
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
 /* 定时采集弹窗：两列排布 + 收紧行距，别高过窗口 */
 .schedule-form .ant-form-item {
   margin-bottom: 14px;
