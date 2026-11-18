@@ -418,7 +418,11 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
       <div className="settings-panel-head has-actions">
         <h2 className="settings-panel-title">{title}</h2>
         <span className="settings-panel-sep">·</span>
-        <p className="settings-panel-desc">{desc}</p>
+        <p className="settings-panel-desc">
+          {desc}
+          {/* 跟着当前的搜索词 / 可见性筛选走，是筛选后的总数 */}
+          <span className="sites-count">共 {total} 个视频</span>
+        </p>
         <div className="settings-panel-actions">
           <Select
             className="video-visibility"
@@ -555,9 +559,15 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
             <List.Item.Meta
               title={
                 <div className="video-title">
-                  <span className="video-title-text" title={item.name}>
+                  {/* 点标题和点封面 / 详情按钮一样打开详情抽屉 */}
+                  <button
+                    type="button"
+                    className="video-title-text"
+                    title={item.name}
+                    onClick={() => void openDetail(item)}
+                  >
                     {item.name}
-                  </span>
+                  </button>
                   {item.note && <span className="video-title-note">{item.note}</span>}
                   {item.hidden && <Tag color="default">已隐藏</Tag>}
                   {item.edited && <Tag color="processing">已编辑</Tag>}

@@ -2863,6 +2863,27 @@ body .collect-form .ant-form-item-extra {
   white-space: nowrap;
 }
 
+/* 标题是按钮：点它打开详情，样式仍按标题走 */
+button.video-title-text {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.video-title-text:hover {
+  color: var(--accent);
+}
+
+button.video-title-text:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .video-title-note {
   flex: 0 0 auto;
   overflow: hidden;
