@@ -2429,7 +2429,7 @@
 .video-list .ant-list-item {
   align-items: center;
   gap: 20px;
-  padding: 14px 18px;
+  padding: 16px 18px;
 }
 
 .video-list .ant-list-item-main {
@@ -2441,12 +2441,20 @@
   margin-block-start: 0;
 }
 
-.video-list .ant-list-item-meta {
-  margin-bottom: 6px;
+/* antd 的 .ant-list-vertical .ant-list-item .ant-list-item-meta 是 3 个类，
+   这里多带一层 .ant-list-items 才能压住它默认的 16px 底边距和 16px/1.5 标题 */
+.video-list .ant-list-items .ant-list-item .ant-list-item-meta {
+  margin-block-end: 10px;
 }
 
-.video-list .ant-list-item-action {
-  margin-top: 10px;
+.video-list .ant-list-items .ant-list-item .ant-list-item-meta-title {
+  margin-block-end: 6px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.video-list .ant-list-items .ant-list-item .ant-list-item-action {
+  margin-block-start: 12px;
 }
 
 /* 行内操作按钮整体压淡，hover 时再提亮，避免抢标题和封面的注意力 */
@@ -2500,7 +2508,11 @@
 
 .video-title .ant-tag {
   flex: 0 0 auto;
+  height: 18px;
   margin-inline-end: 0;
+  padding-inline: 5px;
+  font-size: 10.5px;
+  line-height: 16px;
 }
 
 .video-meta {
@@ -2513,6 +2525,7 @@
   color: var(--text-faint);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
+  line-height: 1.5;
   white-space: nowrap;
 }
 
@@ -2564,7 +2577,7 @@
   display: block;
   max-width: 100%;
   min-height: 1.5em;
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   overflow: hidden;
   color: var(--text-faint);
   font-size: 11.5px;
