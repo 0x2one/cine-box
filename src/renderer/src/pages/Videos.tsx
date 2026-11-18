@@ -18,7 +18,8 @@ import {
   EyeOutlined,
   EditOutlined,
   FileSearchOutlined,
-  ReloadOutlined
+  ReloadOutlined,
+  RightOutlined
 } from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
 
@@ -51,6 +52,113 @@ function detailTag(source: VideoDetailSource): React.JSX.Element {
   if (!source.detailCachedAt) return <Tag color="default">未缓存详情</Tag>
   if (source.detailStale) return <Tag color="warning">详情已过期</Tag>
   return <Tag color="success">详情已缓存</Tag>
+}
+
+/** 复制文本：优先 async clipboard，被拒时退回选区 + execCommand（Electron 两种都支持） */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const area = document.createElement('textarea')
+      area.value = text
+      area.style.position = 'fixed'
+      area.style.top = '-1000px'
+      area.style.opacity = '0'
+      document.body.appendChild(area)
+      area.select()
+      const ok = document.execCommand('copy')
+      area.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+/** 单个资源站的播放源：默认收起，点标题那一行展开 / 收起线路；点集数复制播放地址 */
+function SourceCard({ source }: { source: VideoDetailSource }): React.JSX.Element {
+  const { message } = App.useApp()
+  const [open, setOpen] = useState(false)
+  const lines = source.detail?.playLines ?? []
+  const episodes = lines.reduce((sum, line) => sum + line.episodes.length, 0)
+
+  const copyEpisode = async (episode: VideoPlayEpisode): Promise<void> => {
+    const url = episode.url.trim()
+    if (!url) {
+      message.warning('这一集没有播放地址')
+      return
+    }
+    if (await copyText(url)) {
+      message.success(`已复制「${episode.name || '本集'}」的播放地址`)
+    } else {
+      message.error('复制失败，请重试')
+    }
+  }
+
+  return (
+    <div className={`video-source${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="video-source-head"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <RightOutlined className="video-source-caret" />
+        <span className="video-source-name">{source.siteName}</span>
+        {detailTag(source)}
+        {lines.length > 0 && (
+          <span className="video-source-count">
+            {lines.length} 条线路 · {episodes} 集
+          </span>
+        )}
+        <span className="video-source-meta">
+          {source.categoryName || '未分类'}
+          {source.detailCachedAt ? ` · 缓存于 ${formatDateTime(source.detailCachedAt)}` : ''}
+        </span>
+      </button>
+      {source.detailError && (
+        <span className="video-source-hint">详情抓取失败：{source.detailError}</span>
+      )}
+      {open &&
+        (source.detail ? (
+          lines.length === 0 ? (
+            <span className="video-source-hint">详情里没有播放地址</span>
+          ) : (
+            lines.map((line) => (
+              <div className="video-line" key={`${source.id}-${line.flag}`}>
+                <span className="video-line-flag" title={line.flag || '默认线路'}>
+                  {line.flag || '默认线路'}
+                </span>
+                <div className="video-episodes">
+                  {line.episodes.slice(0, EPISODE_LIMIT).map((episode, index) => (
+                    <button
+                      type="button"
+                      className="video-episode"
+                      key={`${source.id}-${line.flag}-${index}`}
+                      title={`点击复制播放地址\n${episode.url}`}
+                      onClick={() => void copyEpisode(episode)}
+                    >
+                      {episode.name}
+                    </button>
+                  ))}
+                  {line.episodes.length > EPISODE_LIMIT && (
+                    <span className="video-episode is-more">
+                      还有 {line.episodes.length - EPISODE_LIMIT} 集
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))
+          )
+        ) : (
+          !source.detailError && (
+            <span className="video-source-hint">详情未缓存，重新打开会再抓一次</span>
+          )
+        ))}
+    </div>
+  )
 }
 
 /** 控制台「视频」：已采集视频列表（antd List + 分页 + 搜索），可编辑信息、换封面、隐藏 */
@@ -601,107 +709,71 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
         open={detailOpen}
         width={560}
         destroyOnHidden
-        styles={{ body: { padding: '16px 18px' } }}
+        // 内边距交给固定区和滚动区自己给：body 变成不滚的 flex 列，只有来源列表滚
+        styles={{
+          body: { padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }
+        }}
         onClose={() => setDetailOpen(false)}
       >
         {detailLoading || !detail ? (
-          <div className="sites-placeholder">
-            <Spin size="small" />
-            <span className="sites-empty-hint">正在读取详情，没缓存时会顺手抓一次…</span>
+          <div className="video-detail-loading">
+            <div className="sites-placeholder">
+              <Spin size="small" />
+              <span className="sites-empty-hint">正在读取详情，没缓存时会顺手抓一次…</span>
+            </div>
           </div>
         ) : (
           <div className="video-detail">
-            <div className="video-detail-head">
-              <div className="video-detail-cover">
-                <span className="video-detail-letter">{detail.name.trim().slice(0, 1)}</span>
-                {detail.pic && (
-                  <img
-                    src={detail.pic}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    onError={(event) => {
-                      event.currentTarget.style.visibility = 'hidden'
-                    }}
-                  />
-                )}
-              </div>
-              <div className="video-detail-info">
-                <h3 className="video-detail-name">{detail.name}</h3>
-                <div className="video-detail-meta">
-                  {detail.note && <span>{detail.note}</span>}
-                  {detail.vodClass && <span>{detail.vodClass}</span>}
-                  <span>{detail.sourceCount} 个来源</span>
-                  <span>更新 {detail.latestTime}</span>
-                  {detail.hidden && <Tag color="default">已隐藏</Tag>}
-                </div>
-                {detail.vodActor && (
-                  <div className="video-detail-meta">
-                    <span>主演：{detail.vodActor}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <section className="video-detail-section">
-              <span className="video-detail-label">简介</span>
-              <p className="video-detail-text">
-                {detail.introExcerpt || '暂无简介'}
-                {detail.introTruncated ? '…' : ''}
-              </p>
-            </section>
-
-            <section className="video-detail-section">
-              <span className="video-detail-label">来源与播放线路</span>
-              {detail.sources.map((source) => (
-                <div className="video-source" key={source.id}>
-                  <div className="video-source-head">
-                    <span className="video-source-name">{source.siteName}</span>
-                    {detailTag(source)}
-                    <span className="video-source-meta">
-                      {source.categoryName || '未分类'}
-                      {source.detailCachedAt
-                        ? ` · 缓存于 ${formatDateTime(source.detailCachedAt)}`
-                        : ''}
-                    </span>
-                  </div>
-                  {source.detail ? (
-                    source.detail.playLines.length === 0 ? (
-                      <span className="video-source-hint">详情里没有播放地址</span>
-                    ) : (
-                      source.detail.playLines.map((line) => (
-                        <div className="video-line" key={`${source.id}-${line.flag}`}>
-                          <span className="video-line-flag" title={line.flag || '默认线路'}>
-                            {line.flag || '默认线路'}
-                          </span>
-                          <div className="video-episodes">
-                            {line.episodes.slice(0, EPISODE_LIMIT).map((episode, index) => (
-                              <span
-                                className="video-episode"
-                                key={`${source.id}-${line.flag}-${index}`}
-                                title={episode.url}
-                              >
-                                {episode.name}
-                              </span>
-                            ))}
-                            {line.episodes.length > EPISODE_LIMIT && (
-                              <span className="video-episode is-more">
-                                还有 {line.episodes.length - EPISODE_LIMIT} 集
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )
-                  ) : (
-                    <span className="video-source-hint">
-                      {source.detailError
-                        ? `详情抓取失败：${source.detailError}`
-                        : '详情未缓存，重新打开会再抓一次'}
-                    </span>
+            {/* 封面 / 标题 / 简介和「来源与播放线路」标题整块吸顶，只让来源列表滚 */}
+            <div className="video-detail-sticky">
+              <div className="video-detail-head">
+                <div className="video-detail-cover">
+                  <span className="video-detail-letter">{detail.name.trim().slice(0, 1)}</span>
+                  {detail.pic && (
+                    <img
+                      src={detail.pic}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      onError={(event) => {
+                        event.currentTarget.style.visibility = 'hidden'
+                      }}
+                    />
                   )}
                 </div>
+                <div className="video-detail-info">
+                  <h3 className="video-detail-name">{detail.name}</h3>
+                  <div className="video-detail-meta">
+                    {detail.note && <span>{detail.note}</span>}
+                    {detail.vodClass && <span>{detail.vodClass}</span>}
+                    <span>{detail.sourceCount} 个来源</span>
+                    <span>更新 {detail.latestTime}</span>
+                    {detail.hidden && <Tag color="default">已隐藏</Tag>}
+                  </div>
+                  {detail.vodActor && (
+                    <div className="video-detail-meta">
+                      <span>主演：{detail.vodActor}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <section className="video-detail-section">
+                <span className="video-detail-label">简介</span>
+                {/* 最多五行，超出由 .video-detail-text 的 line-clamp 出省略号 */}
+                <p className="video-detail-text" title={detail.introExcerpt || undefined}>
+                  {detail.introExcerpt || '暂无简介'}
+                  {detail.introTruncated ? '…' : ''}
+                </p>
+              </section>
+
+              <span className="video-detail-label">来源与播放线路</span>
+            </div>
+
+            <div className="video-detail-scroll">
+              {detail.sources.map((source) => (
+                <SourceCard key={source.id} source={source} />
               ))}
-            </section>
+            </div>
           </div>
         )}
       </Drawer>

@@ -3012,10 +3012,39 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   overflow-y: auto;
 }
 
+/* 详情抽屉分两段：封面 / 标题 / 简介 / 「来源与播放线路」标题整块固定，
+   下面只有来源列表在自己的滚动容器里滚（body 不再滚，见 Drawer 的 styles.body）。 */
 .video-detail {
   display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.video-detail-sticky {
+  display: flex;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 18px;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--elevated);
+}
+
+/* 滚动条贴着抽屉右缘，固定区永远可见 */
+.video-detail-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+
+/* 读取中的占位没有上面那两段，自己补内边距 */
+.video-detail-loading {
+  padding: 16px 18px;
 }
 
 .video-detail-head {
@@ -3077,12 +3106,17 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   font-size: 11.5px;
 }
 
+/* 简介最多五行：超出部分用 line-clamp 自带的省略号截掉，固定区高度也就定了 */
 .video-detail-text {
+  display: -webkit-box;
+  overflow: hidden;
   margin: 0;
   color: var(--text);
   font-size: 12.5px;
   line-height: 1.7;
   white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
   user-select: text;
 }
 
@@ -3096,11 +3130,45 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   background: var(--surface);
 }
 
+/* 整行标题就是折叠开关：默认收起，箭头朝右，展开后转 90° */
 .video-source-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.video-source-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.video-source-head:hover .video-source-name {
+  color: var(--accent);
+}
+
+.video-source-caret {
+  color: var(--text-faint);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.video-source.is-open .video-source-caret {
+  transform: rotate(90deg);
+}
+
+.video-source-count {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .video-source-name {
@@ -3166,6 +3234,23 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   font-size: 11px;
   text-align: center;
   white-space: nowrap;
+}
+
+/* 集数是按钮：点一下把播放地址复制到剪贴板 */
+button.video-episode {
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.video-episode:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.video-episode:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .video-episode.is-more {
