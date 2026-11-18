@@ -10,10 +10,12 @@
       直接贴进应用时把 <style> 里的 :root 变量换成应用已有的同名变量即可。
 
       可直接玩的地方：
-      · 叠层：点右侧箭头 / 点露出来的那张 / 键盘 ← → 切换，7 秒自动轮播（悬停暂停）
+      · 叠层：宽幅海报铺满整张卡，文字/按钮压在图上；右侧露出后面几张的竖条，
+        点竖条、点右侧箭头或按键盘 ← → 都能翻，7 秒自动轮播（悬停暂停）
       · 搜索：输入即时筛选，Ctrl K 聚焦，Esc 清空
       · 主题：右上角圆钮切换，或直接打开 首页原型.html?theme=dark
-      封面图是 picsum 的占位图，放在 首页原型素材/ 里，接真实数据时换成 video.pic 即可。
+      封面图是 picsum 的占位图（首页用 1600×720 宽图，列表用 300×450 竖图），
+      放在 首页原型素材/ 里，接真实数据时换成 video.pic 即可。
     -->
     <style>
       :root {
@@ -309,47 +311,29 @@
         color: var(--text);
       }
 
-      /* ── 海报叠层 ── */
+      /* ── 海报叠层（宽图，叠层露在右侧） ── */
 
       .hero {
+        --stack: 72px; /* 右侧叠层总共露出的宽度，JS 会按实际槽位覆盖 */
         position: relative;
-        display: grid;
-        grid-template-columns: 264px minmax(0, 1fr);
-        gap: 60px;
-        align-items: center;
-        padding-bottom: 34px;
-      }
-
-      .hero::before {
-        position: absolute;
-        z-index: 0;
-        top: -40px;
-        left: -60px;
-        width: 520px;
-        height: 520px;
-        background: radial-gradient(
-          closest-side,
-          color-mix(in srgb, var(--accent) 14%, transparent),
-          transparent 72%
-        );
-        content: '';
-        pointer-events: none;
+        height: 420px;
+        margin-bottom: 34px;
       }
 
       .deck {
-        position: relative;
+        position: absolute;
+        inset: 0;
         z-index: 1;
-        width: 264px;
-        height: 437px;
       }
 
       .deck-card {
         position: absolute;
-        top: var(--top);
-        left: 50%;
+        top: 0;
+        left: var(--left);
         display: block;
-        width: var(--w);
-        height: 384px;
+        /* 每张等宽，最后一张的右缘正好压在容器右缘上，露出的就是右边一条 */
+        width: calc(100% - var(--stack));
+        height: 100%;
         padding: 0;
         overflow: hidden;
         border: 0;
@@ -360,9 +344,23 @@
             color-mix(in srgb, var(--accent) 12%, var(--surface-muted)),
             var(--surface-muted) 72%
           );
-        box-shadow: var(--shadow-card);
-        transform: translateX(-50%);
+        box-shadow:
+          0 6px 18px rgba(8, 12, 18, 0.16),
+          0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
         cursor: pointer;
+      }
+
+      .deck-card[data-slot='0'] {
+        cursor: default;
+        box-shadow:
+          0 24px 54px rgba(8, 12, 18, 0.3),
+          0 2px 8px rgba(8, 12, 18, 0.16),
+          0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+      }
+
+      /* 鼠标停在哪一条上，那一条就亮一点，提示可以点 */
+      .deck-card:not([data-slot='0']):hover::after {
+        opacity: calc(var(--dim) * 0.5);
       }
 
       .deck-card::after {
@@ -375,11 +373,22 @@
         pointer-events: none;
       }
 
-      .deck-card[data-slot='0'] {
-        cursor: default;
-        box-shadow:
-          var(--shadow-card),
-          0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+      /* 压在最前面那张的文字压暗层：底部压暗给文字让位，左上只留一点点 */
+      .deck-card[data-slot='0']::before {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        background:
+          linear-gradient(
+            0deg,
+            rgba(6, 10, 16, 0.92) 0%,
+            rgba(6, 10, 16, 0.72) 24%,
+            rgba(6, 10, 16, 0.3) 46%,
+            rgba(6, 10, 16, 0) 68%
+          ),
+          linear-gradient(90deg, rgba(6, 10, 16, 0.5) 0%, rgba(6, 10, 16, 0) 50%);
+        content: '';
+        pointer-events: none;
       }
 
       .deck-card img {
@@ -411,30 +420,35 @@
         transform: translateY(12px);
       }
 
-      .deck-info {
-        position: relative;
-        z-index: 1;
+      /* 文字浮在前面的海报上；点不到底下的卡，按钮单独放行 */
+      .hero-info {
+        position: absolute;
+        inset: 0 var(--stack) 0 0;
+        z-index: 3;
         display: flex;
         flex-direction: column;
-        justify-content: center;
-        min-height: 320px;
-        padding-top: 2px;
-      }
-
-      .deck-info.is-swapping {
-        opacity: 0;
-        transform: translateY(5px);
-      }
-
-      .deck-info {
+        justify-content: flex-end;
+        padding: 40px 44px;
+        color: #fff;
+        pointer-events: none;
         transition:
           opacity 0.26s ease,
           transform 0.26s ease;
       }
 
+      .hero-info.is-swapping {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+
+      .hero-info .btn,
+      .hero-info .pager {
+        pointer-events: auto;
+      }
+
       .hero-meta {
         margin: 0;
-        color: var(--text-faint);
+        color: rgba(255, 255, 255, 0.66);
         font-size: 13px;
         letter-spacing: 0.02em;
         font-variant-numeric: tabular-nums;
@@ -443,20 +457,24 @@
       .hero-title {
         display: -webkit-box;
         overflow: hidden;
-        margin: 12px 0 0;
+        max-width: 660px;
+        margin: 10px 0 0;
         font-family: var(--font-display);
-        font-size: 44px;
+        font-size: 46px;
         font-weight: 600;
-        line-height: 1.24;
+        line-height: 1.22;
         letter-spacing: 0.01em;
+        color: #fff;
+        text-shadow: 0 2px 18px rgba(4, 8, 14, 0.35);
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
       }
 
       .hero-actors {
         overflow: hidden;
-        margin: 16px 0 0;
-        color: var(--text-muted);
+        max-width: 560px;
+        margin: 14px 0 0;
+        color: rgba(255, 255, 255, 0.78);
         font-size: 13.5px;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -464,17 +482,17 @@
 
       .hero-actors span {
         margin-right: 6px;
-        color: var(--text-faint);
+        color: rgba(255, 255, 255, 0.5);
       }
 
       .hero-intro {
         display: -webkit-box;
         overflow: hidden;
         max-width: 560px;
-        margin: 16px 0 0;
-        color: var(--text-muted);
+        margin: 14px 0 0;
+        color: rgba(255, 255, 255, 0.76);
         font-size: 14.5px;
-        line-height: 1.8;
+        line-height: 1.78;
         -webkit-box-orient: vertical;
         -webkit-line-clamp: 2;
       }
@@ -483,7 +501,7 @@
         display: flex;
         gap: 10px;
         align-items: center;
-        padding-top: 28px;
+        margin-top: 26px;
       }
 
       .btn {
@@ -499,6 +517,7 @@
         font: inherit;
         font-size: 13.5px;
         cursor: pointer;
+        pointer-events: auto;
         transition:
           background 0.15s ease,
           border-color 0.15s ease,
@@ -528,6 +547,20 @@
         color: var(--text);
       }
 
+      /* 海报上的次级按钮走半透明白，页面上的仍然跟着主题 */
+      .hero-info .btn-ghost {
+        border-color: rgba(255, 255, 255, 0.28);
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(6px);
+      }
+
+      .hero-info .btn-ghost:hover {
+        border-color: rgba(255, 255, 255, 0.5);
+        background: rgba(255, 255, 255, 0.18);
+        color: #fff;
+      }
+
       .pager {
         display: flex;
         gap: 10px;
@@ -536,14 +569,14 @@
       }
 
       .pager-count {
-        color: var(--text-faint);
+        color: rgba(255, 255, 255, 0.6);
         font-size: 12px;
         font-variant-numeric: tabular-nums;
         letter-spacing: 0.04em;
       }
 
       .pager-count b {
-        color: var(--text-muted);
+        color: #fff;
         font-weight: 600;
       }
 
@@ -552,23 +585,25 @@
         width: 30px;
         height: 30px;
         place-items: center;
-        border: 1px solid var(--border);
+        border: 1px solid rgba(255, 255, 255, 0.28);
         border-radius: 50%;
-        background: var(--surface);
-        color: var(--text-muted);
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.92);
         cursor: pointer;
+        pointer-events: auto;
+        backdrop-filter: blur(6px);
         transition:
-          color 0.15s ease,
+          background 0.15s ease,
           border-color 0.15s ease;
       }
 
       .icon-btn:hover {
-        border-color: var(--border-strong);
-        color: var(--text);
+        border-color: rgba(255, 255, 255, 0.55);
+        background: rgba(255, 255, 255, 0.2);
       }
 
       .icon-btn:active {
-        background: var(--surface-muted);
+        background: rgba(255, 255, 255, 0.3);
       }
 
       /* 叠层里露出的下一张，点一下翻到最前面 */
@@ -841,11 +876,15 @@
         }
 
         .hero {
-          gap: 40px;
+          height: 370px;
+        }
+
+        .hero-info {
+          padding: 32px;
         }
 
         .hero-title {
-          font-size: 34px;
+          font-size: 38px;
         }
 
         .rail {
@@ -960,7 +999,7 @@
 
           <section class="hero" aria-label="推荐" aria-roledescription="carousel">
             <div class="deck" id="deck"></div>
-            <div class="deck-info" id="deckInfo"></div>
+            <div class="hero-info" id="deckInfo"></div>
           </section>
 
           <p class="result-line" id="resultLine" hidden></p>
@@ -1235,27 +1274,30 @@
 
       // ── 海报叠层 ──────────────────────────────────────────────
 
-      // 每一层露出的高度越来越少：22 / 12 / 9 / 6 / 4
+      // 向右叠，露出的宽度越来越少：30 / 14 / 11 / 9 / 8
       const SLOTS = [
-        { top: 0, width: 264, dim: 0 },
-        { top: 22, width: 258, dim: 0.1 },
-        { top: 34, width: 253, dim: 0.18 },
-        { top: 43, width: 249, dim: 0.26 },
-        { top: 49, width: 246, dim: 0.34 },
-        { top: 53, width: 244, dim: 0.44 }
+        { left: 0, dim: 0 },
+        { left: 30, dim: 0.38 },
+        { left: 44, dim: 0.52 },
+        { left: 55, dim: 0.62 },
+        { left: 64, dim: 0.7 },
+        { left: 72, dim: 0.78 }
       ]
 
       const deck = document.getElementById('deck')
       const deckInfo = document.getElementById('deckInfo')
+      const heroEl = document.querySelector('.hero')
       const state = { index: 0, query: '' }
+
+      // 叠层总宽度与最后一张的偏移保持一致，卡片和文字区共用这个值
+      heroEl.style.setProperty('--stack', SLOTS[SLOTS.length - 1].left + 'px')
 
       const cards = SLIDES.map((slide, slot) => {
         const card = document.createElement('button')
         card.type = 'button'
         card.className = 'deck-card'
         card.dataset.slot = String(slot)
-        card.style.setProperty('--top', SLOTS[slot].top + 'px')
-        card.style.setProperty('--w', SLOTS[slot].width + 'px')
+        card.style.setProperty('--left', SLOTS[slot].left + 'px')
         card.style.setProperty('--dim', String(SLOTS[slot].dim))
         card.style.zIndex = String(SLOTS.length - slot)
 
@@ -1263,8 +1305,9 @@
         const b = document.createElement('img')
         a.alt = ''
         b.alt = ''
-        a.decoding = 'async'
-        b.decoding = 'async'
+        // 首屏大图同步解码，避免刚进首页先看到一块底色
+        a.decoding = 'sync'
+        b.decoding = 'sync'
         card.append(a, b)
 
         card.addEventListener('click', () => {
