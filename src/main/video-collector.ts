@@ -150,12 +150,8 @@ export function createVideoCollector(options: {
     }
     queue.push(item)
     emit(progress)
-    log(
-      'info',
-      item,
-      origin === 'schedule' ? '定时采集已入队' : '已加入采集队列',
-      `${site.display || site.name} · ${input.mode === 'full' ? '全量' : '增量'} · ${input.fetchRange}`
-    )
+    // 站点 / 模式 / 范围日志行头里已经有了，这里不再重复
+    log('info', item, origin === 'schedule' ? '定时采集已入队' : '已加入采集队列')
     void pump()
     return { ok: true, progress }
   }
@@ -294,12 +290,7 @@ export function createVideoCollector(options: {
 
     progress = store.updateProgress(progress.id, { status: 'running', error: '' }) ?? progress
     emit(progress)
-    log(
-      'info',
-      item,
-      '开始采集',
-      `${item.origin === 'schedule' ? '定时' : '手动'} · ${item.mode === 'full' ? '全量' : '增量'} · ${item.fetchRange}`
-    )
+    log('info', item, '开始采集', item.origin === 'schedule' ? '定时触发' : '手动触发')
 
     const maxPages =
       Math.min(Math.max(Number(item.maxPages) || DEFAULT_MAX_PAGES[item.mode], 1), 10000) || 1

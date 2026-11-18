@@ -4,7 +4,10 @@ import type { LogLevel, VideoCollectLog } from './video-types'
 export interface LogQuery {
   siteId?: string
   level?: LogLevel
-  beforeId?: number
+  /** 只取该 ISO 时间之后的日志 */
+  since?: string
+  /** newest：取最新的一批（倒序返回）；oldest：取最早的一批（正序返回） */
+  order?: 'newest' | 'oldest'
   limit?: number
 }
 
@@ -123,13 +126,14 @@ export function createCollectLogStore(
       where.push('level = ?')
       params.push(query.level)
     }
-    if (query.beforeId && query.beforeId > 0) {
-      where.push('id < ?')
-      params.push(query.beforeId)
+    if (query.since) {
+      where.push('created_at >= ?')
+      params.push(query.since)
     }
+    const dir = query.order === 'oldest' ? 'ASC' : 'DESC'
     const sql = `SELECT * FROM collect_logs
       ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY id DESC LIMIT ?`
+      ORDER BY id ${dir} LIMIT ?`
     try {
       return (
         connection()

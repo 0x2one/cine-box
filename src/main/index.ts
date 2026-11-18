@@ -530,7 +530,8 @@ ipcMain.handle(
     query?: {
       siteId?: string
       level?: 'info' | 'warn' | 'error'
-      beforeId?: number
+      since?: string
+      order?: 'newest' | 'oldest'
       limit?: number
     }
   ) => {

@@ -493,7 +493,10 @@ interface VideoCollectLog {
 interface VideoLogQuery {
   siteId?: string
   level?: LogLevel
-  beforeId?: number
+  /** 只取该 ISO 时间之后的日志 */
+  since?: string
+  /** newest：最新一批（倒序返回）；oldest：最早一批（正序返回） */
+  order?: 'newest' | 'oldest'
   limit?: number
 }
 
