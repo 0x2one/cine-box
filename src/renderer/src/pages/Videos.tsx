@@ -13,7 +13,13 @@ import {
   Tag,
   Tooltip
 } from 'antd'
-import { EyeInvisibleOutlined, EyeOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  EditOutlined,
+  FileSearchOutlined,
+  ReloadOutlined
+} from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
 
 const PAGE_SIZE = 10
@@ -338,9 +344,12 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
             }}
           />
           <Tooltip title="重新读取视频列表">
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void loadPage()}>
-              刷新
-            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              loading={loading}
+              aria-label="刷新"
+              onClick={() => void loadPage()}
+            />
           </Tooltip>
         </div>
       </div>
@@ -403,21 +412,33 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               </div>
             }
             actions={[
-              <Button key="detail" type="text" size="small" onClick={() => void openDetail(item)}>
-                详情
-              </Button>,
-              <Button key="edit" type="text" size="small" onClick={() => void openEdit(item)}>
-                编辑
-              </Button>,
-              <Button
-                key="hidden"
-                type="text"
-                size="small"
-                icon={item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-                onClick={() => void toggleHidden(item)}
-              >
-                {item.hidden ? '显示' : '隐藏'}
-              </Button>
+              <Tooltip key="detail" title="查看详情">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FileSearchOutlined />}
+                  aria-label="查看详情"
+                  onClick={() => void openDetail(item)}
+                />
+              </Tooltip>,
+              <Tooltip key="edit" title="编辑信息">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  aria-label="编辑信息"
+                  onClick={() => void openEdit(item)}
+                />
+              </Tooltip>,
+              <Tooltip key="hidden" title={item.hidden ? '恢复显示' : '隐藏'}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                  aria-label={item.hidden ? '恢复显示' : '隐藏'}
+                  onClick={() => void toggleHidden(item)}
+                />
+              </Tooltip>
             ]}
           >
             <List.Item.Meta
@@ -433,18 +454,23 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               }
               description={
                 <div className="video-meta">
-                  <span>{siteLabel(siteMap, item.siteId)}</span>
+                  <span
+                    className="video-meta-class"
+                    title={item.vodClass || item.categoryName || '未分类'}
+                  >
+                    {item.vodClass || item.categoryName || '未分类'}
+                  </span>
                   <span className="video-meta-dot" />
-                  <span>{item.vodClass || item.categoryName || '未分类'}</span>
+                  <span className="video-meta-strong">{item.sourceCount} 个来源</span>
                   <span className="video-meta-dot" />
-                  <span>{item.sourceCount} 个来源</span>
-                  <span className="video-meta-dot" />
-                  <span>更新 {item.latestTime}</span>
+                  <span className="video-meta-strong">更新 {item.latestTime}</span>
                 </div>
               }
             />
             <p className="video-intro">{item.introExcerpt || '暂无简介'}</p>
-            {item.vodActor && <p className="video-actor">主演：{item.vodActor}</p>}
+            <p className="video-actor" title={`主演：${item.vodActor || '未知'}`}>
+              主演：{item.vodActor || '未知'}
+            </p>
           </List.Item>
         )}
       />
