@@ -2635,15 +2635,22 @@ body .collect-form .ant-form-item-extra {
   background: var(--surface);
 }
 
+/*
+ * 日志行：时间 / 级别 / 站点 / 模式四列按内容对齐，正文吃掉剩余宽度并单行截断；
+ * 之前一条日志占三行（表头 + 正文 + 说明），一屏看不到几条。
+ */
 .log-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 14px;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content max-content minmax(0, 140px) max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0 10px;
+  padding: 3px 12px;
+  line-height: 1.55;
 }
 
 .log-row + .log-row {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 
 .log-row-error {
@@ -2654,61 +2661,72 @@ body .collect-form .ant-form-item-extra {
   background: color-mix(in srgb, #f08c00 6%, transparent);
 }
 
-.log-row-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
 .log-time {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.log-level {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.log-level-info {
+  color: var(--accent);
+}
+
+.log-level-warn {
+  color: #c77c02;
+}
+
+.log-level-error {
+  color: #d64545;
 }
 
 .log-site {
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .log-mode {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.log-message {
+/* 正文 + 说明同排单行：超出宽度截断，完整内容靠 title 悬停查看 */
+.log-body {
+  min-width: 0;
+  overflow: hidden;
   color: var(--text);
   font-size: 12.5px;
-  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   user-select: text;
 }
 
 .log-note {
-  color: var(--text-muted);
-  font-size: 11.5px;
-  line-height: 1.6;
-  user-select: text;
-}
-
-.log-detail summary {
   color: var(--text-faint);
   font-size: 11.5px;
-  cursor: pointer;
 }
 
-.log-detail pre {
-  margin: 6px 0 0;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  user-select: text;
+/* 窄窗口先让出「模式」列，保留站点与正文 */
+@media (max-width: 900px) {
+  .log-row {
+    grid-template-columns: max-content max-content minmax(0, 110px) minmax(0, 1fr);
+  }
+
+  .log-mode {
+    display: none;
+  }
 }
 
 .log-foot {

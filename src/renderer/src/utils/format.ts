@@ -36,6 +36,23 @@ export function formatShortDateTime(iso: string): string {
   return date.getFullYear() === new Date().getFullYear() ? rest : `${date.getFullYear()}-${rest}`
 }
 
+/** 日志行用的紧凑时间：当天只给 23:41:05，跨天补日期（完整时间放 title） */
+export function formatLogTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  const now = new Date()
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  if (sameDay) return time
+  const day = `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return date.getFullYear() === now.getFullYear()
+    ? `${day} ${time}`
+    : `${date.getFullYear()}-${day} ${time}`
+}
+
 /** 计划时间的相对说法：今天 20:00 / 明天 08:30 / 11月20日 09:00；已过期显示「即将执行」 */
 export function formatUpcoming(iso: string): string {
   const date = new Date(iso)

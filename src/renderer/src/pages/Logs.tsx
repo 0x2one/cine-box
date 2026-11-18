@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { App, Button, Popconfirm, Select, Space, Spin, Switch, Tag, Tooltip } from 'antd'
+import { App, Button, Popconfirm, Select, Space, Spin, Switch, Tooltip } from 'antd'
 import {
   ClearOutlined,
   ReloadOutlined,
   VerticalAlignBottomOutlined,
   VerticalAlignTopOutlined
 } from '@ant-design/icons'
-import { formatDateTime } from '../utils/format'
+import { formatDateTime, formatLogTime } from '../utils/format'
 
-const LEVEL_COLOR: Record<LogLevel, string> = {
-  info: 'blue',
-  warn: 'orange',
-  error: 'red'
+const LEVEL_TEXT: Record<LogLevel, string> = {
+  info: '信息',
+  warn: '警告',
+  error: '错误'
 }
 
 const LEVEL_OPTIONS = [
@@ -250,36 +250,38 @@ function LogsPanel({
         <div className="log-list" ref={listRef}>
           {logs.map((log) => {
             const site = siteMap.get(log.siteId)
+            const siteName = log.siteId
+              ? site
+                ? site.display || site.name
+                : `已删除站点 ${log.siteId.slice(0, 8)}`
+              : '系统'
             return (
               <article className={`log-row log-row-${log.level}`} key={log.id}>
-                <div className="log-row-head">
-                  <span className="log-time">{formatDateTime(log.createdAt, true)}</span>
-                  <Tag color={LEVEL_COLOR[log.level]}>{log.level.toUpperCase()}</Tag>
-                  <span className="log-site">
-                    {log.siteId
-                      ? site
-                        ? site.display || site.name
-                        : `已删除站点 ${log.siteId.slice(0, 8)}`
-                      : '系统'}
-                  </span>
+                <span className="log-time" title={formatDateTime(log.createdAt, true)}>
+                  {formatLogTime(log.createdAt)}
+                </span>
+                <span className={`log-level log-level-${log.level}`}>{LEVEL_TEXT[log.level]}</span>
+                <span className="log-site" title={siteName}>
+                  {siteName}
+                </span>
+                <span className="log-mode">
                   {log.mode && (
-                    <span className="log-mode">
+                    <>
                       {log.mode === 'full' ? '全量' : '增量'}
-                      {log.fetchRange ? ` / ${log.fetchRange}` : ''}
-                    </span>
+                      {log.fetchRange
+                        ? `·${log.fetchRange === 'all' ? '全部' : log.fetchRange}`
+                        : ''}
+                    </>
                   )}
-                </div>
-                <div className="log-message">{log.message}</div>
-                {/* detail 是通用补充说明：错误才折叠成「错误详情」，其余直接内联显示 */}
-                {log.detail &&
-                  (log.level === 'error' ? (
-                    <details className="log-detail">
-                      <summary>错误详情</summary>
-                      <pre>{log.detail}</pre>
-                    </details>
-                  ) : (
-                    <div className="log-note">{log.detail}</div>
-                  ))}
+                </span>
+                {/* 说明跟在正文后面同排显示，单行截断，完整内容在悬停里看 */}
+                <span
+                  className="log-body"
+                  title={`${log.message}${log.detail ? ` · ${log.detail}` : ''}`}
+                >
+                  <span className="log-message">{log.message}</span>
+                  {log.detail && <span className="log-note"> · {log.detail}</span>}
+                </span>
               </article>
             )
           })}
