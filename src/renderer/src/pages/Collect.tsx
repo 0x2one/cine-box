@@ -17,7 +17,6 @@ import {
 import {
   ClockCircleOutlined,
   CloudDownloadOutlined,
-  PlayCircleOutlined,
   ReloadOutlined,
   StopOutlined
 } from '@ant-design/icons'
@@ -377,7 +376,7 @@ function CollectPanel({
                 </span>
                 <div className="collect-meta">
                   <span>
-                    上次采集：
+                    采集：
                     {current?.finishedAt
                       ? formatDateTime(current.finishedAt, true)
                       : current?.updatedAt
@@ -385,18 +384,20 @@ function CollectPanel({
                         : '从未'}
                   </span>
                   <span>
-                    下次计划：
-                    {schedule?.enabled && schedule.nextRunAt
-                      ? formatDateTime(schedule.nextRunAt, true)
-                      : '未启用'}
+                    计划：
+                    {!schedule
+                      ? '—'
+                      : schedule.enabled && schedule.nextRunAt
+                        ? formatDateTime(schedule.nextRunAt, true)
+                        : '未启用'}
                   </span>
-                  {schedule && (
-                    <span>
-                      定时：{formatScheduleTiming(schedule)}
-                      {schedule.pageSize > 0 ? ` · 每页 ${schedule.pageSize} 条` : ''}
-                      {schedule.cacheDetail ? ' · 含详情缓存' : ''}
-                    </span>
-                  )}
+                  {/* 定时一行常驻，跟「计划」一样：没配计划时就是一条横线 */}
+                  <span>
+                    定时：
+                    {schedule ? formatScheduleTiming(schedule) : '—'}
+                    {schedule && schedule.pageSize > 0 ? ` · 每页 ${schedule.pageSize} 条` : ''}
+                    {schedule?.cacheDetail ? ' · 含详情缓存' : ''}
+                  </span>
                 </div>
 
                 <div className="collect-actions">
@@ -415,15 +416,7 @@ function CollectPanel({
                   >
                     定时
                   </Button>
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<PlayCircleOutlined />}
-                    onClick={onOpenProgress}
-                  >
-                    进度
-                  </Button>
-                  {/* 取消按钮排在「进度」右边，采集中才出现，避免误点 */}
+                  {/* 取消只在采集中 / 排队时出现，避免误点 */}
                   {busy && (
                     <Tooltip title="取消当前采集 / 排队">
                       <Button
@@ -431,9 +424,10 @@ function CollectPanel({
                         danger
                         icon={<StopOutlined />}
                         loading={cancelling}
-                        aria-label="取消当前采集 / 排队"
                         onClick={() => current && void cancelCollect(site.id, current)}
-                      />
+                      >
+                        取消
+                      </Button>
                     </Tooltip>
                   )}
                 </div>
