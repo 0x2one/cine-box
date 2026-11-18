@@ -2,24 +2,33 @@ import { useState } from 'react'
 import {
   ApartmentOutlined,
   ArrowLeftOutlined,
+  BarChartOutlined,
+  CloudDownloadOutlined,
   DashboardOutlined,
+  DatabaseOutlined,
   FileTextOutlined,
   GlobalOutlined,
-  SaveOutlined,
-  UnorderedListOutlined
+  SaveOutlined
 } from '@ant-design/icons'
 import BackupPanel from './Backup'
+import CapacityPanel from './Capacity'
 import CategoriesPanel from './Categories'
+import CollectPanel from './Collect'
+import LogsPanel from './Logs'
+import ProgressPanel from './Progress'
 import SitesPanel from './Sites'
 
-type ConsoleSection = 'overview' | 'sites' | 'categories' | 'backup' | 'tasks' | 'logs'
+type ConsoleSection =
+  'overview' | 'sites' | 'categories' | 'collect' | 'progress' | 'capacity' | 'backup' | 'logs'
 
 const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOutlined }[] = [
   { key: 'overview', label: '概览', icon: DashboardOutlined },
   { key: 'sites', label: '站点', icon: GlobalOutlined },
   { key: 'categories', label: '分类', icon: ApartmentOutlined },
+  { key: 'collect', label: '采集', icon: CloudDownloadOutlined },
+  { key: 'progress', label: '进度', icon: BarChartOutlined },
+  { key: 'capacity', label: '容量', icon: DatabaseOutlined },
   { key: 'backup', label: '备份', icon: SaveOutlined },
-  { key: 'tasks', label: '任务', icon: UnorderedListOutlined },
   { key: 'logs', label: '日志', icon: FileTextOutlined }
 ]
 
@@ -27,9 +36,11 @@ const SECTION_META: Record<ConsoleSection, { title: string; desc: string; empty?
   overview: { title: '概览', desc: '运行状态与统计', empty: '暂无数据' },
   sites: { title: '站点', desc: '管理采集站点' },
   categories: { title: '视频分类', desc: '层级管理本地分类' },
-  backup: { title: '备份', desc: '导出与恢复站点、分类和绑定关系' },
-  tasks: { title: '任务', desc: '任务列表与执行进度', empty: '暂无任务' },
-  logs: { title: '日志', desc: '运行日志', empty: '暂无日志' }
+  collect: { title: '采集', desc: '手动采集与定时计划' },
+  progress: { title: '进度', desc: '按站点查看采集进度与计数' },
+  capacity: { title: '容量', desc: '查看并清理 SQLite 与详情文件缓存' },
+  backup: { title: '备份', desc: '导出与恢复站点、分类、绑定和计划' },
+  logs: { title: '日志', desc: '采集运行日志' }
 }
 
 /**
@@ -40,12 +51,16 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
   const [section, setSection] = useState<ConsoleSection>('overview')
   /** 从站点分类弹窗点「绑定」带过来的上下文，非空时分类页进入左右两栏映射模式 */
   const [bindingSite, setBindingSite] = useState<{ id: string; name: string } | null>(null)
+  /** 从进度页点「日志」带过来的站点筛选 */
+  const [logSiteId, setLogSiteId] = useState('')
   const meta = SECTION_META[section]
 
   const goSection = (next: ConsoleSection): void => {
     setSection(next)
     // 离开分类页就退出映射模式，避免回来时还挂着一半的状态
     if (next !== 'categories') setBindingSite(null)
+    // 导航进入日志时默认看全部；行内「日志」按钮走 onOpenLogs，不经过这里
+    setLogSiteId('')
   }
 
   return (
@@ -98,6 +113,31 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
             />
           ) : section === 'backup' ? (
             <BackupPanel title={meta.title} desc={meta.desc} />
+          ) : section === 'collect' ? (
+            <CollectPanel
+              title={meta.title}
+              desc={meta.desc}
+              onOpenProgress={() => setSection('progress')}
+            />
+          ) : section === 'progress' ? (
+            <ProgressPanel
+              title={meta.title}
+              desc={meta.desc}
+              onOpenCollect={() => setSection('collect')}
+              onOpenLogs={(siteId) => {
+                setLogSiteId(siteId)
+                setSection('logs')
+              }}
+            />
+          ) : section === 'capacity' ? (
+            <CapacityPanel title={meta.title} desc={meta.desc} />
+          ) : section === 'logs' ? (
+            <LogsPanel
+              key={logSiteId || 'all'}
+              title={meta.title}
+              desc={meta.desc}
+              initialSiteId={logSiteId}
+            />
           ) : (
             <>
               <div className="settings-panel-head">

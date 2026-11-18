@@ -72,6 +72,59 @@ const api = {
     restore: (source: RestoreSource): Promise<BackupRestoreResult> =>
       ipcRenderer.invoke('backup:restore', source)
   },
+  videos: {
+    list: (query: VideoListQuery): Promise<VideoListResult> =>
+      ipcRenderer.invoke('videos:list', query),
+    detail: (videoId: number, options?: { autoFetch?: boolean }): Promise<VideoDetailResult> =>
+      ipcRenderer.invoke('videos:detail', videoId, options),
+    refreshDetail: (
+      videoId: number,
+      options?: { force?: boolean }
+    ): Promise<VideoDetailRefreshResult> =>
+      ipcRenderer.invoke('videos:detail:refresh', videoId, options),
+    stats: (): Promise<VideoStats> => ipcRenderer.invoke('videos:stats'),
+    capacity: (): Promise<VideoCapacity> => ipcRenderer.invoke('videos:capacity'),
+    scanCapacity: (options?: { fixMissing?: boolean }): Promise<VideoCapacityScanResult> =>
+      ipcRenderer.invoke('videos:capacity:scan', options),
+    clearDetails: (options?: { siteId?: string }): Promise<DetailClearResult> =>
+      ipcRenderer.invoke('videos:details:clear', options),
+    progress: (siteId?: string): Promise<VideoCollectProgress[]> =>
+      ipcRenderer.invoke('videos:progress', siteId),
+    collect: (input: VideoCollectStartInput): Promise<VideoCollectStartResult> =>
+      ipcRenderer.invoke('videos:collect:start', input),
+    cancelCollect: (input: {
+      siteId: string
+      mode?: CollectMode
+      fetchRange?: FetchRange
+    }): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('videos:collect:cancel', input),
+    schedules: (): Promise<VideoScheduleListResult> => ipcRenderer.invoke('videos:schedules:list'),
+    saveSchedule: (input: VideoScheduleInput): Promise<VideoScheduleSaveResult> =>
+      ipcRenderer.invoke('videos:schedules:save', input),
+    removeSchedule: (siteId: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('videos:schedules:remove', siteId),
+    logs: (query?: VideoLogQuery): Promise<VideoLogListResult> =>
+      ipcRenderer.invoke('videos:logs:list', query),
+    clearLogs: (options?: { siteId?: string }): Promise<{ ok: boolean; removed?: number }> =>
+      ipcRenderer.invoke('videos:logs:clear', options),
+    clear: (): Promise<VideoCacheClearResult> => ipcRenderer.invoke('videos:clear'),
+    onProgress: (callback: (progress: VideoCollectProgress) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: VideoCollectProgress): void =>
+        callback(progress)
+      ipcRenderer.on('videos:collect:progress', handler)
+      return () => {
+        ipcRenderer.removeListener('videos:collect:progress', handler)
+      }
+    },
+    onLogAppend: (callback: (log: VideoCollectLog) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, log: VideoCollectLog): void =>
+        callback(log)
+      ipcRenderer.on('videos:logs:onAppend', handler)
+      return () => {
+        ipcRenderer.removeListener('videos:logs:onAppend', handler)
+      }
+    }
+  },
   cache: {
     scan: (): Promise<CacheSummary> => ipcRenderer.invoke('cache:scan'),
     clear: (): Promise<CacheClearResult> => ipcRenderer.invoke('cache:clear'),

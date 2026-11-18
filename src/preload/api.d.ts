@@ -277,6 +277,7 @@ interface BackupCounts {
   siteCategories: number
   categories: number
   bindings: number
+  schedules: number
 }
 
 /** 备份记录：备份目录里的一个 JSON 文件 */
@@ -403,6 +404,306 @@ interface CacheApi {
   onProgress: (callback: (progress: CacheProgress) => void) => () => void
 }
 
+type CollectMode = 'incremental' | 'full'
+type FetchRange = 'all' | '24h' | '48h'
+type CollectStatus = 'idle' | 'queued' | 'running' | 'paused' | 'replacing' | 'done' | 'error'
+type CollectOrigin = 'manual' | 'schedule'
+type LogLevel = 'info' | 'warn' | 'error'
+
+interface VideoCollectProgress {
+  /** `${siteId}:${mode}:${fetchRange}` */
+  id: string
+  siteId: string
+  mode: CollectMode
+  fetchRange: FetchRange
+  status: CollectStatus
+  page: number
+  pageCount: number
+  recordCount: number
+  pageSize: number
+  fetched: number
+  inserted: number
+  updated: number
+  failed: number
+  deleted: number
+  error: string
+  startedAt: string
+  finishedAt: string
+  updatedAt: string
+}
+
+interface VideoCollectStartInput {
+  siteId: string
+  mode: CollectMode
+  fetchRange: FetchRange
+  restart?: boolean
+  maxPages?: number
+  allowEmpty?: boolean
+}
+
+interface VideoCollectStartResult {
+  ok: boolean
+  error?: string
+  progress?: VideoCollectProgress
+}
+
+interface VideoSchedule {
+  siteId: string
+  mode: CollectMode
+  fetchRange: FetchRange
+  intervalMinutes: number
+  enabled: boolean
+  nextRunAt: string
+  lastRunAt: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface VideoScheduleInput {
+  siteId: string
+  enabled: boolean
+  intervalMinutes: number
+  mode: CollectMode
+  fetchRange: FetchRange
+}
+
+interface VideoScheduleListResult {
+  ok: boolean
+  error?: string
+  schedules: VideoSchedule[]
+}
+
+interface VideoScheduleSaveResult {
+  ok: boolean
+  error?: 'INVALID_INPUT' | 'NOT_FOUND' | 'CACHE_UNAVAILABLE'
+  schedule?: VideoSchedule
+}
+
+interface VideoCollectLog {
+  id: number
+  createdAt: string
+  level: LogLevel
+  siteId: string
+  mode: string
+  fetchRange: string
+  message: string
+  detail: string
+}
+
+interface VideoLogQuery {
+  siteId?: string
+  level?: LogLevel
+  beforeId?: number
+  limit?: number
+}
+
+interface VideoLogListResult {
+  ok: boolean
+  error?: string
+  logs: VideoCollectLog[]
+}
+
+interface VideoCapacitySite {
+  siteId: string
+  siteName: string
+  videoCount: number
+  sourceCount: number
+  detailCount: number
+  detailBytes: number
+}
+
+interface VideoCapacity {
+  dbBytes: number
+  dbFileBytes: number
+  walBytes: number
+  shmBytes: number
+  videoCount: number
+  sourceCount: number
+  detailCount: number
+  detailBytes: number
+  logCount: number
+  siteCount: number
+  lastCollectedAt: string
+  sites: VideoCapacitySite[]
+}
+
+interface VideoCapacityDrift {
+  indexCount: number
+  indexBytes: number
+  fileCount: number
+  fileBytes: number
+  missing: number
+  orphan: number
+  tempFiles: number
+  fixed: number
+  scannedAt: string
+}
+
+interface VideoCapacityScanResult extends VideoCapacity {
+  drift: VideoCapacityDrift | null
+}
+
+interface VideoStats {
+  videoCount: number
+  sourceCount: number
+  lastCollectedAt: string
+}
+
+interface VideoListQuery {
+  keyword?: string
+  categoryId?: string
+  cursor?: string
+  limit?: number
+}
+
+interface VideoListItem {
+  id: number
+  name: string
+  pic: string
+  note: string
+  introExcerpt: string
+  introTruncated: boolean
+  latestTs: number
+  latestTime: string
+  sourceCount: number
+  vodActor: string
+  vodClass: string
+  siteId: string
+  sourceVideoId: string
+  categoryId: string
+  categoryName: string
+}
+
+interface VideoListResult {
+  ok: boolean
+  items: VideoListItem[]
+  nextCursor: string
+  error?: string
+}
+
+interface VideoPlayEpisode {
+  name: string
+  url: string
+}
+
+interface VideoPlayLine {
+  flag: string
+  episodes: VideoPlayEpisode[]
+}
+
+interface CachedVideoDetail {
+  format: string
+  version: number
+  siteId: string
+  sourceVideoId: string
+  fetchedAt: string
+  sourceTime: string
+  sourceTs: number
+  name: string
+  pic: string
+  note: string
+  intro: string
+  state: string
+  year: string
+  area: string
+  lang: string
+  actor: string
+  vodClass: string
+  director: string
+  category: { id: string; name: string }
+  playLines: VideoPlayLine[]
+}
+
+interface VideoDetailSource {
+  id: number
+  siteId: string
+  siteName: string
+  sourceVideoId: string
+  name: string
+  pic: string
+  note: string
+  sourceTime: string
+  sourceTs: number
+  categoryId: string
+  categoryName: string
+  vodActor: string
+  vodClass: string
+  detailAvailable: boolean
+  detailStale: boolean
+  detailCachedAt: string
+  detailSize: number
+  detailAccessedAt: string
+  detailError: string
+  detail?: CachedVideoDetail
+}
+
+interface VideoDetail {
+  id: number
+  name: string
+  pic: string
+  note: string
+  introExcerpt: string
+  introTruncated: boolean
+  latestTs: number
+  latestTime: string
+  vodActor: string
+  vodClass: string
+  sourceCount: number
+  sources: VideoDetailSource[]
+}
+
+interface VideoDetailResult {
+  ok: boolean
+  error?: string
+  video?: VideoDetail
+}
+
+interface VideoDetailRefreshResult extends VideoDetailResult {
+  refreshed: number
+  failed: number
+}
+
+interface DetailClearResult {
+  ok: boolean
+  freedBytes?: number
+  removedFiles?: number
+  error?: string
+}
+
+interface VideoCacheClearResult {
+  ok: boolean
+  freedBytes?: number
+  error?: string
+}
+
+interface VideosApi {
+  list: (query: VideoListQuery) => Promise<VideoListResult>
+  detail: (videoId: number, options?: { autoFetch?: boolean }) => Promise<VideoDetailResult>
+  refreshDetail: (
+    videoId: number,
+    options?: { force?: boolean }
+  ) => Promise<VideoDetailRefreshResult>
+  stats: () => Promise<VideoStats>
+  capacity: () => Promise<VideoCapacity>
+  scanCapacity: (options?: { fixMissing?: boolean }) => Promise<VideoCapacityScanResult>
+  clearDetails: (options?: { siteId?: string }) => Promise<DetailClearResult>
+  progress: (siteId?: string) => Promise<VideoCollectProgress[]>
+  collect: (input: VideoCollectStartInput) => Promise<VideoCollectStartResult>
+  cancelCollect: (input: {
+    siteId: string
+    mode?: CollectMode
+    fetchRange?: FetchRange
+  }) => Promise<{ ok: boolean; error?: string }>
+  schedules: () => Promise<VideoScheduleListResult>
+  saveSchedule: (input: VideoScheduleInput) => Promise<VideoScheduleSaveResult>
+  removeSchedule: (siteId: string) => Promise<{ ok: boolean; error?: string }>
+  logs: (query?: VideoLogQuery) => Promise<VideoLogListResult>
+  clearLogs: (options?: { siteId?: string }) => Promise<{ ok: boolean; removed?: number }>
+  clear: () => Promise<VideoCacheClearResult>
+  onProgress: (callback: (progress: VideoCollectProgress) => void) => () => void
+  onLogAppend: (callback: (log: VideoCollectLog) => void) => () => void
+}
+
 type UpdaterState =
   'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
 
@@ -436,6 +737,7 @@ interface Api {
   categories: CategoriesApi
   bindings: BindingsApi
   backup: BackupApi
+  videos: VideosApi
   cache: CacheApi
   updater: UpdaterApi
   windowControls: WindowControls

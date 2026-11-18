@@ -21,7 +21,8 @@ const COUNT_ITEMS: { key: keyof BackupCounts; label: string }[] = [
   { key: 'sites', label: '站点' },
   { key: 'siteCategories', label: '在线分类' },
   { key: 'categories', label: '本地分类' },
-  { key: 'bindings', label: '绑定关系' }
+  { key: 'bindings', label: '绑定关系' },
+  { key: 'schedules', label: '采集计划' }
 ]
 
 const BACKUP_ERRORS: Record<string, string> = {
@@ -34,11 +35,11 @@ const BACKUP_ERRORS: Record<string, string> = {
 }
 
 function describeCounts(counts: BackupCounts): string {
-  return `${counts.sites} 个站点 · ${counts.siteCategories} 个在线分类 · ${counts.categories} 个本地分类 · ${counts.bindings} 条绑定`
+  return `${counts.sites} 个站点 · ${counts.siteCategories} 个在线分类 · ${counts.categories} 个本地分类 · ${counts.bindings} 条绑定 · ${counts.schedules} 条采集计划`
 }
 
 /**
- * 控制台「备份」分区：把站点、在线分类、本地分类与绑定关系存成一份 JSON 备份，
+ * 控制台「备份」分区：把站点、在线分类、本地分类、绑定关系与定时采集计划存成一份 JSON 备份，
  * 恢复时可以选库内记录，也可以选任意备份文件。
  */
 function BackupPanel({ title, desc }: { title: string; desc: string }): React.JSX.Element {
@@ -218,7 +219,7 @@ function BackupPanel({ title, desc }: { title: string; desc: string }): React.JS
         <div className="sites-placeholder">
           <span className="sites-empty-title">还没有备份</span>
           <span className="sites-empty-hint">
-            点击右上角「立即备份」保存当前的站点、分类与绑定关系
+            点击右上角「立即备份」保存当前的站点、分类、绑定关系与采集计划
           </span>
         </div>
       ) : (
@@ -277,7 +278,8 @@ function BackupPanel({ title, desc }: { title: string; desc: string }): React.JS
       {!loading && (
         <div className="backup-foot">
           <span>
-            备份是明文 JSON 文件，包含站点、在线分类、本地分类与绑定关系，可以直接分享给别人导入。
+            备份是明文 JSON
+            文件，包含站点、在线分类、本地分类、绑定关系与定时采集计划，可以直接分享给别人导入。
           </span>
           <div className="backup-path">
             <span className="backup-path-label">备份目录</span>
@@ -333,7 +335,7 @@ function BackupPanel({ title, desc }: { title: string; desc: string }): React.JS
               ))}
             </div>
             <p className="backup-warning">
-              恢复会用这份备份覆盖当前所有站点、在线分类、本地分类与绑定关系。恢复前会自动把当前数据备份一份，可在列表中找回。
+              恢复会用这份备份覆盖当前所有站点、在线分类、本地分类、绑定关系与定时采集计划。恢复前会自动把当前数据备份一份，可在列表中找回。
             </p>
           </div>
         )}

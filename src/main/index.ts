@@ -22,6 +22,9 @@ import {
   type CategoryPlacement,
   type VideoCategoryInput
 } from './category-store'
+import { createCollectLogStore } from './collect-log-store'
+import { createCollectScheduleStore } from './collect-schedule-store'
+import { createCollectScheduler } from './collect-scheduler'
 import { fetchSiteCategories } from './site-categories'
 import {
   createSiteStore,
@@ -30,6 +33,10 @@ import {
   type SiteInput
 } from './site-store'
 import { createUpdater } from './updater'
+import { createVideoCacheStore } from './video-cache-store'
+import { createVideoCollector } from './video-collector'
+import { createVideoDetailCache } from './video-detail-cache'
+import type { VideoCollectStartInput, VideoListQuery, VideoScheduleInput } from './video-types'
 
 const gotTheLock = app.requestSingleInstanceLock()
 
@@ -48,6 +55,39 @@ const categoryStore = createCategoryStore(databaseFile)
 const bindingStore = createBindingStore(databaseFile)
 // 备份文件与数据库同目录：userData/Data/Backups
 const backupStore = createBackupStore(databaseFile, app.getVersion())
+// 视频缓存库与详情文件单独存放，可整体清理，不影响站点/分类/计划
+const videoCacheFile = join(app.getPath('userData'), 'Data', 'video-cache.db')
+const videoRoot = join(app.getPath('userData'), 'Data', 'videos')
+const videoStore = createVideoCacheStore(videoCacheFile)
+const scheduleStore = createCollectScheduleStore(databaseFile)
+const collectLogs = createCollectLogStore(
+  () => videoStore.connection(),
+  (log) => sendToRenderer('videos:logs:onAppend', log)
+)
+let cacheEpoch = 0
+const detailCache = createVideoDetailCache({
+  rootDir: videoRoot,
+  store: videoStore,
+  listSites: () => siteStore.list(),
+  epoch: () => cacheEpoch,
+  bumpEpoch: () => {
+    cacheEpoch += 1
+  }
+})
+const collector = createVideoCollector({
+  store: videoStore,
+  details: detailCache,
+  logs: collectLogs,
+  listSites: () => siteStore.list(),
+  emitProgress: (progress) => sendToRenderer('videos:collect:progress', progress)
+})
+const scheduler = createCollectScheduler({
+  schedules: scheduleStore,
+  collector,
+  logs: collectLogs
+})
+/** 缓存库初始化失败时不影响应用启动，视频相关 IPC 返回 CACHE_UNAVAILABLE */
+let videoCacheReady = false
 /** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
 const pendingCategoryRefresh = new Map<string, { categories: SiteCategoryInput[]; at: number }>()
 const PENDING_CATEGORY_TTL = 5 * 60 * 1000
@@ -57,6 +97,27 @@ const cacheManager = createCacheManager()
 function sendToRenderer(channel: string, ...args: unknown[]): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.webContents.send(channel, ...args)
+}
+
+function siteNameMap(): Map<string, string> {
+  return new Map(siteStore.list().map((site) => [site.id, site.display || site.name]))
+}
+
+/** 启动 / 恢复备份后按 cache_sites 对账，不扫 video_sources 大表 */
+async function reconcileVideoCache(): Promise<void> {
+  if (!videoCacheReady) return
+  const sites = new Map(siteStore.list().map((site) => [site.id, site]))
+  for (const row of videoStore.listCacheSites()) {
+    const site = sites.get(row.siteId)
+    if (!site || site.address !== row.address || site.format !== row.format) {
+      videoStore.removeSite(row.siteId)
+      await detailCache.removeSite(row.siteId)
+    }
+  }
+}
+
+function cacheUnavailable(): { ok: false; error: string } {
+  return { ok: false, error: 'CACHE_UNAVAILABLE' }
 }
 
 /* ── 主窗口显示 / 隐藏 ── */
@@ -356,21 +417,198 @@ ipcMain.handle('cache:clear', (event) =>
   })
 )
 
+/* ── IPC：视频缓存 ── */
+
+ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), items: [], nextCursor: '' }
+  let filters: { siteId: string; categoryId: string }[] | undefined
+  if (query?.categoryId) {
+    filters = bindingStore
+      .forCategory(query.categoryId)
+      .map((binding) => ({ siteId: binding.siteId, categoryId: binding.sourceId }))
+    if (filters.length === 0) return { ok: true, items: [], nextCursor: '' }
+  }
+  return videoStore.listVideos(query ?? {}, filters)
+})
+
+ipcMain.handle(
+  'videos:detail',
+  async (_event, videoId: number, options?: { autoFetch?: boolean }) => {
+    if (!videoCacheReady) return cacheUnavailable()
+    return detailCache.read(Number(videoId), options?.autoFetch !== false)
+  }
+)
+
+ipcMain.handle(
+  'videos:detail:refresh',
+  async (_event, videoId: number, options?: { force?: boolean }) => {
+    if (!videoCacheReady) return { ...cacheUnavailable(), refreshed: 0, failed: 0 }
+    return detailCache.refresh(Number(videoId), Boolean(options?.force))
+  }
+)
+
+ipcMain.handle('videos:stats', () => {
+  if (!videoCacheReady) return { videoCount: 0, sourceCount: 0, lastCollectedAt: '' }
+  return videoStore.stats()
+})
+
+ipcMain.handle('videos:capacity', () => {
+  if (!videoCacheReady) {
+    return {
+      dbBytes: 0,
+      dbFileBytes: 0,
+      walBytes: 0,
+      shmBytes: 0,
+      videoCount: 0,
+      sourceCount: 0,
+      detailCount: 0,
+      detailBytes: 0,
+      logCount: 0,
+      siteCount: 0,
+      lastCollectedAt: '',
+      sites: []
+    }
+  }
+  return videoStore.capacity(siteNameMap())
+})
+
+ipcMain.handle('videos:capacity:scan', async (_event, options?: { fixMissing?: boolean }) => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), drift: null }
+  const drift = await detailCache.scan(Boolean(options?.fixMissing))
+  return { ...videoStore.capacity(siteNameMap()), drift }
+})
+
+ipcMain.handle('videos:details:clear', async (_event, options?: { siteId?: string }) => {
+  if (!videoCacheReady) return cacheUnavailable()
+  return detailCache.clear(options?.siteId ? String(options.siteId) : undefined)
+})
+
+ipcMain.handle('videos:progress', (_event, siteId?: string) => {
+  if (!videoCacheReady) return []
+  return videoStore.listProgress(siteId ? String(siteId) : undefined)
+})
+
+ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartInput) => {
+  if (!videoCacheReady) return cacheUnavailable()
+  return collector.enqueue(input, 'manual')
+})
+
+ipcMain.handle(
+  'videos:collect:cancel',
+  (
+    _event,
+    input: {
+      siteId: string
+      mode?: VideoCollectStartInput['mode']
+      fetchRange?: VideoCollectStartInput['fetchRange']
+    }
+  ) => {
+    if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
+    return collector.cancel(input)
+  }
+)
+
+ipcMain.handle('videos:schedules:list', () => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), schedules: [] }
+  return { ok: true, schedules: scheduleStore.list() }
+})
+
+ipcMain.handle('videos:schedules:save', (_event, input: VideoScheduleInput) => {
+  if (!videoCacheReady) return cacheUnavailable()
+  return scheduleStore.save(input)
+})
+
+ipcMain.handle('videos:schedules:remove', (_event, siteId: string) => {
+  if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
+  return { ok: scheduleStore.remove(String(siteId)) }
+})
+
+ipcMain.handle(
+  'videos:logs:list',
+  (
+    _event,
+    query?: {
+      siteId?: string
+      level?: 'info' | 'warn' | 'error'
+      beforeId?: number
+      limit?: number
+    }
+  ) => {
+    if (!videoCacheReady) return { ok: false, logs: [], error: 'CACHE_UNAVAILABLE' }
+    return { ok: true, logs: collectLogs.list(query ?? {}) }
+  }
+)
+
+ipcMain.handle('videos:logs:clear', (_event, options?: { siteId?: string }) => {
+  if (!videoCacheReady) return { ok: false }
+  return {
+    ok: true,
+    removed: collectLogs.clear(options?.siteId ? String(options.siteId) : undefined)
+  }
+})
+
+ipcMain.handle('videos:clear', async () => {
+  if (!videoCacheReady) return cacheUnavailable()
+  collector.suspend()
+  scheduler.stop()
+  await collector.cancelAll()
+  const before = videoStore.capacity()
+  try {
+    await detailCache.removeAll()
+    await videoStore.rebuild()
+    videoCacheReady = true
+  } catch {
+    videoCacheReady = false
+    return { ok: false, error: 'DB' }
+  }
+  videoCacheReady = true
+  collectLogs.trim()
+  collector.resume()
+  scheduler.start()
+  return { ok: true, freedBytes: before.dbBytes + before.detailBytes }
+})
+
 /* ── IPC：采集站点 ── */
 
 ipcMain.handle('sites:list', () => siteStore.list())
 
 ipcMain.handle('sites:add', (_event, input: SiteInput) => siteStore.add(input))
 
-ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
+ipcMain.handle('sites:update', async (_event, id: string, input: SiteInput) => {
+  const siteId = String(id)
   // 地址 / 格式可能变化，之前抓取的待确认结果随之作废
-  pendingCategoryRefresh.delete(String(id))
-  return siteStore.update(String(id), input)
+  pendingCategoryRefresh.delete(siteId)
+  const existing = siteStore.list().find((item) => item.id === siteId) ?? null
+  const result = siteStore.update(siteId, input)
+  if (
+    result.ok &&
+    existing &&
+    (existing.address !== result.site.address || existing.format !== result.site.format)
+  ) {
+    // 地址 / 格式变化后旧缓存不可信：取消采集并清空该站点缓存与详情目录
+    collector.cancel({ siteId })
+    if (videoCacheReady) {
+      videoStore.removeSite(siteId)
+      await detailCache.removeSite(siteId)
+    }
+  }
+  return result
 })
 
-ipcMain.handle('sites:remove', (_event, id: string) => {
-  pendingCategoryRefresh.delete(String(id))
-  return siteStore.remove(String(id))
+ipcMain.handle('sites:remove', async (_event, id: string) => {
+  const siteId = String(id)
+  pendingCategoryRefresh.delete(siteId)
+  const result = siteStore.remove(siteId)
+  if (result.ok) {
+    collector.cancel({ siteId })
+    if (videoCacheReady) {
+      videoStore.removeSite(siteId)
+      await detailCache.removeSite(siteId)
+    }
+    // collect_schedules 由业务库外键级联删除
+    scheduleStore.remove(siteId)
+  }
+  return result
 })
 
 ipcMain.handle('sites:categories', async (_event, id: string) => {
@@ -499,10 +737,14 @@ ipcMain.handle('backup:pick', async () => {
   return backupStore.inspect(result.filePaths[0])
 })
 
-ipcMain.handle('backup:restore', (_event, source: RestoreSource) => {
+ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
   const result = backupStore.restore(source)
   // 站点分类被整体替换，之前「重新获取」的待确认结果全部作废
-  if (result.ok) pendingCategoryRefresh.clear()
+  if (result.ok) {
+    pendingCategoryRefresh.clear()
+    if (videoCacheReady) await collector.cancelAll()
+    await reconcileVideoCache()
+  }
   return result
 })
 
@@ -566,7 +808,18 @@ if (!gotTheLock) {
     await siteStore.init().catch(() => {})
     await categoryStore.init().catch(() => {})
     await bindingStore.init().catch(() => {})
+    await scheduleStore.init().catch((error) => console.error('采集计划初始化失败', error))
     await backupStore.init().catch(() => {})
+    try {
+      await videoStore.init()
+      videoCacheReady = true
+      videoStore.resetInterrupted()
+      collectLogs.trim()
+      await reconcileVideoCache()
+    } catch (error) {
+      videoCacheReady = false
+      console.error('视频缓存初始化失败', error)
+    }
 
     const savedShortcut = appSettingsStore.get().showShortcut
     if (savedShortcut) tryRegisterAccel(savedShortcut)
@@ -575,6 +828,7 @@ if (!gotTheLock) {
     createWindow()
     syncTrayWithSettings()
     updater.init()
+    if (videoCacheReady) scheduler.start()
 
     app.on('activate', function () {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -588,9 +842,12 @@ if (!gotTheLock) {
   app.on('before-quit', () => {
     isQuitting = true
     destroyTray()
+    scheduler.stop()
+    collector.shutdown()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护
     if (app.isReady()) globalShortcut.unregisterAll()
     // 关闭数据库连接，触发 WAL checkpoint 并清掉 -wal / -shm 附属文件
+    videoStore.close()
     siteStore.close()
     categoryStore.close()
     bindingStore.close()

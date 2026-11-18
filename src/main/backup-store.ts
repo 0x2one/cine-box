@@ -16,7 +16,8 @@ import { inTransaction, openDatabase } from './database'
 
 /** 备份文件的格式标记与版本，恢复时用来识别与兼容 */
 const BACKUP_FORMAT = 'cine-box-backup'
-const BACKUP_VERSION = 1
+/** 版本 2：增加 collect_schedules；版本 1 备份按空计划恢复 */
+const BACKUP_VERSION = 2
 /** 备份目录（与数据库同级），文件是明文 JSON，方便分享与跨版本恢复 */
 const BACKUP_DIR = 'Backups'
 const FILE_PREFIX = 'cine-box-backup-'
@@ -31,6 +32,7 @@ export interface BackupCounts {
   siteCategories: number
   categories: number
   bindings: number
+  schedules: number
 }
 
 /** 一条备份记录：磁盘上的一个 JSON 文件 */
@@ -88,11 +90,24 @@ interface BindingRow {
   updatedAt: string
 }
 
+interface ScheduleRow {
+  siteId: string
+  mode: 'incremental' | 'full'
+  fetchRange: 'all' | '24h' | '48h'
+  intervalMinutes: number
+  enabled: boolean
+  nextRunAt: string
+  lastRunAt: string
+  createdAt: string
+  updatedAt: string
+}
+
 interface BackupData {
   sites: SiteRow[]
   siteCategories: SiteCategoryRow[]
   categories: VideoCategoryRow[]
   bindings: BindingRow[]
+  schedules: ScheduleRow[]
 }
 
 interface BackupDocument {
@@ -197,6 +212,13 @@ FROM category_bindings
 ORDER BY rowid
 `
 
+const SELECT_SCHEDULES = `
+SELECT site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
+       created_at, updated_at
+FROM collect_schedules
+ORDER BY created_at ASC, rowid ASC
+`
+
 const INSERT_SITE = `
 INSERT INTO sites (id, name, display, address, format, remark, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -216,6 +238,13 @@ const INSERT_BINDING = `
 INSERT INTO category_bindings
   (id, site_id, site_category_id, video_category_id, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
+`
+
+const INSERT_SCHEDULE = `
+INSERT INTO collect_schedules
+  (site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
+   created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -246,12 +275,15 @@ function countsOf(data: BackupData): BackupCounts {
     sites: data.sites.length,
     siteCategories: data.siteCategories.length,
     categories: data.categories.length,
-    bindings: data.bindings.length
+    bindings: data.bindings.length,
+    schedules: data.schedules.length
   }
 }
 
 function totalOf(counts: BackupCounts): number {
-  return counts.sites + counts.siteCategories + counts.categories + counts.bindings
+  return (
+    counts.sites + counts.siteCategories + counts.categories + counts.bindings + counts.schedules
+  )
 }
 
 type ParseResult = { ok: true; document: BackupDocument } | { ok: false; error: BackupError }
@@ -403,6 +435,42 @@ function parseBindings(
   return rows
 }
 
+/** 定时采集计划：站点必须存在；旧备份（版本 1）没有该数组时按空计划处理 */
+function parseSchedules(value: unknown, siteIds: Set<string>): ScheduleRow[] | null {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) return null
+  const rows: ScheduleRow[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (!isRecord(item)) return null
+    const siteId = requiredText(item.siteId, 64)
+    if (!siteId || !siteIds.has(siteId) || seen.has(siteId)) return null
+    const mode = item.mode === 'incremental' || item.mode === 'full' ? item.mode : null
+    const fetchRange =
+      item.fetchRange === 'all' || item.fetchRange === '24h' || item.fetchRange === '48h'
+        ? item.fetchRange
+        : null
+    const interval = Number(item.intervalMinutes)
+    if (!mode || !fetchRange || !Number.isFinite(interval) || interval < 5) return null
+    if (mode === 'full' && fetchRange !== 'all') return null
+    if (typeof item.enabled !== 'boolean') return null
+    const createdAt = timestamp(item.createdAt, new Date().toISOString())
+    seen.add(siteId)
+    rows.push({
+      siteId,
+      mode,
+      fetchRange,
+      intervalMinutes: Math.min(Math.floor(interval), 10080),
+      enabled: item.enabled,
+      nextRunAt: optionalText(item.nextRunAt, 40),
+      lastRunAt: optionalText(item.lastRunAt, 40),
+      createdAt,
+      updatedAt: timestamp(item.updatedAt, createdAt)
+    })
+  }
+  return rows
+}
+
 /** 校验整份备份；任何一行对不上都拒绝，避免只恢复一半数据 */
 function parseBackup(raw: unknown): ParseResult {
   if (!isRecord(raw) || raw.format !== BACKUP_FORMAT) return invalid()
@@ -426,8 +494,10 @@ function parseBackup(raw: unknown): ParseResult {
     new Set(categories.map((row) => row.id))
   )
   if (!bindings) return invalid()
+  const schedules = parseSchedules(raw.data.schedules, siteIds)
+  if (!schedules) return invalid()
 
-  const data: BackupData = { sites, siteCategories, categories, bindings }
+  const data: BackupData = { sites, siteCategories, categories, bindings, schedules }
   const createdAt = timestamp(raw.createdAt, new Date().toISOString())
   return {
     ok: true,
@@ -511,7 +581,29 @@ function readState(database: DatabaseSync): BackupData {
       }
     })
 
-  return { sites, siteCategories, categories, bindings }
+  const schedules: ScheduleRow[] = database
+    .prepare(SELECT_SCHEDULES)
+    .all()
+    .map((row) => {
+      const raw = row as Record<string, unknown>
+      const createdAt = timestamp(raw.created_at, new Date().toISOString())
+      return {
+        siteId: String(raw.site_id ?? ''),
+        mode: raw.mode === 'full' ? ('full' as const) : ('incremental' as const),
+        fetchRange:
+          raw.fetch_range === '24h' || raw.fetch_range === '48h'
+            ? raw.fetch_range
+            : ('all' as const),
+        intervalMinutes: Number(raw.interval_minutes ?? 360),
+        enabled: Number(raw.enabled ?? 1) !== 0,
+        nextRunAt: String(raw.next_run_at ?? ''),
+        lastRunAt: String(raw.last_run_at ?? ''),
+        createdAt,
+        updatedAt: timestamp(raw.updated_at, createdAt)
+      }
+    })
+
+  return { sites, siteCategories, categories, bindings, schedules }
 }
 
 /** 自引用外键要求父分类先插入，按层级从浅到深写入 */
@@ -532,9 +624,10 @@ function orderByDepth(rows: VideoCategoryRow[]): VideoCategoryRow[] {
     .map((item) => item.row)
 }
 
-/** 整体覆盖：先清空四张表，再按外键顺序写回，失败时由事务回滚 */
+/** 整体覆盖：先清空五张表，再按外键顺序写回，失败时由事务回滚 */
 function applyState(database: DatabaseSync, data: BackupData): void {
   inTransaction(database, (tx) => {
+    tx.exec('DELETE FROM collect_schedules')
     tx.exec('DELETE FROM category_bindings')
     tx.exec('DELETE FROM site_categories')
     tx.exec('DELETE FROM video_categories')
@@ -549,6 +642,21 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.address,
         row.format,
         row.remark,
+        row.createdAt,
+        row.updatedAt
+      )
+    }
+
+    const insertSchedule = tx.prepare(INSERT_SCHEDULE)
+    for (const row of data.schedules) {
+      insertSchedule.run(
+        row.siteId,
+        row.mode,
+        row.fetchRange,
+        row.intervalMinutes,
+        row.enabled ? 1 : 0,
+        row.nextRunAt,
+        row.lastRunAt,
         row.createdAt,
         row.updatedAt
       )
