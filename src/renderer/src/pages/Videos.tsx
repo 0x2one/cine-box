@@ -670,10 +670,9 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                     ) : (
                       source.detail.playLines.map((line) => (
                         <div className="video-line" key={`${source.id}-${line.flag}`}>
-                          <span className="video-line-flag">{line.flag || '默认线路'}</span>
-                          {line.episodes.length > EPISODE_LIMIT && (
-                            <span className="video-line-count">共 {line.episodes.length} 集</span>
-                          )}
+                          <span className="video-line-flag" title={line.flag || '默认线路'}>
+                            {line.flag || '默认线路'}
+                          </span>
                           <div className="video-episodes">
                             {line.episodes.slice(0, EPISODE_LIMIT).map((episode, index) => (
                               <span
@@ -686,7 +685,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                             ))}
                             {line.episodes.length > EPISODE_LIMIT && (
                               <span className="video-episode is-more">
-                                +{line.episodes.length - EPISODE_LIMIT}
+                                还有 {line.episodes.length - EPISODE_LIMIT} 集
                               </span>
                             )}
                           </div>
