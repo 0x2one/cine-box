@@ -36,7 +36,12 @@ import { createUpdater } from './updater'
 import { createVideoCacheStore } from './video-cache-store'
 import { createVideoCollector } from './video-collector'
 import { createVideoDetailCache } from './video-detail-cache'
-import type { VideoCollectStartInput, VideoListQuery, VideoScheduleInput } from './video-types'
+import type {
+  VideoCollectStartInput,
+  VideoListQuery,
+  VideoScheduleInput,
+  VideoUpdateInput
+} from './video-types'
 
 const gotTheLock = app.requestSingleInstanceLock()
 
@@ -420,15 +425,20 @@ ipcMain.handle('cache:clear', (event) =>
 /* ── IPC：视频缓存 ── */
 
 ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
-  if (!videoCacheReady) return { ...cacheUnavailable(), items: [], nextCursor: '' }
+  if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
   let filters: { siteId: string; categoryId: string }[] | undefined
   if (query?.categoryId) {
     filters = bindingStore
       .forCategory(query.categoryId)
       .map((binding) => ({ siteId: binding.siteId, categoryId: binding.sourceId }))
-    if (filters.length === 0) return { ok: true, items: [], nextCursor: '' }
+    if (filters.length === 0) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
   }
   return videoStore.listVideos(query ?? {}, filters)
+})
+
+ipcMain.handle('videos:update', (_event, videoId: number, patch: VideoUpdateInput) => {
+  if (!videoCacheReady) return { ok: false, error: 'DB' }
+  return videoStore.updateVideo(Number(videoId), patch ?? {})
 })
 
 ipcMain.handle(

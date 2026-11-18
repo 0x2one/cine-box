@@ -8,7 +8,8 @@ import {
   DatabaseOutlined,
   FileTextOutlined,
   GlobalOutlined,
-  SaveOutlined
+  SaveOutlined,
+  VideoCameraOutlined
 } from '@ant-design/icons'
 import BackupPanel from './Backup'
 import CapacityPanel from './Capacity'
@@ -17,9 +18,18 @@ import CollectPanel from './Collect'
 import LogsPanel from './Logs'
 import ProgressPanel from './Progress'
 import SitesPanel from './Sites'
+import VideosPanel from './Videos'
 
 type ConsoleSection =
-  'overview' | 'sites' | 'categories' | 'collect' | 'progress' | 'capacity' | 'backup' | 'logs'
+  | 'overview'
+  | 'sites'
+  | 'categories'
+  | 'collect'
+  | 'progress'
+  | 'videos'
+  | 'capacity'
+  | 'backup'
+  | 'logs'
 
 const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOutlined }[] = [
   { key: 'overview', label: '概览', icon: DashboardOutlined },
@@ -27,6 +37,7 @@ const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOut
   { key: 'categories', label: '分类', icon: ApartmentOutlined },
   { key: 'collect', label: '采集', icon: CloudDownloadOutlined },
   { key: 'progress', label: '进度', icon: BarChartOutlined },
+  { key: 'videos', label: '视频', icon: VideoCameraOutlined },
   { key: 'capacity', label: '容量', icon: DatabaseOutlined },
   { key: 'backup', label: '备份', icon: SaveOutlined },
   { key: 'logs', label: '日志', icon: FileTextOutlined }
@@ -38,6 +49,7 @@ const SECTION_META: Record<ConsoleSection, { title: string; desc: string; empty?
   categories: { title: '视频分类', desc: '层级管理本地分类' },
   collect: { title: '采集', desc: '手动采集与定时计划' },
   progress: { title: '进度', desc: '按站点查看采集进度与计数' },
+  videos: { title: '视频', desc: '已采集视频与详情' },
   capacity: { title: '容量', desc: '查看并清理缓存索引与详情文件' },
   backup: { title: '备份', desc: '导出与恢复站点、分类、绑定和计划' },
   logs: { title: '日志', desc: '采集运行日志' }
@@ -129,6 +141,8 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
                 setSection('logs')
               }}
             />
+          ) : section === 'videos' ? (
+            <VideosPanel title={meta.title} desc={meta.desc} />
           ) : section === 'capacity' ? (
             <CapacityPanel title={meta.title} desc={meta.desc} />
           ) : section === 'logs' ? (

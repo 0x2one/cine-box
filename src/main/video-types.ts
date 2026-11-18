@@ -134,8 +134,11 @@ export interface VideoListQuery {
   keyword?: string
   /** 本地视频分类：先由业务库解析成在线分类，再在缓存库过滤 */
   categoryId?: string
-  cursor?: string
-  limit?: number
+  /** 1 起的页码，配合 pageSize 做服务端分页 */
+  page?: number
+  pageSize?: number
+  /** 按隐藏状态过滤；默认 all（控制台里隐藏的也要能看到并改回来） */
+  visibility?: 'all' | 'shown' | 'hidden'
 }
 
 export interface VideoListItem {
@@ -154,12 +157,36 @@ export interface VideoListItem {
   sourceVideoId: string
   categoryId: string
   categoryName: string
+  /** 展示端隐藏；默认 false（显示） */
+  hidden: boolean
+  /** 备注 / 简介 / 主演 / 类型 / 封面被手动改过 */
+  edited: boolean
 }
 
 export interface VideoListResult {
   ok: boolean
   items: VideoListItem[]
-  nextCursor: string
+  total: number
+  page: number
+  pageSize: number
+  error?: string
+}
+
+/** 只允许改这些字段：名称是合并键，不提供修改入口 */
+export interface VideoUpdateInput {
+  note?: string
+  intro?: string
+  vodActor?: string
+  vodClass?: string
+  /** 选中的封面地址（必须来自该视频的某个来源），空串表示恢复主来源封面 */
+  pic?: string
+  /** 封面来自哪个站点，仅用于界面回显 */
+  picSiteId?: string
+  hidden?: boolean
+}
+
+export interface VideoUpdateResult {
+  ok: boolean
   error?: string
 }
 
@@ -238,6 +265,12 @@ export interface VideoDetail {
   vodClass: string
   sourceCount: number
   sources: VideoDetailSource[]
+  /** 展示端隐藏；默认 false */
+  hidden: boolean
+  /** 存在手动修改的字段 */
+  edited: boolean
+  /** 封面取自哪个站点（手动换图时记录），空串表示用主来源 */
+  picSiteId: string
 }
 
 export interface VideoDetailResult {

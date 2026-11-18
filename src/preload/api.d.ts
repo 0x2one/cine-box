@@ -560,8 +560,9 @@ interface VideoStats {
 interface VideoListQuery {
   keyword?: string
   categoryId?: string
-  cursor?: string
-  limit?: number
+  page?: number
+  pageSize?: number
+  visibility?: 'all' | 'shown' | 'hidden'
 }
 
 interface VideoListItem {
@@ -580,12 +581,31 @@ interface VideoListItem {
   sourceVideoId: string
   categoryId: string
   categoryName: string
+  hidden: boolean
+  edited: boolean
 }
 
 interface VideoListResult {
   ok: boolean
   items: VideoListItem[]
-  nextCursor: string
+  total: number
+  page: number
+  pageSize: number
+  error?: string
+}
+
+interface VideoUpdateInput {
+  note?: string
+  intro?: string
+  vodActor?: string
+  vodClass?: string
+  pic?: string
+  picSiteId?: string
+  hidden?: boolean
+}
+
+interface VideoUpdateResult {
+  ok: boolean
   error?: string
 }
 
@@ -658,6 +678,9 @@ interface VideoDetail {
   vodClass: string
   sourceCount: number
   sources: VideoDetailSource[]
+  hidden: boolean
+  edited: boolean
+  picSiteId: string
 }
 
 interface VideoDetailResult {
@@ -686,6 +709,7 @@ interface VideoCacheClearResult {
 
 interface VideosApi {
   list: (query: VideoListQuery) => Promise<VideoListResult>
+  update: (videoId: number, patch: VideoUpdateInput) => Promise<VideoUpdateResult>
   detail: (videoId: number, options?: { autoFetch?: boolean }) => Promise<VideoDetailResult>
   refreshDetail: (
     videoId: number,

@@ -75,6 +75,8 @@ const api = {
   videos: {
     list: (query: VideoListQuery): Promise<VideoListResult> =>
       ipcRenderer.invoke('videos:list', query),
+    update: (videoId: number, patch: VideoUpdateInput): Promise<VideoUpdateResult> =>
+      ipcRenderer.invoke('videos:update', videoId, patch),
     detail: (videoId: number, options?: { autoFetch?: boolean }): Promise<VideoDetailResult> =>
       ipcRenderer.invoke('videos:detail', videoId, options),
     refreshDetail: (

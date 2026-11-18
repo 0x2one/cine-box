@@ -15,7 +15,9 @@ import type {
   VideoListQuery,
   VideoListItem,
   VideoListResult,
-  VideoStats
+  VideoStats,
+  VideoUpdateInput,
+  VideoUpdateResult
 } from './video-types'
 
 /** 单页写入的计数，与 collect_progress 的计数器语义一致 */
@@ -112,6 +114,7 @@ export interface VideoCacheStore {
     query: VideoListQuery,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ) => VideoListResult
+  updateVideo: (videoId: number, patch: VideoUpdateInput) => VideoUpdateResult
   stats: () => VideoStats
   capacity: (siteNames?: Map<string, string>) => VideoCapacity
   getProgress: (id: string) => VideoCollectProgress | null
@@ -256,6 +259,19 @@ CREATE TABLE IF NOT EXISTS collect_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_collect_logs_created ON collect_logs (created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_collect_logs_site ON collect_logs (site_id, created_at DESC);
+
+-- 人工编辑：NULL 表示沿用采集值；hidden 单独控制展示端是否隐藏，默认 0（显示）
+CREATE TABLE IF NOT EXISTS video_edits (
+  video_id INTEGER PRIMARY KEY,
+  note TEXT,
+  intro TEXT,
+  vod_actor TEXT,
+  vod_class TEXT,
+  pic TEXT,
+  pic_site_id TEXT NOT NULL DEFAULT '',
+  hidden INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
 `
 
 const PRAGMAS = `
@@ -328,13 +344,6 @@ function rowToDetailSource(row: Record<string, unknown>): DetailSourceRow {
   }
 }
 
-function decodeCursor(cursor: string | undefined): { latestTs: number; id: number } | null {
-  if (!cursor) return null
-  const match = /^(\d+):(\d+)$/.exec(cursor)
-  if (!match) return null
-  return { latestTs: Number(match[1]), id: Number(match[2]) }
-}
-
 /**
  * 视频缓存库：列表、搜索、多站合并、进度、详情索引与容量统计。
  * 详情正文不在这里，只有 video_sources.detail_* 索引。
@@ -378,6 +387,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       .all(videoId) as Record<string, unknown>[]
 
     if (sources.length === 0) {
+      connection.prepare('DELETE FROM video_edits WHERE video_id = ?').run(videoId)
       connection.prepare('DELETE FROM videos WHERE id = ?').run(videoId)
       return
     }
@@ -744,13 +754,15 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
   ): VideoListResult {
     const connection = database()
     const keyword = query.keyword?.trim() ?? ''
-    const limit = Math.min(Math.max(Number(query.limit) || 30, 1), 100)
+    const pageSize = Math.min(Math.max(Number(query.pageSize) || 10, 1), 100)
+    const page = Math.max(Number(query.page) || 1, 1)
+    const offset = (page - 1) * pageSize
     const where: string[] = []
     const params: (string | number)[] = []
 
     if (keyword) {
       const match = makeFtsQuery(keyword)
-      if (!match) return { ok: true, items: [], nextCursor: '' }
+      if (!match) return { ok: true, items: [], total: 0, page, pageSize }
       where.push('v.id IN (SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?)')
       params.push(match)
     }
@@ -761,35 +773,48 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       where.push(`EXISTS (SELECT 1 FROM video_sources f WHERE f.video_id = v.id AND (${clauses}))`)
       for (const filter of categoryFilters) params.push(filter.siteId, filter.categoryId)
     }
-    const cursor = decodeCursor(query.cursor)
-    if (cursor) {
-      where.push('(v.latest_ts < ? OR (v.latest_ts = ? AND v.id < ?))')
-      params.push(cursor.latestTs, cursor.latestTs, cursor.id)
-    }
+    const visibility = query.visibility ?? 'all'
+    if (visibility === 'hidden') where.push('COALESCE(e.hidden, 0) = 1')
+    if (visibility === 'shown') where.push('COALESCE(e.hidden, 0) = 0')
 
-    const sql = `
-      SELECT v.id, v.name, v.pic, v.note, v.intro_excerpt, v.intro_truncated,
-             v.latest_ts, v.latest_time, v.source_count, v.vod_actor, v.vod_class,
-             s.site_id, s.source_video_id, s.category_id, s.category_name
+    const from = `
       FROM videos v
       JOIN video_sources s ON s.id = v.primary_source_id
-      ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+      LEFT JOIN video_edits e ON e.video_id = v.id
+      ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}`
+    const selectSql = `
+      SELECT v.id, v.name,
+             COALESCE(e.pic, v.pic) AS pic,
+             COALESCE(e.note, v.note) AS note,
+             COALESCE(e.intro, v.intro_excerpt) AS intro_excerpt,
+             CASE WHEN e.intro IS NOT NULL THEN 0 ELSE v.intro_truncated END AS intro_truncated,
+             v.latest_ts, v.latest_time, v.source_count,
+             COALESCE(e.vod_actor, v.vod_actor) AS vod_actor,
+             COALESCE(e.vod_class, v.vod_class) AS vod_class,
+             s.site_id, s.source_video_id, s.category_id, s.category_name,
+             COALESCE(e.hidden, 0) AS hidden,
+             CASE WHEN e.note IS NOT NULL OR e.intro IS NOT NULL OR e.vod_actor IS NOT NULL
+                    OR e.vod_class IS NOT NULL OR e.pic IS NOT NULL
+                  THEN 1 ELSE 0 END AS edited
+      ${from}
       ORDER BY v.latest_ts DESC, v.id DESC
-      LIMIT ?`
+      LIMIT ? OFFSET ?`
+
     let rows: Record<string, unknown>[]
+    let total: number
     try {
-      rows = connection.prepare(sql).all(...params, limit + 1) as Record<string, unknown>[]
+      rows = connection.prepare(selectSql).all(...params, pageSize, offset) as Record<
+        string,
+        unknown
+      >[]
+      const counted = connection.prepare(`SELECT COUNT(*) AS n ${from}`).get(...params) as
+        Record<string, unknown> | undefined
+      total = num(counted?.n)
     } catch {
       // FTS 语法错误 / 索引异常时返回空，而不是把异常抛给渲染层
-      return { ok: false, items: [], nextCursor: '', error: 'DB' }
+      return { ok: false, items: [], total: 0, page, pageSize, error: 'DB' }
     }
 
-    let nextCursor = ''
-    if (rows.length > limit) {
-      rows = rows.slice(0, limit)
-      const last = rows[rows.length - 1]
-      nextCursor = `${num(last.latest_ts)}:${num(last.id)}`
-    }
     const items: VideoListItem[] = rows.map((raw) => ({
       id: num(raw.id),
       name: text(raw.name),
@@ -805,9 +830,93 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       siteId: text(raw.site_id),
       sourceVideoId: text(raw.source_video_id),
       categoryId: text(raw.category_id),
-      categoryName: text(raw.category_name)
+      categoryName: text(raw.category_name),
+      hidden: num(raw.hidden) !== 0,
+      edited: num(raw.edited) !== 0
     }))
-    return { ok: true, items, nextCursor }
+    return { ok: true, items, total, page, pageSize }
+  }
+
+  /**
+   * 保存人工编辑：空串表示清掉这条覆盖、回落到采集值；hidden 始终写入。
+   * 名称是合并键，不在可改字段里。
+   */
+  function updateVideo(videoId: number, patch: VideoUpdateInput): VideoUpdateResult {
+    const connection = database()
+    const exists = connection.prepare('SELECT id FROM videos WHERE id = ?').get(videoId)
+    if (!exists) return { ok: false, error: 'NOT_FOUND' }
+
+    const pickPic = (): { pic: string | null | undefined; siteId: string } | { error: string } => {
+      if (patch.pic === undefined) return { pic: undefined, siteId: '' }
+      const wanted = patch.pic.trim()
+      if (!wanted) return { pic: null, siteId: '' }
+      const row = connection
+        .prepare('SELECT site_id FROM video_sources WHERE video_id = ? AND pic = ? LIMIT 1')
+        .get(videoId, wanted) as Record<string, unknown> | undefined
+      if (!row) return { error: 'INVALID_PIC' }
+      return { pic: truncate(wanted, 2000), siteId: text(row.site_id) }
+    }
+    const picResult = pickPic()
+    if ('error' in picResult) return { ok: false, error: picResult.error }
+
+    const current = connection
+      .prepare(
+        'SELECT note, intro, vod_actor, vod_class, pic, pic_site_id, hidden FROM video_edits WHERE video_id = ?'
+      )
+      .get(videoId) as Record<string, unknown> | undefined
+
+    const merge = (next: string | undefined, existing: unknown): string | null => {
+      if (next === undefined) return typeof existing === 'string' ? existing : null
+      const value = truncate(next.trim(), 4000)
+      return value === '' ? null : value
+    }
+    const note = merge(patch.note, current?.note)
+    const intro = merge(patch.intro, current?.intro)
+    const vodActor = merge(patch.vodActor, current?.vod_actor)
+    const vodClass = merge(patch.vodClass, current?.vod_class)
+    let pic: string | null
+    let picSiteId: string
+    if (patch.pic === undefined) {
+      pic = typeof current?.pic === 'string' ? current.pic : null
+      picSiteId = text(current?.pic_site_id)
+    } else {
+      pic = picResult.pic ?? null
+      picSiteId = pic ? picResult.siteId : ''
+    }
+    const hidden = patch.hidden === undefined ? num(current?.hidden) !== 0 : Boolean(patch.hidden)
+
+    const empty = !note && !intro && !vodActor && !vodClass && !pic
+    if (empty && !hidden) {
+      connection.prepare('DELETE FROM video_edits WHERE video_id = ?').run(videoId)
+      return { ok: true }
+    }
+    connection
+      .prepare(
+        `INSERT INTO video_edits
+           (video_id, note, intro, vod_actor, vod_class, pic, pic_site_id, hidden, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (video_id) DO UPDATE SET
+           note = excluded.note,
+           intro = excluded.intro,
+           vod_actor = excluded.vod_actor,
+           vod_class = excluded.vod_class,
+           pic = excluded.pic,
+           pic_site_id = excluded.pic_site_id,
+           hidden = excluded.hidden,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        videoId,
+        note,
+        intro,
+        vodActor,
+        vodClass,
+        pic,
+        picSiteId,
+        hidden ? 1 : 0,
+        new Date().toISOString()
+      )
+    return { ok: true }
   }
 
   function stats(): VideoStats {
@@ -1051,9 +1160,18 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     const connection = database()
     const video = connection
       .prepare(
-        `SELECT id, name, pic, note, intro_excerpt, intro_truncated, latest_ts, latest_time,
-                vod_actor, vod_class, source_count
-         FROM videos WHERE id = ?`
+        `SELECT v.id, v.name, COALESCE(e.pic, v.pic) AS pic, COALESCE(e.note, v.note) AS note,
+                COALESCE(e.intro, v.intro_excerpt) AS intro_excerpt,
+                CASE WHEN e.intro IS NOT NULL THEN 0 ELSE v.intro_truncated END AS intro_truncated,
+                v.latest_ts, v.latest_time,
+                COALESCE(e.vod_actor, v.vod_actor) AS vod_actor,
+                COALESCE(e.vod_class, v.vod_class) AS vod_class,
+                v.source_count, COALESCE(e.hidden, 0) AS hidden, COALESCE(e.pic_site_id, '') AS pic_site_id,
+                CASE WHEN e.note IS NOT NULL OR e.intro IS NOT NULL OR e.vod_actor IS NOT NULL
+                       OR e.vod_class IS NOT NULL OR e.pic IS NOT NULL
+                     THEN 1 ELSE 0 END AS edited
+         FROM videos v LEFT JOIN video_edits e ON e.video_id = v.id
+         WHERE v.id = ?`
       )
       .get(videoId) as Record<string, unknown> | undefined
     if (!video) return null
@@ -1102,7 +1220,10 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       vodActor: text(video.vod_actor),
       vodClass: text(video.vod_class),
       sourceCount: num(video.source_count),
-      sources
+      sources,
+      hidden: num(video.hidden) !== 0,
+      edited: num(video.edited) !== 0,
+      picSiteId: text(video.pic_site_id)
     }
   }
 
@@ -1249,6 +1370,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     deleteSources,
     recomputeVideos,
     listVideos,
+    updateVideo,
     stats,
     capacity,
     getProgress,
