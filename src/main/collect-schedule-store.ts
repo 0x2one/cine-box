@@ -138,9 +138,6 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
     const fetchRange: FetchRange = input.fetchRange
     // 全量模式只对全量范围有意义，24h/48h 组合直接拒绝
     if (mode === 'full' && fetchRange !== 'all') return { ok: false, error: 'INVALID_INPUT' }
-    const interval = intervalOf(input?.intervalMinutes)
-    if (interval < 5) return { ok: false, error: 'INVALID_INPUT' }
-    const intervalMinutes = Math.min(interval, 10080)
     const timing: ScheduleTiming = input?.timing === 'daily' ? 'daily' : 'interval'
     const dailyTime = timing === 'daily' ? String(input?.dailyTime ?? '').trim() : ''
     if (timing === 'daily' && !isValidDailyTime(dailyTime)) {
@@ -150,6 +147,15 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
     const connection = database()
     const site = connection.prepare('SELECT id FROM sites WHERE id = ?').get(siteId)
     if (!site) return { ok: false, error: 'NOT_FOUND' }
+    const existing = get(siteId)
+
+    const interval = intervalOf(input?.intervalMinutes)
+    // 间隔只在「按时间间隔」时是必填项。选「每天固定时间」时界面会把间隔输入框整个卸载，
+    // 渲染层提交的 intervalMinutes 可能缺失，这时沿用计划原来的间隔（没有就是 6 小时），
+    // 不能因此判成非法输入 —— 否则每天固定时间根本存不下去。
+    if (interval < 5 && timing !== 'daily') return { ok: false, error: 'INVALID_INPUT' }
+    const intervalMinutes =
+      interval >= 5 ? Math.min(interval, 10080) : (existing?.intervalMinutes ?? 360)
 
     const now = new Date().toISOString()
     const enabled = Boolean(input.enabled)
@@ -157,7 +163,6 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
     // 主进程探测后带进来；0 表示未知（探测失败且没有历史值）
     const pageSize = clampPageSize(input.pageSize)
     const next = enabled ? nextRunAt(new Date(), timing, intervalMinutes, dailyTime) : ''
-    const existing = get(siteId)
     connection
       .prepare(
         `INSERT INTO collect_schedules

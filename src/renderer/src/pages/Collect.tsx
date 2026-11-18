@@ -237,11 +237,16 @@ function CollectPanel({
     setSaving(true)
     try {
       const timing: ScheduleTiming = values.timing === 'daily' ? 'daily' : 'interval'
+      // 「每天固定时间」会把间隔输入框卸载，validateFields 只回传当时挂载的字段，
+      // 所以间隔要从表单 store 里补读，切回「按时间间隔」时还是用户填过的值
+      const intervalMinutes = Number(
+        values.intervalMinutes ?? scheduleForm.getFieldValue('intervalMinutes')
+      )
       const result = await window.api.videos.saveSchedule({
         siteId: scheduleTarget.id,
         enabled: values.enabled,
         timing,
-        intervalMinutes: values.intervalMinutes,
+        intervalMinutes: intervalMinutes > 0 ? intervalMinutes : 0,
         dailyTime: timing === 'daily' && values.dailyTime ? values.dailyTime.format('HH:mm') : '',
         mode: values.mode,
         fetchRange: values.mode === 'full' ? 'all' : values.fetchRange,
@@ -249,7 +254,11 @@ function CollectPanel({
       })
       if (!result.ok) {
         message.error(
-          result.error === 'NOT_FOUND' ? '站点不存在，可能已被删除' : '保存定时设置失败'
+          result.error === 'NOT_FOUND'
+            ? '站点不存在，可能已被删除'
+            : result.error === 'INVALID_INPUT'
+              ? '定时设置校验未通过，请检查间隔与执行时间'
+              : '保存定时设置失败，缓存库可能正在重建'
         )
         return
       }
