@@ -349,14 +349,14 @@ function CollectPanel({
                     icon={<CloudDownloadOutlined />}
                     onClick={() => setManualTarget(site)}
                   >
-                    立即采集
+                    采集
                   </Button>
                   <Button
                     size="small"
                     icon={<ClockCircleOutlined />}
                     onClick={() => setScheduleTarget(site)}
                   >
-                    定时设置
+                    定时
                   </Button>
                   {busy && (
                     <Tooltip title="取消当前采集 / 排队">
