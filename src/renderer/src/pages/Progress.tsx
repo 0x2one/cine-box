@@ -2,40 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { App, Button, Popconfirm, Spin, Tag, Tooltip } from 'antd'
 import { CloudDownloadOutlined, FileTextOutlined, StopOutlined } from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
-
-const STATUS_TEXT: Record<CollectStatus, string> = {
-  idle: '未采集',
-  queued: '排队中',
-  running: '采集中',
-  paused: '已暂停',
-  replacing: '全量替换中',
-  done: '已完成',
-  error: '出错'
-}
-
-const STATUS_COLOR: Record<CollectStatus, string> = {
-  idle: 'default',
-  queued: 'processing',
-  running: 'processing',
-  paused: 'warning',
-  replacing: 'processing',
-  done: 'success',
-  error: 'error'
-}
-
-const STATUS_ORDER: Record<CollectStatus, number> = {
-  running: 0,
-  replacing: 1,
-  queued: 2,
-  error: 3,
-  paused: 4,
-  idle: 5,
-  done: 6
-}
-
-function siteLabel(site: Site | undefined, siteId: string): string {
-  return site ? site.display || site.name : `已删除站点 ${siteId.slice(0, 8)}`
-}
+import {
+  COLLECT_STATUS_COLOR,
+  COLLECT_STATUS_ORDER,
+  COLLECT_STATUS_TEXT,
+  siteLabel
+} from '../utils/collect'
 
 function modeText(mode: CollectMode): string {
   return mode === 'full' ? '全量' : '增量'
@@ -99,7 +71,7 @@ function ProgressPanel({
   const siteMap = useMemo(() => new Map(sites.map((site) => [site.id, site])), [sites])
   const ordered = useMemo(() => {
     return [...rows].sort((left, right) => {
-      const byStatus = STATUS_ORDER[left.status] - STATUS_ORDER[right.status]
+      const byStatus = COLLECT_STATUS_ORDER[left.status] - COLLECT_STATUS_ORDER[right.status]
       if (byStatus !== 0) return byStatus
       return right.updatedAt.localeCompare(left.updatedAt)
     })
@@ -193,7 +165,9 @@ function ProgressPanel({
                       {item.pageCount > 0 ? ` · ${percent}%` : ''}
                     </span>
                   </div>
-                  <Tag color={STATUS_COLOR[item.status]}>{STATUS_TEXT[item.status]}</Tag>
+                  <Tag color={COLLECT_STATUS_COLOR[item.status]}>
+                    {COLLECT_STATUS_TEXT[item.status]}
+                  </Tag>
                   <div className="progress-actions">
                     <Tooltip title="查看该站点日志">
                       <Button

@@ -23,26 +23,12 @@ import {
 } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { formatDateTime } from '../utils/format'
-
-const STATUS_TEXT: Record<CollectStatus, string> = {
-  idle: '未采集',
-  queued: '排队中',
-  running: '采集中',
-  paused: '已暂停',
-  replacing: '全量替换中',
-  done: '已完成',
-  error: '出错'
-}
-
-const STATUS_COLOR: Record<CollectStatus, string> = {
-  idle: 'default',
-  queued: 'processing',
-  running: 'processing',
-  paused: 'warning',
-  replacing: 'processing',
-  done: 'success',
-  error: 'error'
-}
+import {
+  COLLECT_STATUS_COLOR,
+  COLLECT_STATUS_TEXT,
+  formatScheduleTiming,
+  siteLabel
+} from '../utils/collect'
 
 const MODE_OPTIONS = [
   { value: 'incremental', label: '增量（只补最近更新）' },
@@ -84,23 +70,12 @@ interface ScheduleValues {
   cacheDetail: boolean
 }
 
-/** 间隔的短说明：30 分钟 / 6 小时 / 1.5 小时 */
-function intervalLabel(minutes: number): string {
-  if (minutes < 60) return `${minutes} 分钟`
-  const hours = minutes / 60
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`
-}
-
 const COLLECT_ERRORS: Record<string, string> = {
   ALREADY_QUEUED: '同一模式与采集方式已在队列中，请稍后查看进度',
   INVALID_INPUT: '采集参数不合法',
   NOT_FOUND: '站点不存在，可能已被删除',
   CACHE_UNAVAILABLE: '缓存库不可用，请重启应用后重试',
   BUSY: '缓存正在清理，请稍后再试'
-}
-
-function siteLabel(site: Site): string {
-  return site.display || site.name
 }
 
 /** 控制台「采集」：按站点发起手动采集、设置定时计划 */
@@ -353,7 +328,7 @@ function CollectPanel({
                       {site.format.toUpperCase()}
                     </Tag>
                   </div>
-                  <Tag color={STATUS_COLOR[status]}>{STATUS_TEXT[status]}</Tag>
+                  <Tag color={COLLECT_STATUS_COLOR[status]}>{COLLECT_STATUS_TEXT[status]}</Tag>
                 </div>
 
                 <span className="site-card-address" title={site.address}>
@@ -376,10 +351,7 @@ function CollectPanel({
                   </span>
                   {schedule && (
                     <span>
-                      定时：
-                      {schedule.timing === 'daily'
-                        ? `每天 ${schedule.dailyTime}`
-                        : `每 ${intervalLabel(schedule.intervalMinutes)}`}
+                      定时：{formatScheduleTiming(schedule)}
                       {schedule.cacheDetail ? ' · 含详情缓存' : ''}
                     </span>
                   )}

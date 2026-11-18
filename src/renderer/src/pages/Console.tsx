@@ -16,20 +16,11 @@ import CapacityPanel from './Capacity'
 import CategoriesPanel from './Categories'
 import CollectPanel from './Collect'
 import LogsPanel from './Logs'
+import OverviewPanel from './Overview'
 import ProgressPanel from './Progress'
 import SitesPanel from './Sites'
 import VideosPanel from './Videos'
-
-type ConsoleSection =
-  | 'overview'
-  | 'sites'
-  | 'categories'
-  | 'collect'
-  | 'progress'
-  | 'videos'
-  | 'capacity'
-  | 'backup'
-  | 'logs'
+import type { ConsoleSection } from '../types'
 
 const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOutlined }[] = [
   { key: 'overview', label: '概览', icon: DashboardOutlined },
@@ -43,8 +34,8 @@ const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOut
   { key: 'logs', label: '日志', icon: FileTextOutlined }
 ]
 
-const SECTION_META: Record<ConsoleSection, { title: string; desc: string; empty?: string }> = {
-  overview: { title: '概览', desc: '运行状态与统计', empty: '暂无数据' },
+const SECTION_META: Record<ConsoleSection, { title: string; desc: string }> = {
+  overview: { title: '概览', desc: '运行状态与统计' },
   sites: { title: '站点', desc: '管理采集站点' },
   categories: { title: '视频分类', desc: '层级管理本地分类' },
   collect: { title: '采集', desc: '手动采集与定时计划' },
@@ -57,7 +48,7 @@ const SECTION_META: Record<ConsoleSection, { title: string; desc: string; empty?
 
 /**
  * 控制台：返回收进左侧导航，分区标题与说明合并成吸顶行。
- * 站点与视频分类分区已接入真实数据，其余分区先用空状态占位。
+ * 概览页汇总各分区数据，其余分区各自读取并订阅自己的数据。
  */
 function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
   const [section, setSection] = useState<ConsoleSection>('overview')
@@ -73,6 +64,68 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
     if (next !== 'categories') setBindingSite(null)
     // 导航进入日志时默认看全部；行内「日志」按钮走 onOpenLogs，不经过这里
     setLogSiteId('')
+  }
+
+  const renderSection = (): React.JSX.Element => {
+    switch (section) {
+      case 'overview':
+        return <OverviewPanel title={meta.title} desc={meta.desc} onNavigate={goSection} />
+      case 'sites':
+        return (
+          <SitesPanel
+            title={meta.title}
+            desc={meta.desc}
+            onStartBinding={(site) => {
+              setBindingSite(site)
+              setSection('categories')
+            }}
+          />
+        )
+      case 'categories':
+        return (
+          <CategoriesPanel
+            title={meta.title}
+            desc={meta.desc}
+            bindingSite={bindingSite}
+            onExitBinding={() => setBindingSite(null)}
+          />
+        )
+      case 'backup':
+        return <BackupPanel title={meta.title} desc={meta.desc} />
+      case 'collect':
+        return (
+          <CollectPanel
+            title={meta.title}
+            desc={meta.desc}
+            onOpenProgress={() => goSection('progress')}
+          />
+        )
+      case 'progress':
+        return (
+          <ProgressPanel
+            title={meta.title}
+            desc={meta.desc}
+            onOpenCollect={() => goSection('collect')}
+            onOpenLogs={(siteId) => {
+              setLogSiteId(siteId)
+              setSection('logs')
+            }}
+          />
+        )
+      case 'videos':
+        return <VideosPanel title={meta.title} desc={meta.desc} />
+      case 'capacity':
+        return <CapacityPanel title={meta.title} desc={meta.desc} />
+      case 'logs':
+        return (
+          <LogsPanel
+            key={logSiteId || 'all'}
+            title={meta.title}
+            desc={meta.desc}
+            initialSiteId={logSiteId}
+          />
+        )
+    }
   }
 
   return (
@@ -105,69 +158,7 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
           })}
         </nav>
 
-        <div className="settings-panel">
-          {/* 站点与分类分区自己渲染吸顶行（标题 / 说明 / 计数 / 新增按钮），其余分区用通用标题行 */}
-          {section === 'sites' ? (
-            <SitesPanel
-              title={meta.title}
-              desc={meta.desc}
-              onStartBinding={(site) => {
-                setBindingSite(site)
-                setSection('categories')
-              }}
-            />
-          ) : section === 'categories' ? (
-            <CategoriesPanel
-              title={meta.title}
-              desc={meta.desc}
-              bindingSite={bindingSite}
-              onExitBinding={() => setBindingSite(null)}
-            />
-          ) : section === 'backup' ? (
-            <BackupPanel title={meta.title} desc={meta.desc} />
-          ) : section === 'collect' ? (
-            <CollectPanel
-              title={meta.title}
-              desc={meta.desc}
-              onOpenProgress={() => setSection('progress')}
-            />
-          ) : section === 'progress' ? (
-            <ProgressPanel
-              title={meta.title}
-              desc={meta.desc}
-              onOpenCollect={() => setSection('collect')}
-              onOpenLogs={(siteId) => {
-                setLogSiteId(siteId)
-                setSection('logs')
-              }}
-            />
-          ) : section === 'videos' ? (
-            <VideosPanel title={meta.title} desc={meta.desc} />
-          ) : section === 'capacity' ? (
-            <CapacityPanel title={meta.title} desc={meta.desc} />
-          ) : section === 'logs' ? (
-            <LogsPanel
-              key={logSiteId || 'all'}
-              title={meta.title}
-              desc={meta.desc}
-              initialSiteId={logSiteId}
-            />
-          ) : (
-            <>
-              <div className="settings-panel-head">
-                <h2 className="settings-panel-title">{meta.title}</h2>
-                <span className="settings-panel-sep">·</span>
-                <p className="settings-panel-desc">{meta.desc}</p>
-              </div>
-              <section className="settings-card">
-                <div className="console-empty">
-                  <span className="console-empty-title">{meta.empty}</span>
-                  <span className="console-empty-hint">控制台功能正在搭建，敬请期待</span>
-                </div>
-              </section>
-            </>
-          )}
-        </div>
+        <div className="settings-panel">{renderSection()}</div>
       </div>
     </div>
   )

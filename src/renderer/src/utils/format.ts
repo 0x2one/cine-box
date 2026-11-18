@@ -1,3 +1,7 @@
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
 /** 把字节数格式化成易读的容量文本（B / KB / MB / GB） */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -10,9 +14,37 @@ export function formatBytes(bytes: number): string {
 export function formatDateTime(iso: string, withSeconds = false): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return '—'
-  const pad = (value: number): string => String(value).padStart(2, '0')
   const minutes = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
     date.getHours()
   )}:${pad(date.getMinutes())}`
   return withSeconds ? `${minutes}:${pad(date.getSeconds())}` : minutes
+}
+
+/** 窄位置用的时间戳：同年省略年份（11-18 18:59），跨年才补上年份 */
+export function formatShortDateTime(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  const rest = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes()
+  )}`
+  return date.getFullYear() === new Date().getFullYear() ? rest : `${date.getFullYear()}-${rest}`
+}
+
+/** 计划时间的相对说法：今天 20:00 / 明天 08:30 / 11月20日 09:00；已过期显示「即将执行」 */
+export function formatUpcoming(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  const now = new Date()
+  if (date.getTime() <= now.getTime()) return '即将执行'
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const startOfDay = (value: Date): number =>
+    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
+  const days = Math.round((startOfDay(date) - startOfDay(now)) / (24 * 60 * 60 * 1000))
+  if (days === 0) return `今天 ${time}`
+  if (days === 1) return `明天 ${time}`
+  if (days === 2) return `后天 ${time}`
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`
+  }
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${time}`
 }

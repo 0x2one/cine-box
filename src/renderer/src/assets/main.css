@@ -394,25 +394,323 @@
 
 /* ── 控制台 ── */
 
-/* 标题、左侧导航、右侧面板沿用设置页的 .page-inner / .settings-* 样式，这里只补空状态 */
-.console-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 56px 24px;
-  text-align: center;
+/* 标题、左侧导航、右侧面板沿用设置页的 .page-inner / .settings-* 样式 */
+
+/* ── 控制台：概览 ── */
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.console-empty-title {
-  color: var(--text);
+/* 整张卡片都是入口：用 button 承载，外观与其它统计卡一致 */
+.overview-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 15px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent);
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.overview-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+}
+
+.overview-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.overview-card-head .anticon {
   font-size: 13px;
+}
+
+.overview-card-go {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 10px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.overview-card:hover .overview-card-go {
+  opacity: 1;
+}
+
+.overview-value {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.overview-value small {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.overview-hint {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.overview-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.overview-block {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.overview-block-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-muted) 45%, var(--surface));
+}
+
+.overview-block-title {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.overview-block-count {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-block-head .ant-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding-inline: 0;
+  font-size: 12px;
+}
+
+.overview-block-icon {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.overview-block-icon.is-warn {
+  color: #c77c02;
+}
+
+.overview-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-row {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 14px;
+}
+
+.overview-row + .overview-row {
+  border-top: 1px solid var(--border);
+}
+
+.overview-row-main {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+}
+
+.overview-row-name {
+  max-width: 46%;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-row-meta {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.overview-row-end {
+  margin-left: auto;
+}
+
+/* 最近一次将要执行的时间用主色点出来 */
+.overview-row-end.is-next {
+  color: var(--accent);
+}
+
+.overview-row-sub {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-row-message {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 14px 20px;
+}
+
+.overview-empty-title {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.overview-empty-hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.overview-block-issues {
+  margin-top: 12px;
+}
+
+/* 空库引导：还没有站点时代替统计卡 */
+.overview-onboard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 20px 22px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
+}
+
+.overview-onboard-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.overview-onboard-desc {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.overview-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.overview-step {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.overview-step-index {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.overview-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.overview-step-title {
+  color: var(--text);
+  font-size: 12.5px;
   font-weight: 500;
 }
 
-.console-empty-hint {
+.overview-step-desc {
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.overview-step .ant-btn {
+  margin-top: auto;
 }
 
 /* ── 控制台：站点 ── */
@@ -2412,6 +2710,18 @@
 }
 
 @media (max-width: 960px) {
+  .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-steps {
+    grid-template-columns: 1fr;
+  }
+
   .capacity-grid {
     grid-template-columns: 1fr;
   }
