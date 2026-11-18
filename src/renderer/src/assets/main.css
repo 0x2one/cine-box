@@ -128,6 +128,10 @@
   .page {
     animation: none;
   }
+
+  .progress-card.is-active::after {
+    animation: none;
+  }
 }
 
 .page-inner {
@@ -1952,8 +1956,20 @@
   transition: width 240ms ease;
 }
 
+/* 进行中：一段高光沿进度条向右流动，和已完成（静止实色）区分开 */
 .progress-card.is-active::after {
-  animation: progress-breathe 1.8s ease-in-out infinite;
+  background-image: linear-gradient(
+    90deg,
+    transparent 18%,
+    color-mix(in srgb, var(--accent) 45%, #fff) 44%,
+    color-mix(in srgb, var(--accent) 10%, #fff) 50%,
+    color-mix(in srgb, var(--accent) 45%, #fff) 56%,
+    transparent 82%
+  );
+  background-repeat: repeat-x;
+  background-size: 180px 100%;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 40%, transparent);
+  animation: progress-flow 1.4s linear infinite;
 }
 
 .progress-card.is-paused::after {
@@ -1964,14 +1980,13 @@
   background: #2f9e44;
 }
 
-@keyframes progress-breathe {
-  0%,
-  100% {
-    opacity: 0.5;
+@keyframes progress-flow {
+  from {
+    background-position: -180px 0;
   }
 
-  50% {
-    opacity: 1;
+  to {
+    background-position: 0 0;
   }
 }
 

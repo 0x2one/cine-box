@@ -163,7 +163,7 @@ function ProgressPanel({
                   : 0
             const active = item.status === 'running' || item.status === 'replacing'
             const label = siteLabel(siteMap.get(item.siteId), item.siteId)
-            // 下边框进度条只在这三种状态下出现：进行中（呼吸）、暂停（琥珀）、已完成（满格绿）
+            // 下边框进度条只在这三种状态下出现：进行中（流光）、暂停（琥珀）、已完成（满格绿）
             const stateClass = active
               ? ' is-active'
               : item.status === 'paused'
