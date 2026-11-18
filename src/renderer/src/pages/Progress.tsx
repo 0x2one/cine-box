@@ -7,7 +7,7 @@ import {
   ReloadOutlined,
   StopOutlined
 } from '@ant-design/icons'
-import { formatDateTime } from '../utils/format'
+import { formatCount, formatDateTime } from '../utils/format'
 import {
   COLLECT_ERRORS,
   COLLECT_STATUS_COLOR,
@@ -118,7 +118,9 @@ function ProgressPanel({
         fetchRange: item.fetchRange,
         restart: fromStart,
         // 续采不带弹窗，详情缓存沿用上次手动采集的选择
-        cacheDetail: manualCacheDetail()
+        cacheDetail: manualCacheDetail(),
+        // 之前跑过就沿用已经确认过的真实页大小，省掉一次探测请求
+        pageSize: item.pageSize > 0 ? item.pageSize : undefined
       })
       if (!result.ok) {
         message.warning(COLLECT_ERRORS[result.error ?? ''] ?? '发起采集失败，请重试')
@@ -197,10 +199,13 @@ function ProgressPanel({
                     </span>
                     <span className="progress-mode">
                       {modeText(item.mode)} · {item.fetchRange === 'all' ? '全部' : item.fetchRange}
+                      {item.pageSize > 0 ? ` · 每页 ${item.pageSize} 条` : ''}
                     </span>
                     <span className="progress-caption">
                       {progressText(item)}
                       {item.pageCount > 0 ? ` · ${percent}%` : ''}
+                      {/* 站点在 <list recordcount> / total 里给的真实记录总量 */}
+                      {item.recordCount > 0 ? ` · 共 ${formatCount(item.recordCount)} 条` : ''}
                     </span>
                   </div>
                   <Tag color={COLLECT_STATUS_COLOR[item.status]}>

@@ -209,12 +209,15 @@ function CollectPanel({
       setManualTarget(null)
       setRestartChoice(null)
       await load()
+      // 站点忽略 pagesize=100 时按探测到的真实页大小采集，提示里说清楚
+      const sizeNote =
+        result.pageSize && result.pageSize < 100 ? `（每页 ${result.pageSize} 条）` : ''
       if (manualResumeRow && !resumeFromStart) {
-        message.success(`已继续采集，从第 ${manualResumeRow.page + 1} 页开始`)
+        message.success(`已继续采集，从第 ${manualResumeRow.page + 1} 页开始${sizeNote}`)
       } else if (manualResumeRow) {
-        message.success('已重新加入队列，从第 1 页开始')
+        message.success(`已重新加入队列，从第 1 页开始${sizeNote}`)
       } else {
-        message.success('已加入采集队列，可在「进度」查看')
+        message.success(`已加入采集队列${sizeNote}，可在「进度」查看`)
       }
     } catch {
       message.error('发起采集失败，请重试')
@@ -252,7 +255,13 @@ function CollectPanel({
       }
       setScheduleTarget(null)
       await load()
-      message.success(values.enabled ? '定时采集已启用' : '定时采集已关闭')
+      const pageSize = result.schedule?.pageSize ?? 0
+      // 探测到的真实页大小会跟着计划存下来，每次定时触发都按它翻页
+      message.success(
+        values.enabled
+          ? `定时采集已启用${pageSize > 0 && pageSize < 100 ? `（每页 ${pageSize} 条）` : ''}`
+          : '定时采集已关闭'
+      )
     } catch {
       message.error('保存定时设置失败，请重试')
     } finally {
@@ -375,6 +384,7 @@ function CollectPanel({
                   {schedule && (
                     <span>
                       定时：{formatScheduleTiming(schedule)}
+                      {schedule.pageSize > 0 ? ` · 每页 ${schedule.pageSize} 条` : ''}
                       {schedule.cacheDetail ? ' · 含详情缓存' : ''}
                     </span>
                   )}

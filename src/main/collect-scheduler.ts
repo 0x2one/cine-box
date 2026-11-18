@@ -37,7 +37,9 @@ export function createCollectScheduler(options: {
         siteId: schedule.siteId,
         mode: schedule.mode,
         fetchRange: schedule.fetchRange,
-        cacheDetail: schedule.cacheDetail
+        cacheDetail: schedule.cacheDetail,
+        // 保存计划时探测到的真实页大小；0 表示当时没探到，采集器按默认 100
+        pageSize: schedule.pageSize || undefined
       },
       'schedule'
     )

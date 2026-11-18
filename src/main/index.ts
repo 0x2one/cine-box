@@ -26,6 +26,7 @@ import { createCollectLogStore } from './collect-log-store'
 import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
 import { fetchSiteCategories } from './site-categories'
+import { clampPageSize, probePageSize } from './video-collect-probe'
 import {
   createSiteStore,
   type CategoryUpdateMode,
@@ -37,6 +38,8 @@ import { createVideoCacheStore } from './video-cache-store'
 import { createVideoCollector } from './video-collector'
 import { createVideoDetailCache } from './video-detail-cache'
 import type {
+  CollectMode,
+  FetchRange,
   VideoCollectStartInput,
   VideoListQuery,
   VideoScheduleInput,
@@ -524,9 +527,44 @@ ipcMain.handle('videos:progress', (_event, siteId?: string) => {
   return videoStore.listProgress(siteId ? String(siteId) : undefined)
 })
 
+/**
+ * 该站点历史任务已经确认过的真实每页条数：同模式 + 同采集方式优先，
+ * 其次取最近一条有值的记录（listProgress 已按 updated_at 倒序）。
+ * 有历史值就不再联网探测；清空缓存会连带清掉进度，之后才会重新探测。
+ */
+function knownPageSize(siteId: string, mode?: CollectMode, fetchRange?: FetchRange): number {
+  if (!videoCacheReady || !siteId) return 0
+  const rows = videoStore.listProgress(siteId)
+  const exact = rows.find(
+    (row) => row.mode === mode && row.fetchRange === fetchRange && row.pageSize > 0
+  )
+  if (exact) return exact.pageSize
+  return rows.find((row) => row.pageSize > 0)?.pageSize ?? 0
+}
+
 ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartInput) => {
   if (!videoCacheReady) return cacheUnavailable()
-  return collector.enqueue(input, 'manual')
+  const siteId = String(input?.siteId ?? '').trim()
+  // 同一模式与方式已经在跑 / 排队时不用探测，enqueue 会直接回 ALREADY_QUEUED
+  const range = input?.mode === 'full' ? 'all' : input?.fetchRange
+  const live = videoStore
+    .listProgress(siteId)
+    .some(
+      (row) =>
+        row.mode === input?.mode &&
+        row.fetchRange === range &&
+        (row.status === 'queued' || row.status === 'running' || row.status === 'replacing')
+    )
+  let pageSize = clampPageSize(input?.pageSize)
+  if (!pageSize && !live) {
+    // 历史任务用过真实页大小就直接复用，只有完全没记录时才试抓一页
+    pageSize = knownPageSize(siteId, input?.mode, range)
+    if (!pageSize) {
+      const site = siteStore.list().find((item) => item.id === siteId)
+      if (site) pageSize = (await probePageSize(site)).pageSize
+    }
+  }
+  return collector.enqueue({ ...input, pageSize: pageSize || undefined }, 'manual')
 })
 
 ipcMain.handle(
@@ -549,9 +587,15 @@ ipcMain.handle('videos:schedules:list', () => {
   return { ok: true, schedules: scheduleStore.list() }
 })
 
-ipcMain.handle('videos:schedules:save', (_event, input: VideoScheduleInput) => {
+ipcMain.handle('videos:schedules:save', async (_event, input: VideoScheduleInput) => {
   if (!videoCacheReady) return cacheUnavailable()
-  return scheduleStore.save(input)
+  const siteId = String(input?.siteId ?? '').trim()
+  const existing = siteId ? scheduleStore.get(siteId) : null
+  const site = siteId ? siteStore.list().find((item) => item.id === siteId) : undefined
+  // 计划里存过、或该站历史任务确认过真实页大小就直接用；都没有才试抓一页（关闭计划不联网）
+  let pageSize = existing?.pageSize || knownPageSize(siteId, input?.mode, input?.fetchRange) || 0
+  if (!pageSize && site && input?.enabled) pageSize = (await probePageSize(site)).pageSize
+  return scheduleStore.save({ ...input, pageSize })
 })
 
 ipcMain.handle('videos:schedules:remove', (_event, siteId: string) => {
@@ -572,6 +616,8 @@ ipcMain.handle(
     }
   ) => {
     if (!videoCacheReady) return { ok: false, logs: [], error: 'CACHE_UNAVAILABLE' }
+    // 日志是异步批量落库的，读之前先落完队列，避免刚发生的告警读不到
+    collectLogs.flush()
     return { ok: true, logs: collectLogs.list(query ?? {}) }
   }
 )
@@ -599,7 +645,8 @@ ipcMain.handle('videos:clear', async () => {
     return { ok: false, error: 'DB' }
   }
   videoCacheReady = true
-  collectLogs.trim()
+  // 清空缓存的语义是整个缓存库重建：队列里还没落库的日志一并丢弃
+  collectLogs.clear()
   collector.resume()
   scheduler.start()
   return { ok: true, freedBytes: before.dbBytes + before.detailBytes }
@@ -883,6 +930,8 @@ if (!gotTheLock) {
     collector.shutdown()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护
     if (app.isReady()) globalShortcut.unregisterAll()
+    // 日志是异步批量落库的：关库前把队列里剩下的同步写完
+    collectLogs.flush()
     // 关闭数据库连接，触发 WAL checkpoint 并清掉 -wal / -shm 附属文件
     videoStore.close()
     siteStore.close()

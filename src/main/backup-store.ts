@@ -100,6 +100,8 @@ interface ScheduleRow {
   dailyTime: string
   enabled: boolean
   cacheDetail: boolean
+  /** 保存计划时探测到的真实每页条数；0 = 未知（旧备份） */
+  pageSize: number
   nextRunAt: string
   lastRunAt: string
   createdAt: string
@@ -218,7 +220,7 @@ ORDER BY rowid
 
 const SELECT_SCHEDULES = `
 SELECT site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled, cache_detail,
-       next_run_at, last_run_at, created_at, updated_at
+       page_size, next_run_at, last_run_at, created_at, updated_at
 FROM collect_schedules
 ORDER BY created_at ASC, rowid ASC
 `
@@ -247,8 +249,8 @@ VALUES (?, ?, ?, ?, ?, ?)
 const INSERT_SCHEDULE = `
 INSERT INTO collect_schedules
   (site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled, cache_detail,
-   next_run_at, last_run_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+   page_size, next_run_at, last_run_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -464,6 +466,10 @@ function parseSchedules(value: unknown, siteIds: Set<string>): ScheduleRow[] | n
     const dailyTime = timing === 'daily' ? (requiredText(item.dailyTime, 5) ?? '') : ''
     if (timing === 'daily' && !isValidDailyTime(dailyTime)) return null
     const createdAt = timestamp(item.createdAt, new Date().toISOString())
+    // 旧备份没有 pageSize，按未知（0）处理，采集时用默认 100
+    const pageSizeRaw = Number(item.pageSize)
+    const pageSize =
+      Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.min(Math.floor(pageSizeRaw), 100) : 0
     seen.add(siteId)
     rows.push({
       siteId,
@@ -474,6 +480,7 @@ function parseSchedules(value: unknown, siteIds: Set<string>): ScheduleRow[] | n
       dailyTime,
       enabled: item.enabled,
       cacheDetail,
+      pageSize,
       nextRunAt: optionalText(item.nextRunAt, 40),
       lastRunAt: optionalText(item.lastRunAt, 40),
       createdAt,
@@ -611,6 +618,7 @@ function readState(database: DatabaseSync): BackupData {
         dailyTime: String(raw.daily_time ?? ''),
         enabled: Number(raw.enabled ?? 1) !== 0,
         cacheDetail: Number(raw.cache_detail ?? 0) !== 0,
+        pageSize: Number(raw.page_size ?? 0) || 0,
         nextRunAt: String(raw.next_run_at ?? ''),
         lastRunAt: String(raw.last_run_at ?? ''),
         createdAt,
@@ -673,6 +681,7 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.dailyTime,
         row.enabled ? 1 : 0,
         row.cacheDetail ? 1 : 0,
+        row.pageSize,
         row.nextRunAt,
         row.lastRunAt,
         row.createdAt,

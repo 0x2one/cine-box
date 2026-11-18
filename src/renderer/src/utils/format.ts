@@ -10,6 +10,12 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
+/** 大数字加千位分隔：89564 → 89,564（采集总量这类六位数才看得清） */
+export function formatCount(value: number): string {
+  if (!Number.isFinite(value)) return '0'
+  return Math.round(value).toLocaleString('zh-CN')
+}
+
 /** 统一显示到分钟，备份等需要区分同分钟内的记录时再带上秒 */
 export function formatDateTime(iso: string, withSeconds = false): string {
   const date = new Date(iso)

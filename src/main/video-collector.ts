@@ -2,6 +2,7 @@ import { fetchCollectText } from './collect-http'
 import type { CollectLogStore } from './collect-log-store'
 import type { Site } from './site-store'
 import { parseCollectPage, type CollectedPage } from './video-collect-parser'
+import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, clampPageSize } from './video-collect-probe'
 import type { VideoCacheStore, DetailSourceRow } from './video-cache-store'
 import type { VideoDetailCache } from './video-detail-cache'
 import type {
@@ -34,6 +35,8 @@ interface QueueItem extends VideoCollectStartInput {
   origin: CollectOrigin
   /** 上次在 replacing 阶段中断，重新入队后直接继续清理 */
   resumeReplace: boolean
+  /** 本次任务实际使用的每页条数（1–100） */
+  pageSize: number
 }
 
 interface ActiveTask {
@@ -63,6 +66,15 @@ function progressId(siteId: string, mode: CollectMode, range: FetchRange): strin
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** 耗时文案：850ms / 1.2s / 2m5s */
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+  return `${minutes}m${seconds}s`
 }
 
 /**
@@ -132,11 +144,14 @@ export function createVideoCollector(options: {
       return { ok: false, error: 'ALREADY_QUEUED' }
     }
     const existing = store.getProgress(progressId(siteId, input.mode, input.fetchRange))
+    // 主进程会先把探测到的真实页大小带进来；没带就按默认 100
+    const pageSize = clampPageSize(input.pageSize) || DEFAULT_PAGE_SIZE
     const progress = store.prepareTask({
       siteId,
       mode: input.mode,
       fetchRange: input.fetchRange,
-      restart: input.restart
+      restart: input.restart,
+      pageSize
     })
     const item: QueueItem = {
       siteId,
@@ -147,21 +162,22 @@ export function createVideoCollector(options: {
       allowEmpty: Boolean(input.allowEmpty),
       origin,
       resumeReplace: existing?.status === 'replacing',
-      cacheDetail: Boolean(input.cacheDetail)
+      cacheDetail: Boolean(input.cacheDetail),
+      pageSize
     }
     queue.push(item)
     emit(progress)
     // 站点 / 模式 / 范围日志行头里已经有了，这里不再重复
     log('info', item, origin === 'schedule' ? '定时采集已入队' : '已加入采集队列')
     void pump()
-    return { ok: true, progress }
+    return { ok: true, progress, pageSize }
   }
 
-  function buildUrl(site: Site, range: FetchRange, page: number): string {
+  function buildUrl(site: Site, range: FetchRange, page: number, pageSize: number): string {
     const url = new URL(site.address)
     url.searchParams.set('ac', 'detail')
     url.searchParams.set('pg', String(page))
-    url.searchParams.set('pagesize', '100')
+    url.searchParams.set('pagesize', String(Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE)))
     if (range === '24h') url.searchParams.set('h', '24')
     else if (range === '48h') url.searchParams.set('h', '48')
     else url.searchParams.delete('h')
@@ -176,7 +192,10 @@ export function createVideoCollector(options: {
     page: number,
     signal: AbortSignal
   ): Promise<{ ok: true; value: CollectedPage } | { ok: false; error: string }> {
-    const response = await fetchCollectText(buildUrl(site, item.fetchRange, page), signal)
+    const response = await fetchCollectText(
+      buildUrl(site, item.fetchRange, page, item.pageSize),
+      signal
+    )
     if (!response.ok) {
       if (response.error === 'ABORT') return { ok: false, error: 'ABORT' }
       return {
@@ -209,7 +228,9 @@ export function createVideoCollector(options: {
   async function replaceAll(
     item: QueueItem,
     progress: VideoCollectProgress,
-    signal: AbortSignal
+    signal: AbortSignal,
+    /** 列表阶段耗时文案；续采进入替换时没有翻页阶段，留空 */
+    phaseText = ''
   ): Promise<VideoCollectProgress> {
     const runToken = progress.startedAt || nowIso()
     const runStartTs = Number.isNaN(Date.parse(progress.startedAt))
@@ -225,7 +246,8 @@ export function createVideoCollector(options: {
       'info',
       item,
       '开始全量替换',
-      `本次标记 token=${runToken}，删除 ${runToken ? '本次未返回的旧来源' : '无'}`
+      `本次标记 token=${runToken}，删除 ${runToken ? '本次未返回的旧来源' : '无'}` +
+        (phaseText ? ` · ${phaseText}` : '')
     )
 
     while (true) {
@@ -294,7 +316,12 @@ export function createVideoCollector(options: {
       store.updateProgress(progress.id, { status: 'running', error: '', finishedAt: '' }) ??
       progress
     emit(progress)
-    log('info', item, '开始采集', item.origin === 'schedule' ? '定时触发' : '手动触发')
+    log(
+      'info',
+      item,
+      '开始采集',
+      `${item.origin === 'schedule' ? '定时触发' : '手动触发'} · 每页 ${item.pageSize} 条`
+    )
 
     const maxPages =
       Math.min(Math.max(Number(item.maxPages) || DEFAULT_MAX_PAGES[item.mode], 1), 10000) || 1
@@ -302,6 +329,13 @@ export function createVideoCollector(options: {
     let paused = false
     let detailCached = 0
     let detailFailed = 0
+    // 详情来源：本页响应直接落盘 / 仍需联网补抓（个别站点整页模式不给详情字段）
+    let detailDirect = 0
+    let detailFetched = 0
+    // 耗时拆分（累计）：列表请求 / 写库 / 详情缓存
+    let fetchTotalMs = 0
+    let writeTotalMs = 0
+    let detailTotalMs = 0
 
     while (true) {
       if (signal.aborted || task.cancelled || disposed) {
@@ -318,7 +352,9 @@ export function createVideoCollector(options: {
         break
       }
 
+      const fetchStart = Date.now()
       const result = await fetchPage(site, item, nextPage, signal)
+      const fetchPageMs = Date.now() - fetchStart
       if (!result.ok) {
         if (result.error === 'ABORT' || signal.aborted || task.cancelled) {
           paused = true
@@ -351,6 +387,7 @@ export function createVideoCollector(options: {
       }
 
       let write
+      const writeStart = Date.now()
       try {
         write = store.writePage(
           item.siteId,
@@ -362,12 +399,14 @@ export function createVideoCollector(options: {
         await finishWithError(item, progress.id, 'DB')
         return
       }
+      const writePageMs = Date.now() - writeStart
 
       progress =
         store.updateProgress(progress.id, {
           page: nextPage,
           pageCount: page.pageCount,
-          recordCount: page.recordCount,
+          // 有的站点只在第一页给 recordcount，后续页为 0 时保留已知总量
+          recordCount: page.recordCount || progress.recordCount,
           pageSize: page.pageSize,
           fetchedDelta: write.fetched,
           insertedDelta: write.inserted,
@@ -383,20 +422,46 @@ export function createVideoCollector(options: {
           `抓取 ${progress.fetched} · 新增 ${progress.inserted} · 更新 ${progress.updated} · 失败 ${progress.failed}`
         )
       }
+      let detailPageMs = 0
+      let pageDirect = 0
+      let pageFetched = 0
       if (item.cacheDetail && write.sourceIds.length > 0) {
+        const detailStart = Date.now()
         const sources = write.sourceIds
           .map((id) => store.getDetailSource(id))
           .filter((row): row is DetailSourceRow => row !== null)
         if (sources.length > 0) {
           try {
-            const warmed = await details.warm(sources)
-            detailCached += warmed.cached
-            detailFailed += warmed.failed
+            // 整页模式已经带回详情，先直接落盘；剩下的才联网补抓
+            const itemsById = new Map(page.items.map((entry) => [entry.sourceVideoId, entry]))
+            const direct = await details.warmFromPage(sources, itemsById)
+            detailCached += direct.cached
+            detailFailed += direct.failed
+            detailDirect += direct.cached
+            pageDirect = direct.cached
+            if (direct.fallback.length > 0) {
+              const warmed = await details.warm(direct.fallback)
+              detailCached += warmed.cached
+              detailFailed += warmed.failed
+              detailFetched += warmed.cached
+              pageFetched = warmed.cached
+            }
           } catch {
             // 详情预热失败不影响列表采集，下一页继续
           }
         }
+        detailPageMs = Date.now() - detailStart
       }
+      fetchTotalMs += fetchPageMs
+      writeTotalMs += writePageMs
+      detailTotalMs += detailPageMs
+      log(
+        'info',
+        item,
+        `第 ${nextPage} 页耗时 ${formatMs(fetchPageMs + writePageMs + detailPageMs)}`,
+        `列表 ${formatMs(fetchPageMs)} · 写库 ${formatMs(writePageMs)} · 详情 ${formatMs(detailPageMs)}` +
+          (item.cacheDetail ? `（本页直接 ${pageDirect} 个 / 补抓 ${pageFetched} 个）` : '')
+      )
       if (page.pageCount > 0 && nextPage >= page.pageCount) {
         completed = true
         break
@@ -405,11 +470,16 @@ export function createVideoCollector(options: {
       await delay(0)
     }
 
+    // 列表阶段耗时拆分：写进「暂停 / 完成 / 开始全量替换」日志，慢在哪一眼能看出来
+    const phaseText =
+      `耗时 ${formatMs(fetchTotalMs + writeTotalMs + detailTotalMs)}` +
+      `（列表 ${formatMs(fetchTotalMs)} · 写库 ${formatMs(writeTotalMs)} · 详情 ${formatMs(detailTotalMs)}）`
+
     if (paused) {
       const pausedProgress =
         store.updateProgress(progress.id, { status: 'paused', error: '' }) ?? progress
       emit(pausedProgress)
-      log('warn', item, '采集已暂停', `停在第 ${pausedProgress.page} 页，下次继续`)
+      log('warn', item, '采集已暂停', `停在第 ${pausedProgress.page} 页，下次继续 · ${phaseText}`)
       return
     }
 
@@ -458,7 +528,7 @@ export function createVideoCollector(options: {
         log('warn', item, '采集完成，但未执行全量替换', '未处理到最后一页')
         return
       }
-      await replaceAll(item, progress, signal)
+      await replaceAll(item, progress, signal, `列表阶段 ${phaseText}`)
       return
     }
 
@@ -475,8 +545,9 @@ export function createVideoCollector(options: {
       '采集完成',
       `${final.page} 页 · 抓取 ${final.fetched} · 新增 ${final.inserted} · 更新 ${final.updated} · 失败 ${final.failed}` +
         (item.cacheDetail
-          ? ` · 详情缓存 ${detailCached} 个${detailFailed > 0 ? `（失败 ${detailFailed}）` : ''}`
-          : '')
+          ? ` · 详情缓存 ${detailCached} 个${detailFailed > 0 ? `（失败 ${detailFailed}）` : ''}（本页 ${detailDirect} / 补抓 ${detailFetched}）`
+          : '') +
+        ` · ${phaseText}`
     )
   }
 

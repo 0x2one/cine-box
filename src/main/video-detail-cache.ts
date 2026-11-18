@@ -58,6 +58,14 @@ export interface VideoDetailCache {
   removeSourceFile: (source: DetailSourceRow) => Promise<void>
   /** 采集时预热详情：只抓缺失 / 过期的来源，失败只记索引错误 */
   warm: (sources: DetailSourceRow[]) => Promise<{ cached: number; failed: number }>
+  /**
+   * 采集时用列表页响应里的详情字段直接落盘（整页模式 ac=detail 已带回简介与播放线路），
+   * 不再按 id 重复请求；返回没能直接落盘、需要联网补抓的来源
+   */
+  warmFromPage: (
+    sources: DetailSourceRow[],
+    items: Map<string, CollectedVideo>
+  ) => Promise<{ cached: number; failed: number; fallback: DetailSourceRow[] }>
 }
 
 function safeSegment(value: string): string {
@@ -611,6 +619,40 @@ export function createVideoDetailCache(options: {
     return { cached: details.size, failed: failed.size }
   }
 
+  /**
+   * 列表页已经是 ac=detail 整页模式，响应里的每条都带了完整简介与播放线路，
+   * 直接 buildDetail + 写文件即可，省掉「每 10 个 id 再抓一次」的重复下载。
+   * 整页响应里缺条目、或简介与线路都为空时，说明这站的整页模式可能不给详情，
+   * 交回给 warm() 按 id 补抓，行为与改造前一致。
+   */
+  async function warmFromPage(
+    sources: DetailSourceRow[],
+    items: Map<string, CollectedVideo>
+  ): Promise<{ cached: number; failed: number; fallback: DetailSourceRow[] }> {
+    const fallback: DetailSourceRow[] = []
+    let cached = 0
+    let failed = 0
+    for (const source of sources) {
+      if (source.detailCachedAt !== '' && !source.detailStale) continue
+      const item = items.get(source.sourceVideoId)
+      if (!item || (item.playLines.length === 0 && item.intro === '')) {
+        fallback.push(source)
+        continue
+      }
+      try {
+        await writeCached(source, buildDetail(item, source))
+        cached += 1
+      } catch (error) {
+        const code = errorOf(error)
+        failed += 1
+        store.setDetailIndex(source.id, { detailError: code })
+        // 缓存库正在清空 / 应用退出，后面的也不用写了
+        if (code === 'ABORT') break
+      }
+    }
+    return { cached, failed, fallback }
+  }
+
   return {
     read: (videoId, autoFetch) => {
       const running = inflightRead.get(videoId)
@@ -631,6 +673,7 @@ export function createVideoDetailCache(options: {
     removeAll,
     scan,
     removeSourceFile,
-    warm
+    warm,
+    warmFromPage
   }
 }

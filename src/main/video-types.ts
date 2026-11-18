@@ -46,6 +46,8 @@ export interface VideoSchedule {
   enabled: boolean
   /** 采集时是否顺带生成详情缓存 */
   cacheDetail: boolean
+  /** 保存计划时探测到的真实每页条数；0 = 未知，采集时按默认 100 */
+  pageSize: number
   nextRunAt: string
   lastRunAt: string
   createdAt: string
@@ -61,6 +63,8 @@ export interface VideoScheduleInput {
   mode: CollectMode
   fetchRange: FetchRange
   cacheDetail?: boolean
+  /** 探测结果由主进程写入，渲染层不传 */
+  pageSize?: number
 }
 
 export interface VideoCollectLog {
@@ -130,12 +134,16 @@ export interface VideoCollectStartInput {
   allowEmpty?: boolean
   /** 采集时顺带把详情文件也抓下来（默认只写列表索引） */
   cacheDetail?: boolean
+  /** 探测到的真实每页条数；省略时主进程会先探测，探测失败按默认 100 */
+  pageSize?: number
 }
 
 export interface VideoCollectStartResult {
   ok: boolean
   error?: string
   progress?: VideoCollectProgress
+  /** 本次任务实际使用的每页条数 */
+  pageSize?: number
 }
 
 export interface VideoListQuery {

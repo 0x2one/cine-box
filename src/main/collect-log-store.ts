@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { inTransaction } from './database'
 import type { LogLevel, VideoCollectLog } from './video-types'
 
 export interface LogQuery {
@@ -21,15 +22,27 @@ export interface LogAppendInput {
 }
 
 export interface CollectLogStore {
-  append: (input: LogAppendInput) => VideoCollectLog
+  /**
+   * 只入内存队列，不落库、不发事件，调用方（采集主循环）不会被写日志拖慢；
+   * 落库与推送在下一个事件循环批次里批量完成，id 到那时才回填
+   */
+  append: (input: LogAppendInput) => void
   list: (query?: LogQuery) => VideoCollectLog[]
+  /** 清空日志，同时丢掉队列里还没落库的部分，避免清空后又被写回来 */
   clear: (siteId?: string) => number
   trim: () => void
+  /** 同步写完队列里的日志（退出 / 清空缓存前调用） */
+  flush: () => void
 }
 
 const MAX_ROWS = 5000
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const TRIM_EVERY = 100
+
+const INSERT_LOG = `
+INSERT INTO collect_logs (created_at, level, site_id, mode, fetch_range, message, detail)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : value.slice(0, max)
@@ -49,13 +62,16 @@ function rowToLog(row: Record<string, unknown>): VideoCollectLog {
 }
 
 /**
- * 采集日志：写入缓存库的 collect_logs，按“最多 5000 行 / 30 天”裁剪；
- * 新日志通过 emit 实时推给渲染层，日志失败不影响采集主流程。
+ * 采集日志：异步批量写入缓存库的 collect_logs，按“最多 5000 行 / 30 天”裁剪。
+ * append 只做一次数组 push 并安排下一个事件循环批次落库，采集每页都会写日志，
+ * 但写库、裁剪、推事件都不在采集的关键路径上；日志失败不影响采集主流程。
  */
 export function createCollectLogStore(
   connection: () => DatabaseSync,
   emit?: (log: VideoCollectLog) => void
 ): CollectLogStore {
+  const pending: VideoCollectLog[] = []
+  let scheduled = false
   let writes = 0
 
   function trim(): void {
@@ -72,8 +88,55 @@ export function createCollectLogStore(
     }
   }
 
-  function append(input: LogAppendInput): VideoCollectLog {
-    const log: VideoCollectLog = {
+  function flush(): void {
+    if (pending.length === 0) return
+    const batch = pending.splice(0, pending.length)
+    try {
+      // 一批日志一个事务：把 N 次同步写盘压成一次
+      inTransaction(connection(), (tx) => {
+        const insert = tx.prepare(INSERT_LOG)
+        for (const log of batch) {
+          const result = insert.run(
+            log.createdAt,
+            log.level,
+            log.siteId,
+            log.mode,
+            log.fetchRange,
+            log.message,
+            log.detail
+          )
+          log.id = Number(result.lastInsertRowid)
+        }
+      })
+      writes += batch.length
+      if (writes >= TRIM_EVERY) {
+        writes = 0
+        trim()
+      }
+    } catch {
+      // 缓存库已关闭 / 正在重建：这批日志只推给界面，不落库
+    }
+    for (const log of batch) {
+      try {
+        emit?.(log)
+      } catch {
+        // 渲染层未就绪 / 已关闭
+      }
+    }
+  }
+
+  function scheduleFlush(): void {
+    if (scheduled) return
+    scheduled = true
+    // setImmediate：等当前同步批次（页面写入事务等）跑完再落库，采集循环不等待
+    setImmediate(() => {
+      scheduled = false
+      flush()
+    })
+  }
+
+  function append(input: LogAppendInput): void {
+    pending.push({
       id: 0,
       createdAt: new Date().toISOString(),
       level: input.level,
@@ -82,36 +145,8 @@ export function createCollectLogStore(
       fetchRange: input.fetchRange ?? '',
       message: truncate(String(input.message ?? ''), 500),
       detail: truncate(String(input.detail ?? ''), 2000)
-    }
-    try {
-      const db = connection()
-      const result = db
-        .prepare(
-          `INSERT INTO collect_logs
-             (created_at, level, site_id, mode, fetch_range, message, detail)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          log.createdAt,
-          log.level,
-          log.siteId,
-          log.mode,
-          log.fetchRange,
-          log.message,
-          log.detail
-        )
-      log.id = Number(result.lastInsertRowid)
-      writes += 1
-      if (writes % TRIM_EVERY === 0) trim()
-    } catch {
-      // 写日志失败时仍然把日志交给界面，别因为日志表异常中断采集
-    }
-    try {
-      emit?.(log)
-    } catch {
-      // 渲染层未就绪 / 已关闭
-    }
-    return log
+    })
+    scheduleFlush()
   }
 
   function list(query: LogQuery = {}): VideoCollectLog[] {
@@ -146,6 +181,10 @@ export function createCollectLogStore(
   }
 
   function clear(siteId?: string): number {
+    // 还没落库的日志一起丢掉，否则清空之后又会被 flush 写回来
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      if (!siteId || pending[index].siteId === siteId) pending.splice(index, 1)
+    }
     try {
       const db = connection()
       return siteId
@@ -156,5 +195,5 @@ export function createCollectLogStore(
     }
   }
 
-  return { append, list, clear, trim }
+  return { append, list, clear, trim, flush }
 }

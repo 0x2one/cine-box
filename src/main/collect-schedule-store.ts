@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { openDatabase } from './database'
 import { isValidDailyTime, nextRunAt } from './schedule-time'
+import { clampPageSize } from './video-collect-probe'
 import type {
   CollectMode,
   FetchRange,
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS collect_schedules (
   daily_time TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
   cache_detail INTEGER NOT NULL DEFAULT 0,
+  page_size INTEGER NOT NULL DEFAULT 0,
   next_run_at TEXT NOT NULL DEFAULT '',
   last_run_at TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
@@ -50,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_collect_schedules_due
 
 const SELECT_ALL = `
 SELECT site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled, cache_detail,
-       next_run_at, last_run_at, created_at, updated_at
+       page_size, next_run_at, last_run_at, created_at, updated_at
 FROM collect_schedules
 ORDER BY created_at ASC, rowid ASC
 `
@@ -65,6 +67,7 @@ function rowToSchedule(row: Record<string, unknown>): VideoSchedule {
     dailyTime: String(row.daily_time ?? ''),
     enabled: Number(row.enabled) !== 0,
     cacheDetail: Number(row.cache_detail) !== 0,
+    pageSize: Number(row.page_size) || 0,
     nextRunAt: String(row.next_run_at ?? ''),
     lastRunAt: String(row.last_run_at ?? ''),
     createdAt: String(row.created_at ?? ''),
@@ -76,7 +79,8 @@ function rowToSchedule(row: Record<string, unknown>): VideoSchedule {
 const LATE_COLUMNS = [
   { name: 'cache_detail', ddl: 'cache_detail INTEGER NOT NULL DEFAULT 0' },
   { name: 'timing', ddl: "timing TEXT NOT NULL DEFAULT 'interval'" },
-  { name: 'daily_time', ddl: "daily_time TEXT NOT NULL DEFAULT ''" }
+  { name: 'daily_time', ddl: "daily_time TEXT NOT NULL DEFAULT ''" },
+  { name: 'page_size', ddl: 'page_size INTEGER NOT NULL DEFAULT 0' }
 ]
 
 function migrate(connection: DatabaseSync): void {
@@ -114,7 +118,7 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
     const row = database()
       .prepare(
         `SELECT site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled,
-                cache_detail, next_run_at, last_run_at, created_at, updated_at
+                cache_detail, page_size, next_run_at, last_run_at, created_at, updated_at
          FROM collect_schedules WHERE site_id = ?`
       )
       .get(siteId) as Record<string, unknown> | undefined
@@ -150,14 +154,16 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
     const now = new Date().toISOString()
     const enabled = Boolean(input.enabled)
     const cacheDetail = Boolean(input.cacheDetail)
+    // 主进程探测后带进来；0 表示未知（探测失败且没有历史值）
+    const pageSize = clampPageSize(input.pageSize)
     const next = enabled ? nextRunAt(new Date(), timing, intervalMinutes, dailyTime) : ''
     const existing = get(siteId)
     connection
       .prepare(
         `INSERT INTO collect_schedules
            (site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled, cache_detail,
-            next_run_at, last_run_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            page_size, next_run_at, last_run_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (site_id) DO UPDATE SET
            mode = excluded.mode,
            fetch_range = excluded.fetch_range,
@@ -166,6 +172,7 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
            daily_time = excluded.daily_time,
            enabled = excluded.enabled,
            cache_detail = excluded.cache_detail,
+           page_size = excluded.page_size,
            next_run_at = excluded.next_run_at,
            updated_at = excluded.updated_at`
       )
@@ -178,6 +185,7 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
         dailyTime,
         enabled ? 1 : 0,
         cacheDetail ? 1 : 0,
+        pageSize,
         next,
         existing?.lastRunAt ?? '',
         existing?.createdAt ?? now,
@@ -199,7 +207,7 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
       database()
         .prepare(
           `SELECT site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled,
-                  cache_detail, next_run_at, last_run_at, created_at, updated_at
+                  cache_detail, page_size, next_run_at, last_run_at, created_at, updated_at
            FROM collect_schedules
            WHERE enabled = 1 AND next_run_at <> '' AND next_run_at <= ?
            ORDER BY next_run_at ASC`

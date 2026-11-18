@@ -128,6 +128,8 @@ export interface VideoCacheStore {
     mode: CollectMode
     fetchRange: FetchRange
     restart?: boolean
+    /** 任务实际使用的每页条数：写进进度，首屏就能显示「每页 N 条」 */
+    pageSize?: number
   }) => VideoCollectProgress
   updateProgress: (id: string, patch: ProgressPatch) => VideoCollectProgress | null
   resetInterrupted: () => void
@@ -1081,10 +1083,13 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     mode: CollectMode
     fetchRange: FetchRange
     restart?: boolean
+    /** 任务实际使用的每页条数：写进进度，首屏就能显示「每页 N 条」 */
+    pageSize?: number
   }): VideoCollectProgress {
     const connection = database()
     const id = progressKey(input.siteId, input.mode, input.fetchRange)
     const now = new Date().toISOString()
+    const pageSize = Math.max(0, Math.floor(Number(input.pageSize) || 0))
     const existing = getProgress(id)
     if (!existing) {
       connection
@@ -1092,27 +1097,28 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
           `INSERT INTO collect_progress
              (id, site_id, mode, fetch_range, status, page, page_count, record_count, page_size,
               fetched, inserted, updated, failed, deleted, error, started_at, finished_at, updated_at)
-           VALUES (?, ?, ?, ?, 'queued', 0, 0, 0, 0, 0, 0, 0, 0, 0, '', ?, '', ?)`
+           VALUES (?, ?, ?, ?, 'queued', 0, 0, 0, ?, 0, 0, 0, 0, 0, '', ?, '', ?)`
         )
-        .run(id, input.siteId, input.mode, input.fetchRange, now, now)
+        .run(id, input.siteId, input.mode, input.fetchRange, pageSize, now, now)
     } else if (input.restart || existing.status === 'done' || existing.status === 'idle') {
       connection
         .prepare(
           `UPDATE collect_progress SET
-             status = 'queued', page = 0, page_count = 0, record_count = 0, page_size = 0,
+             status = 'queued', page = 0, page_count = 0, record_count = 0, page_size = ?,
              fetched = 0, inserted = 0, updated = 0, failed = 0, deleted = 0,
              error = '', started_at = ?, finished_at = '', updated_at = ?
            WHERE id = ?`
         )
-        .run(now, now, id)
+        .run(pageSize, now, now, id)
     } else {
       // paused / error / replacing 续采：保留 page、计数和 started_at（全量替换 token）
       connection
         .prepare(
-          `UPDATE collect_progress SET status = 'queued', error = '', finished_at = '', updated_at = ?
+          `UPDATE collect_progress SET status = 'queued', error = '', finished_at = '',
+             page_size = CASE WHEN ? > 0 THEN ? ELSE page_size END, updated_at = ?
            WHERE id = ?`
         )
-        .run(now, id)
+        .run(pageSize, pageSize, now, id)
     }
     return getProgress(id) as VideoCollectProgress
   }
