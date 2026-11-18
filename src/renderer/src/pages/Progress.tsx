@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { App, Button, Popconfirm, Progress, Spin, Tag, Tooltip } from 'antd'
+import { App, Button, Popconfirm, Spin, Tag, Tooltip } from 'antd'
 import { CloudDownloadOutlined, FileTextOutlined, StopOutlined } from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
 
@@ -152,128 +152,134 @@ function ProgressPanel({
           <span className="sites-empty-hint">去「采集」发起一次，进度会实时显示在这里</span>
         </div>
       ) : (
-        <div className="progress-table">
-          <div className="progress-row progress-row-head">
-            <span>站点</span>
-            <span>模式 / 方式</span>
-            <span>状态</span>
-            <span>进度</span>
-            <span>抓取 / 新增 / 更新 / 失败 / 删除</span>
-            <span>时间</span>
-            <span />
-          </div>
+        <div className="progress-list">
           {ordered.map((item) => {
+            // 已完成一律视为 100%，其余按页数推算
             const percent =
-              item.pageCount > 0
-                ? Math.min(100, Math.round((item.page / item.pageCount) * 100))
-                : item.status === 'done'
-                  ? 100
+              item.status === 'done'
+                ? 100
+                : item.pageCount > 0
+                  ? Math.min(100, Math.round((item.page / item.pageCount) * 100))
                   : 0
             const active = item.status === 'running' || item.status === 'replacing'
+            const label = siteLabel(siteMap.get(item.siteId), item.siteId)
+            // 下边框进度条只在这三种状态下出现：进行中（呼吸）、暂停（琥珀）、已完成（满格绿）
+            const stateClass = active
+              ? ' is-active'
+              : item.status === 'paused'
+                ? ' is-paused'
+                : item.status === 'done'
+                  ? ' is-done'
+                  : ''
             return (
-              <div className={`progress-row${active ? ' is-active' : ''}`} key={item.id}>
-                <div className="progress-site">
-                  <span className="progress-site-name">
-                    {siteLabel(siteMap.get(item.siteId), item.siteId)}
-                  </span>
-                  <span className="progress-site-id" title={item.siteId}>
-                    {item.siteId.slice(0, 8)}
-                  </span>
-                </div>
-                <div className="progress-mode">
-                  <span>{modeText(item.mode)}</span>
-                  <span className="progress-range">
-                    {item.fetchRange === 'all' ? '全部' : item.fetchRange}
-                  </span>
-                </div>
-                <div>
+              <article
+                className={`progress-card${stateClass}`}
+                key={item.id}
+                style={{ '--progress': `${percent}%` } as React.CSSProperties}
+              >
+                <div className="progress-card-head">
+                  <div className="progress-card-title">
+                    <span className="progress-site-name" title={label}>
+                      {label}
+                    </span>
+                    <span className="progress-site-id" title={item.siteId}>
+                      {item.siteId.slice(0, 8)}
+                    </span>
+                    <span className="progress-mode">
+                      {modeText(item.mode)} · {item.fetchRange === 'all' ? '全部' : item.fetchRange}
+                    </span>
+                    <span className="progress-caption">
+                      {progressText(item)}
+                      {item.pageCount > 0 ? ` · ${percent}%` : ''}
+                    </span>
+                  </div>
                   <Tag color={STATUS_COLOR[item.status]}>{STATUS_TEXT[item.status]}</Tag>
-                </div>
-                <div className="progress-bar">
-                  <Progress
-                    percent={percent}
-                    size="small"
-                    showInfo={false}
-                    status={
-                      item.status === 'error'
-                        ? 'exception'
-                        : active
-                          ? 'active'
-                          : item.status === 'done'
-                            ? 'success'
-                            : 'normal'
-                    }
-                  />
-                  <span className="progress-caption">{progressText(item)}</span>
-                </div>
-                <div className="progress-counts">
-                  <span>{item.fetched}</span>
-                  <span className="is-inserted">{item.inserted}</span>
-                  <span className="is-updated">{item.updated}</span>
-                  <span className="is-failed">{item.failed}</span>
-                  <span className="is-deleted">{item.deleted}</span>
-                </div>
-                <div className="progress-time">
-                  <span>开始 {item.startedAt ? formatDateTime(item.startedAt, true) : '—'}</span>
-                  <span>
-                    {item.finishedAt
-                      ? `结束 ${formatDateTime(item.finishedAt, true)}`
-                      : `更新 ${formatDateTime(item.updatedAt, true)}`}
-                  </span>
-                  {item.error && (
-                    <Tooltip title={item.error}>
-                      <span className="progress-error" title={item.error}>
-                        {item.error}
-                      </span>
-                    </Tooltip>
-                  )}
-                </div>
-                <div className="progress-actions">
-                  <Tooltip title="查看该站点日志">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<FileTextOutlined />}
-                      onClick={() => onOpenLogs(item.siteId)}
-                      aria-label="查看该站点日志"
-                    />
-                  </Tooltip>
-                  <Tooltip title="重新发起采集">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<CloudDownloadOutlined />}
-                      onClick={onOpenCollect}
-                      aria-label="重新发起采集"
-                    />
-                  </Tooltip>
-                  {(item.status === 'running' ||
-                    item.status === 'queued' ||
-                    item.status === 'replacing') && (
-                    <Popconfirm
-                      title="取消采集"
-                      description={
-                        item.status === 'queued'
-                          ? '排队中的任务会直接移出队列。'
-                          : '当前页结束后暂停，已提交的页会保留。'
-                      }
-                      okText="取消采集"
-                      cancelText="继续"
-                      okButtonProps={{ danger: true }}
-                      onConfirm={() => void cancel(item)}
-                    >
+                  <div className="progress-actions">
+                    <Tooltip title="查看该站点日志">
                       <Button
                         type="text"
-                        danger
                         size="small"
-                        loading={cancelling === item.id}
-                        icon={<StopOutlined />}
-                        aria-label="取消采集"
+                        icon={<FileTextOutlined />}
+                        onClick={() => onOpenLogs(item.siteId)}
+                        aria-label="查看该站点日志"
                       />
-                    </Popconfirm>
-                  )}
+                    </Tooltip>
+                    <Tooltip title="重新发起采集">
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CloudDownloadOutlined />}
+                        onClick={onOpenCollect}
+                        aria-label="重新发起采集"
+                      />
+                    </Tooltip>
+                    {(item.status === 'running' ||
+                      item.status === 'queued' ||
+                      item.status === 'replacing') && (
+                      <Popconfirm
+                        title="取消采集"
+                        description={
+                          item.status === 'queued'
+                            ? '排队中的任务会直接移出队列。'
+                            : '当前页结束后暂停，已提交的页会保留。'
+                        }
+                        okText="取消采集"
+                        cancelText="继续"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => void cancel(item)}
+                      >
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          loading={cancelling === item.id}
+                          icon={<StopOutlined />}
+                          aria-label="取消采集"
+                        />
+                      </Popconfirm>
+                    )}
+                  </div>
                 </div>
-              </div>
+
+                <div className="progress-card-foot">
+                  <div className="progress-counts">
+                    <span className="progress-count">
+                      <span className="progress-count-label">抓取</span>
+                      <span className="progress-count-value">{item.fetched}</span>
+                    </span>
+                    <span className="progress-count">
+                      <span className="progress-count-label">新增</span>
+                      <span className="progress-count-value is-inserted">{item.inserted}</span>
+                    </span>
+                    <span className="progress-count">
+                      <span className="progress-count-label">更新</span>
+                      <span className="progress-count-value is-updated">{item.updated}</span>
+                    </span>
+                    <span className="progress-count">
+                      <span className="progress-count-label">失败</span>
+                      <span className="progress-count-value is-failed">{item.failed}</span>
+                    </span>
+                    <span className="progress-count">
+                      <span className="progress-count-label">删除</span>
+                      <span className="progress-count-value is-deleted">{item.deleted}</span>
+                    </span>
+                  </div>
+                  <div className="progress-time">
+                    <span>开始 {item.startedAt ? formatDateTime(item.startedAt, true) : '—'}</span>
+                    <span>
+                      {item.finishedAt
+                        ? `结束 ${formatDateTime(item.finishedAt, true)}`
+                        : `更新 ${formatDateTime(item.updatedAt, true)}`}
+                    </span>
+                  </div>
+                </div>
+
+                {item.error && (
+                  <Tooltip title={item.error}>
+                    <span className="progress-error">{item.error}</span>
+                  </Tooltip>
+                )}
+              </article>
             )
           })}
         </div>
