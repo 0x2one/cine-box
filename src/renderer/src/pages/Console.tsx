@@ -38,7 +38,7 @@ const SECTION_META: Record<ConsoleSection, { title: string; desc: string; empty?
   categories: { title: '视频分类', desc: '层级管理本地分类' },
   collect: { title: '采集', desc: '手动采集与定时计划' },
   progress: { title: '进度', desc: '按站点查看采集进度与计数' },
-  capacity: { title: '容量', desc: '查看并清理 SQLite 与详情文件缓存' },
+  capacity: { title: '容量', desc: '查看并清理缓存索引与详情文件' },
   backup: { title: '备份', desc: '导出与恢复站点、分类、绑定和计划' },
   logs: { title: '日志', desc: '采集运行日志' }
 }

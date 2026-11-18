@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons'
 import { formatBytes, formatDateTime } from '../utils/format'
 
-/** 控制台「容量」：SQLite 索引 + 详情文件缓存体积，支持手动清理 */
+/** 控制台「容量」：缓存索引 + 详情文件缓存体积，支持手动清理 */
 function CapacityPanel({ title, desc }: { title: string; desc: string }): React.JSX.Element {
   const { message } = App.useApp()
   const [capacity, setCapacity] = useState<VideoCapacity | null>(null)
@@ -121,7 +121,7 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
               刷新
             </Button>
           </Tooltip>
-          <Tooltip title="遍历 Data/videos，和 SQLite 索引对账">
+          <Tooltip title="遍历 Data/videos，和缓存索引对账">
             <Button icon={<ScanOutlined />} loading={scanning} onClick={() => void scan()}>
               扫描校对
             </Button>
@@ -154,11 +154,11 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
             <section className="capacity-card">
               <div className="capacity-card-head">
                 <DatabaseOutlined />
-                <span>SQLite 缓存</span>
+                <span>缓存索引</span>
               </div>
               <strong className="capacity-value">{formatBytes(capacity?.dbBytes ?? 0)}</strong>
               <span className="capacity-hint">
-                主库 {formatBytes(capacity?.dbFileBytes ?? 0)} · WAL{' '}
+                数据文件 {formatBytes(capacity?.dbFileBytes ?? 0)} · 写入缓冲{' '}
                 {formatBytes(capacity?.walBytes ?? 0)}
               </span>
               <div className="capacity-stats">
@@ -193,7 +193,7 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
                 <span>合计占用</span>
               </div>
               <strong className="capacity-value">{formatBytes(totalBytes)}</strong>
-              <span className="capacity-hint">SQLite + 详情文件</span>
+              <span className="capacity-hint">缓存索引 + 详情文件</span>
               <div className="capacity-stats">
                 <span>清理不会影响站点、分类、绑定与定时计划</span>
               </div>
