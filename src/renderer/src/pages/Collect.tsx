@@ -65,6 +65,7 @@ interface ManualValues {
   mode: CollectMode
   fetchRange: FetchRange
   allowEmpty: boolean
+  cacheDetail: boolean
 }
 
 interface ScheduleValues {
@@ -72,6 +73,7 @@ interface ScheduleValues {
   intervalMinutes: number
   mode: CollectMode
   fetchRange: FetchRange
+  cacheDetail: boolean
 }
 
 const COLLECT_ERRORS: Record<string, string> = {
@@ -151,7 +153,12 @@ function CollectPanel({
 
   useEffect(() => {
     if (!manualTarget) return
-    manualForm.setFieldsValue({ mode: 'incremental', fetchRange: '24h', allowEmpty: false })
+    manualForm.setFieldsValue({
+      mode: 'incremental',
+      fetchRange: '24h',
+      allowEmpty: false,
+      cacheDetail: false
+    })
   }, [manualTarget, manualForm])
 
   useEffect(() => {
@@ -161,7 +168,8 @@ function CollectPanel({
       enabled: existing?.enabled ?? false,
       intervalMinutes: existing?.intervalMinutes ?? 360,
       mode: existing?.mode ?? 'incremental',
-      fetchRange: existing?.fetchRange ?? '24h'
+      fetchRange: existing?.fetchRange ?? '24h',
+      cacheDetail: existing?.cacheDetail ?? false
     })
   }, [scheduleTarget, schedules, scheduleForm])
 
@@ -179,7 +187,8 @@ function CollectPanel({
         siteId: manualTarget.id,
         mode: values.mode,
         fetchRange: values.mode === 'full' ? 'all' : values.fetchRange,
-        allowEmpty: values.allowEmpty
+        allowEmpty: values.allowEmpty,
+        cacheDetail: values.cacheDetail
       })
       if (!result.ok) {
         message.warning(COLLECT_ERRORS[result.error ?? ''] ?? '发起采集失败，请重试')
@@ -210,7 +219,8 @@ function CollectPanel({
         enabled: values.enabled,
         intervalMinutes: values.intervalMinutes,
         mode: values.mode,
-        fetchRange: values.mode === 'full' ? 'all' : values.fetchRange
+        fetchRange: values.mode === 'full' ? 'all' : values.fetchRange,
+        cacheDetail: values.cacheDetail
       })
       if (!result.ok) {
         message.error(
@@ -339,6 +349,7 @@ function CollectPanel({
                     {schedule?.enabled && schedule.nextRunAt
                       ? formatDateTime(schedule.nextRunAt, true)
                       : '未启用'}
+                    {schedule?.cacheDetail ? ' · 含详情缓存' : ''}
                   </span>
                 </div>
 
@@ -403,6 +414,13 @@ function CollectPanel({
               options={manualMode === 'full' ? RANGE_OPTIONS.slice(0, 1) : RANGE_OPTIONS}
               disabled={manualMode === 'full'}
             />
+          </Form.Item>
+          <Form.Item
+            name="cacheDetail"
+            valuePropName="checked"
+            extra="勾选后本次采集会顺带抓取详情（简介、演员、播放线路）并缓存到本地，多花一些时间和磁盘；不勾选则打开视频时再按需生成。"
+          >
+            <Checkbox>同时生成详情缓存</Checkbox>
           </Form.Item>
           {manualMode === 'full' && (
             <Form.Item
@@ -477,6 +495,13 @@ function CollectPanel({
               </Button>
             ))}
           </div>
+          <Form.Item
+            name="cacheDetail"
+            valuePropName="checked"
+            extra="勾选后每次定时采集都会顺带生成详情缓存，会明显增加单次耗时与磁盘占用。"
+          >
+            <Checkbox>采集时同时生成详情缓存</Checkbox>
+          </Form.Item>
         </Form>
       </Modal>
     </>

@@ -24,6 +24,8 @@ export interface PageWriteResult {
   inserted: number
   updated: number
   failed: number
+  /** 本页写入（新增或更新）的来源 id，供采集时预热详情缓存 */
+  sourceIds: number[]
 }
 
 export interface ProgressPatch {
@@ -491,7 +493,13 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     const connection = database()
     const now = new Date().toISOString()
     const nowTs = Date.now()
-    const result: PageWriteResult = { fetched: items.length, inserted: 0, updated: 0, failed: 0 }
+    const result: PageWriteResult = {
+      fetched: items.length,
+      inserted: 0,
+      updated: 0,
+      failed: 0,
+      sourceIds: []
+    }
     const affected = new Set<number>()
 
     inTransaction(connection, (tx) => {
@@ -558,7 +566,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
         const existing = selectSource.get(siteId, sourceVideoId) as
           Record<string, unknown> | undefined
         if (!existing) {
-          insertSource.run(
+          const inserted = insertSource.run(
             siteId,
             sourceVideoId,
             videoId,
@@ -578,11 +586,13 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
             now
           )
           result.inserted += 1
+          result.sourceIds.push(num(inserted.lastInsertRowid))
           affected.add(videoId)
           continue
         }
 
         const sourceId = num(existing.id)
+        result.sourceIds.push(sourceId)
         const oldVideoId = num(existing.video_id)
         const merged = {
           videoId,

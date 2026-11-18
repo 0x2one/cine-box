@@ -2,7 +2,7 @@ import { fetchCollectText } from './collect-http'
 import type { CollectLogStore } from './collect-log-store'
 import type { Site } from './site-store'
 import { parseCollectPage, type CollectedPage } from './video-collect-parser'
-import type { VideoCacheStore } from './video-cache-store'
+import type { VideoCacheStore, DetailSourceRow } from './video-cache-store'
 import type { VideoDetailCache } from './video-detail-cache'
 import type {
   CollectMode,
@@ -146,7 +146,8 @@ export function createVideoCollector(options: {
       maxPages: input.maxPages,
       allowEmpty: Boolean(input.allowEmpty),
       origin,
-      resumeReplace: existing?.status === 'replacing'
+      resumeReplace: existing?.status === 'replacing',
+      cacheDetail: Boolean(input.cacheDetail)
     }
     queue.push(item)
     emit(progress)
@@ -296,6 +297,8 @@ export function createVideoCollector(options: {
       Math.min(Math.max(Number(item.maxPages) || DEFAULT_MAX_PAGES[item.mode], 1), 10000) || 1
     let completed = false
     let paused = false
+    let detailCached = 0
+    let detailFailed = 0
 
     while (true) {
       if (signal.aborted || task.cancelled || disposed) {
@@ -377,6 +380,20 @@ export function createVideoCollector(options: {
           `抓取 ${progress.fetched} · 新增 ${progress.inserted} · 更新 ${progress.updated} · 失败 ${progress.failed}`
         )
       }
+      if (item.cacheDetail && write.sourceIds.length > 0) {
+        const sources = write.sourceIds
+          .map((id) => store.getDetailSource(id))
+          .filter((row): row is DetailSourceRow => row !== null)
+        if (sources.length > 0) {
+          try {
+            const warmed = await details.warm(sources)
+            detailCached += warmed.cached
+            detailFailed += warmed.failed
+          } catch {
+            // 详情预热失败不影响列表采集，下一页继续
+          }
+        }
+      }
       if (page.pageCount > 0 && nextPage >= page.pageCount) {
         completed = true
         break
@@ -453,7 +470,10 @@ export function createVideoCollector(options: {
       'info',
       item,
       '采集完成',
-      `${final.page} 页 · 抓取 ${final.fetched} · 新增 ${final.inserted} · 更新 ${final.updated} · 失败 ${final.failed}`
+      `${final.page} 页 · 抓取 ${final.fetched} · 新增 ${final.inserted} · 更新 ${final.updated} · 失败 ${final.failed}` +
+        (item.cacheDetail
+          ? ` · 详情缓存 ${detailCached} 个${detailFailed > 0 ? `（失败 ${detailFailed}）` : ''}`
+          : '')
     )
   }
 

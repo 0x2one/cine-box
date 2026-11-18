@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS collect_schedules (
   fetch_range TEXT NOT NULL DEFAULT '24h' CHECK (fetch_range IN ('all', '24h', '48h')),
   interval_minutes INTEGER NOT NULL DEFAULT 360 CHECK (interval_minutes >= 5),
   enabled INTEGER NOT NULL DEFAULT 1,
+  cache_detail INTEGER NOT NULL DEFAULT 0,
   next_run_at TEXT NOT NULL DEFAULT '',
   last_run_at TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
@@ -39,8 +40,8 @@ CREATE INDEX IF NOT EXISTS idx_collect_schedules_due
 `
 
 const SELECT_ALL = `
-SELECT site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
-       created_at, updated_at
+SELECT site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at,
+       last_run_at, created_at, updated_at
 FROM collect_schedules
 ORDER BY created_at ASC, rowid ASC
 `
@@ -52,11 +53,24 @@ function rowToSchedule(row: Record<string, unknown>): VideoSchedule {
     fetchRange: row.fetch_range === '24h' || row.fetch_range === '48h' ? row.fetch_range : 'all',
     intervalMinutes: Number(row.interval_minutes) || 360,
     enabled: Number(row.enabled) !== 0,
+    cacheDetail: Number(row.cache_detail) !== 0,
     nextRunAt: String(row.next_run_at ?? ''),
     lastRunAt: String(row.last_run_at ?? ''),
     createdAt: String(row.created_at ?? ''),
     updatedAt: String(row.updated_at ?? '')
   }
+}
+
+/** 老库补列：cache_detail 是后加的，按 pragma_table_info 幂等迁移 */
+function migrate(connection: DatabaseSync): void {
+  const columns = connection.prepare('PRAGMA table_info(collect_schedules)').all() as Record<
+    string,
+    unknown
+  >[]
+  if (columns.some((column) => String(column.name) === 'cache_detail')) return
+  connection.exec(
+    'ALTER TABLE collect_schedules ADD COLUMN cache_detail INTEGER NOT NULL DEFAULT 0'
+  )
 }
 
 function intervalOf(value: unknown): number {
@@ -81,8 +95,8 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
   function get(siteId: string): VideoSchedule | null {
     const row = database()
       .prepare(
-        `SELECT site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
-                created_at, updated_at
+        `SELECT site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at,
+                last_run_at, created_at, updated_at
          FROM collect_schedules WHERE site_id = ?`
       )
       .get(siteId) as Record<string, unknown> | undefined
@@ -112,19 +126,21 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
 
     const now = new Date().toISOString()
     const enabled = Boolean(input.enabled)
+    const cacheDetail = Boolean(input.cacheDetail)
     const nextRunAt = enabled ? new Date(Date.now() + intervalMinutes * 60_000).toISOString() : ''
     const existing = get(siteId)
     connection
       .prepare(
         `INSERT INTO collect_schedules
-           (site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
-            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at,
+            last_run_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (site_id) DO UPDATE SET
            mode = excluded.mode,
            fetch_range = excluded.fetch_range,
            interval_minutes = excluded.interval_minutes,
            enabled = excluded.enabled,
+           cache_detail = excluded.cache_detail,
            next_run_at = excluded.next_run_at,
            updated_at = excluded.updated_at`
       )
@@ -134,6 +150,7 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
         fetchRange,
         intervalMinutes,
         enabled ? 1 : 0,
+        cacheDetail ? 1 : 0,
         nextRunAt,
         existing?.lastRunAt ?? '',
         existing?.createdAt ?? now,
@@ -154,8 +171,8 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
     return (
       database()
         .prepare(
-          `SELECT site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
-                  created_at, updated_at
+          `SELECT site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at,
+                  last_run_at, created_at, updated_at
            FROM collect_schedules
            WHERE enabled = 1 AND next_run_at <> '' AND next_run_at <= ?
            ORDER BY next_run_at ASC`
@@ -177,6 +194,7 @@ export function createCollectScheduleStore(file: string): CollectScheduleStore {
       if (db) return
       const connection = openDatabase(file)
       connection.exec(CREATE_TABLE)
+      migrate(connection)
       db = connection
     },
     list,

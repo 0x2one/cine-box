@@ -439,6 +439,8 @@ interface VideoCollectStartInput {
   restart?: boolean
   maxPages?: number
   allowEmpty?: boolean
+  /** 采集时顺带把详情文件也抓下来（默认只写列表索引） */
+  cacheDetail?: boolean
 }
 
 interface VideoCollectStartResult {
@@ -453,6 +455,8 @@ interface VideoSchedule {
   fetchRange: FetchRange
   intervalMinutes: number
   enabled: boolean
+  /** 采集时是否顺带生成详情缓存 */
+  cacheDetail: boolean
   nextRunAt: string
   lastRunAt: string
   createdAt: string
@@ -465,6 +469,7 @@ interface VideoScheduleInput {
   intervalMinutes: number
   mode: CollectMode
   fetchRange: FetchRange
+  cacheDetail?: boolean
 }
 
 interface VideoScheduleListResult {

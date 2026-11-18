@@ -56,6 +56,8 @@ export interface VideoDetailCache {
   scan: (fixMissing: boolean) => Promise<VideoCapacityDrift>
   /** 供采集全量替换时按来源删除详情文件 */
   removeSourceFile: (source: DetailSourceRow) => Promise<void>
+  /** 采集时预热详情：只抓缺失 / 过期的来源，失败只记索引错误 */
+  warm: (sources: DetailSourceRow[]) => Promise<{ cached: number; failed: number }>
 }
 
 function safeSegment(value: string): string {
@@ -602,6 +604,13 @@ export function createVideoDetailCache(options: {
     }
   }
 
+  async function warm(sources: DetailSourceRow[]): Promise<{ cached: number; failed: number }> {
+    const targets = sources.filter((source) => source.detailCachedAt === '' || source.detailStale)
+    if (targets.length === 0) return { cached: 0, failed: 0 }
+    const { details, failed } = await fetchSources(targets)
+    return { cached: details.size, failed: failed.size }
+  }
+
   return {
     read: (videoId, autoFetch) => {
       const running = inflightRead.get(videoId)
@@ -621,6 +630,7 @@ export function createVideoDetailCache(options: {
     removeSite,
     removeAll,
     scan,
-    removeSourceFile
+    removeSourceFile,
+    warm
   }
 }

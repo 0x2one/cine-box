@@ -35,7 +35,8 @@ export function createCollectScheduler(options: {
       {
         siteId: schedule.siteId,
         mode: schedule.mode,
-        fetchRange: schedule.fetchRange
+        fetchRange: schedule.fetchRange,
+        cacheDetail: schedule.cacheDetail
       },
       'schedule'
     )

@@ -96,6 +96,7 @@ interface ScheduleRow {
   fetchRange: 'all' | '24h' | '48h'
   intervalMinutes: number
   enabled: boolean
+  cacheDetail: boolean
   nextRunAt: string
   lastRunAt: string
   createdAt: string
@@ -213,8 +214,8 @@ ORDER BY rowid
 `
 
 const SELECT_SCHEDULES = `
-SELECT site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
-       created_at, updated_at
+SELECT site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at,
+       last_run_at, created_at, updated_at
 FROM collect_schedules
 ORDER BY created_at ASC, rowid ASC
 `
@@ -242,9 +243,9 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 const INSERT_SCHEDULE = `
 INSERT INTO collect_schedules
-  (site_id, mode, fetch_range, interval_minutes, enabled, next_run_at, last_run_at,
+  (site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at, last_run_at,
    created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -454,6 +455,8 @@ function parseSchedules(value: unknown, siteIds: Set<string>): ScheduleRow[] | n
     if (!mode || !fetchRange || !Number.isFinite(interval) || interval < 5) return null
     if (mode === 'full' && fetchRange !== 'all') return null
     if (typeof item.enabled !== 'boolean') return null
+    // 旧备份没有 cacheDetail 字段，按关闭处理
+    const cacheDetail = item.cacheDetail === true
     const createdAt = timestamp(item.createdAt, new Date().toISOString())
     seen.add(siteId)
     rows.push({
@@ -462,6 +465,7 @@ function parseSchedules(value: unknown, siteIds: Set<string>): ScheduleRow[] | n
       fetchRange,
       intervalMinutes: Math.min(Math.floor(interval), 10080),
       enabled: item.enabled,
+      cacheDetail,
       nextRunAt: optionalText(item.nextRunAt, 40),
       lastRunAt: optionalText(item.lastRunAt, 40),
       createdAt,
@@ -596,6 +600,7 @@ function readState(database: DatabaseSync): BackupData {
             : ('all' as const),
         intervalMinutes: Number(raw.interval_minutes ?? 360),
         enabled: Number(raw.enabled ?? 1) !== 0,
+        cacheDetail: Number(raw.cache_detail ?? 0) !== 0,
         nextRunAt: String(raw.next_run_at ?? ''),
         lastRunAt: String(raw.last_run_at ?? ''),
         createdAt,
@@ -655,6 +660,7 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.fetchRange,
         row.intervalMinutes,
         row.enabled ? 1 : 0,
+        row.cacheDetail ? 1 : 0,
         row.nextRunAt,
         row.lastRunAt,
         row.createdAt,
