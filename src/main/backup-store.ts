@@ -13,6 +13,7 @@ import {
 import { basename, dirname, join, resolve } from 'path'
 import type { DatabaseSync } from 'node:sqlite'
 import { inTransaction, openDatabase } from './database'
+import { isValidDailyTime } from './schedule-time'
 
 /** 备份文件的格式标记与版本，恢复时用来识别与兼容 */
 const BACKUP_FORMAT = 'cine-box-backup'
@@ -94,7 +95,9 @@ interface ScheduleRow {
   siteId: string
   mode: 'incremental' | 'full'
   fetchRange: 'all' | '24h' | '48h'
+  timing: 'interval' | 'daily'
   intervalMinutes: number
+  dailyTime: string
   enabled: boolean
   cacheDetail: boolean
   nextRunAt: string
@@ -214,8 +217,8 @@ ORDER BY rowid
 `
 
 const SELECT_SCHEDULES = `
-SELECT site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at,
-       last_run_at, created_at, updated_at
+SELECT site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled, cache_detail,
+       next_run_at, last_run_at, created_at, updated_at
 FROM collect_schedules
 ORDER BY created_at ASC, rowid ASC
 `
@@ -243,9 +246,9 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 const INSERT_SCHEDULE = `
 INSERT INTO collect_schedules
-  (site_id, mode, fetch_range, interval_minutes, enabled, cache_detail, next_run_at, last_run_at,
-   created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (site_id, mode, fetch_range, timing, interval_minutes, daily_time, enabled, cache_detail,
+   next_run_at, last_run_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -455,15 +458,20 @@ function parseSchedules(value: unknown, siteIds: Set<string>): ScheduleRow[] | n
     if (!mode || !fetchRange || !Number.isFinite(interval) || interval < 5) return null
     if (mode === 'full' && fetchRange !== 'all') return null
     if (typeof item.enabled !== 'boolean') return null
-    // 旧备份没有 cacheDetail 字段，按关闭处理
+    // 旧备份没有 cacheDetail / timing 字段，按关闭、按间隔处理
     const cacheDetail = item.cacheDetail === true
+    const timing = item.timing === 'daily' ? 'daily' : 'interval'
+    const dailyTime = timing === 'daily' ? (requiredText(item.dailyTime, 5) ?? '') : ''
+    if (timing === 'daily' && !isValidDailyTime(dailyTime)) return null
     const createdAt = timestamp(item.createdAt, new Date().toISOString())
     seen.add(siteId)
     rows.push({
       siteId,
       mode,
       fetchRange,
+      timing,
       intervalMinutes: Math.min(Math.floor(interval), 10080),
+      dailyTime,
       enabled: item.enabled,
       cacheDetail,
       nextRunAt: optionalText(item.nextRunAt, 40),
@@ -598,7 +606,9 @@ function readState(database: DatabaseSync): BackupData {
           raw.fetch_range === '24h' || raw.fetch_range === '48h'
             ? raw.fetch_range
             : ('all' as const),
+        timing: raw.timing === 'daily' ? ('daily' as const) : ('interval' as const),
         intervalMinutes: Number(raw.interval_minutes ?? 360),
+        dailyTime: String(raw.daily_time ?? ''),
         enabled: Number(raw.enabled ?? 1) !== 0,
         cacheDetail: Number(raw.cache_detail ?? 0) !== 0,
         nextRunAt: String(raw.next_run_at ?? ''),
@@ -658,7 +668,9 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.siteId,
         row.mode,
         row.fetchRange,
+        row.timing,
         row.intervalMinutes,
+        row.dailyTime,
         row.enabled ? 1 : 0,
         row.cacheDetail ? 1 : 0,
         row.nextRunAt,

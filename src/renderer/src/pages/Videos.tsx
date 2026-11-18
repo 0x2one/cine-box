@@ -499,7 +499,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
           const scroller = document.querySelector('.video-edit-scroll')
           if (scroller instanceof HTMLElement) scroller.scrollTop = 0
         }}
-        styles={{ body: { maxHeight: 'calc(100vh - 260px)', overflowY: 'auto', paddingRight: 6 } }}
+        styles={{ body: { paddingRight: 6 } }}
         footer={[
           editTarget?.edited ? (
             <Button

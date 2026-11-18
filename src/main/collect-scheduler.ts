@@ -1,5 +1,6 @@
 import type { CollectLogStore } from './collect-log-store'
 import type { CollectScheduleStore } from './collect-schedule-store'
+import { nextRunAt } from './schedule-time'
 import type { VideoCollector } from './video-collector'
 import type { VideoSchedule } from './video-types'
 
@@ -28,8 +29,8 @@ export function createCollectScheduler(options: {
 
   async function runSchedule(schedule: VideoSchedule): Promise<void> {
     const now = new Date()
-    const next = new Date(now.getTime() + schedule.intervalMinutes * 60_000).toISOString()
     // 先推进时间：即使入队失败也不重复触发
+    const next = nextRunAt(now, schedule.timing, schedule.intervalMinutes, schedule.dailyTime)
     schedules.markRun(schedule.siteId, now.toISOString(), next)
     const result = await collector.enqueue(
       {

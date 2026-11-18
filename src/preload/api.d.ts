@@ -406,6 +406,7 @@ interface CacheApi {
 
 type CollectMode = 'incremental' | 'full'
 type FetchRange = 'all' | '24h' | '48h'
+type ScheduleTiming = 'interval' | 'daily'
 type CollectStatus = 'idle' | 'queued' | 'running' | 'paused' | 'replacing' | 'done' | 'error'
 type CollectOrigin = 'manual' | 'schedule'
 type LogLevel = 'info' | 'warn' | 'error'
@@ -453,7 +454,10 @@ interface VideoSchedule {
   siteId: string
   mode: CollectMode
   fetchRange: FetchRange
+  timing: ScheduleTiming
   intervalMinutes: number
+  /** timing = daily 时的时间点（HH:mm） */
+  dailyTime: string
   enabled: boolean
   /** 采集时是否顺带生成详情缓存 */
   cacheDetail: boolean
@@ -466,7 +470,9 @@ interface VideoSchedule {
 interface VideoScheduleInput {
   siteId: string
   enabled: boolean
+  timing: ScheduleTiming
   intervalMinutes: number
+  dailyTime: string
   mode: CollectMode
   fetchRange: FetchRange
   cacheDetail?: boolean

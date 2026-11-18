@@ -1906,6 +1906,17 @@
   margin-bottom: 4px;
 }
 
+/* 定时采集弹窗：两列排布 + 收紧行距，别高过窗口 */
+.schedule-form .ant-form-item {
+  margin-bottom: 14px;
+}
+
+.schedule-form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
 /* ── 控制台：采集进度 ── */
 
 .progress-list {
@@ -2613,10 +2624,36 @@
   font-weight: 600;
 }
 
-/* 抽屉和遮罩从标题栏下方展开，别盖住窗口的最小化 / 关闭按钮 */
-.ant-drawer {
+/* 抽屉和弹窗的滚动容器从标题栏下方开始，窗口出现滚动条时不会压住窗口按钮。
+   这几条要压过 antd 运行时注入的 .ant-modal-root .ant-modal-wrap，所以带上 body。
+   遮罩不跟着缩：弹窗出现时标题栏也要一起压暗 */
+body .ant-drawer,
+body .ant-modal-root .ant-modal-wrap {
   top: 44px;
   height: calc(100% - 44px);
+}
+
+/* 弹窗定位：容器下移了 44px，弹窗自身少排一点，位置和原来一致（距窗口顶 100px） */
+body .ant-modal-root .ant-modal-wrap .ant-modal {
+  top: 56px;
+  padding-bottom: 0;
+}
+
+/* 弹窗不超出窗口：内容区滚动，标题和按钮固定；上下各留 100px / 24px */
+body .ant-modal-root .ant-modal-wrap .ant-modal-container {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 124px);
+}
+
+body .ant-modal-root .ant-modal-wrap .ant-modal-header,
+body .ant-modal-root .ant-modal-wrap .ant-modal-footer {
+  flex: 0 0 auto;
+}
+
+body .ant-modal-root .ant-modal-wrap .ant-modal-body {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .video-detail {

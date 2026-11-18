@@ -32,11 +32,17 @@ export interface VideoCollectProgress {
   updatedAt: string
 }
 
+/** 定时方式：按间隔，或每天固定时间点 */
+export type ScheduleTiming = 'interval' | 'daily'
+
 export interface VideoSchedule {
   siteId: string
   mode: CollectMode
   fetchRange: FetchRange
+  timing: ScheduleTiming
   intervalMinutes: number
+  /** timing = daily 时的时间点（HH:mm） */
+  dailyTime: string
   enabled: boolean
   /** 采集时是否顺带生成详情缓存 */
   cacheDetail: boolean
@@ -49,7 +55,9 @@ export interface VideoSchedule {
 export interface VideoScheduleInput {
   siteId: string
   enabled: boolean
+  timing: ScheduleTiming
   intervalMinutes: number
+  dailyTime: string
   mode: CollectMode
   fetchRange: FetchRange
   cacheDetail?: boolean

@@ -6,10 +6,12 @@ import {
   Form,
   InputNumber,
   Modal,
+  Radio,
   Select,
   Space,
   Spin,
   Tag,
+  TimePicker,
   Tooltip
 } from 'antd'
 import {
@@ -19,6 +21,7 @@ import {
   ReloadOutlined,
   StopOutlined
 } from '@ant-design/icons'
+import dayjs, { type Dayjs } from 'dayjs'
 import { formatDateTime } from '../utils/format'
 
 const STATUS_TEXT: Record<CollectStatus, string> = {
@@ -70,10 +73,19 @@ interface ManualValues {
 
 interface ScheduleValues {
   enabled: boolean
+  timing: ScheduleTiming
   intervalMinutes: number
+  dailyTime: Dayjs
   mode: CollectMode
   fetchRange: FetchRange
   cacheDetail: boolean
+}
+
+/** 间隔的短说明：30 分钟 / 6 小时 / 1.5 小时 */
+function intervalLabel(minutes: number): string {
+  if (minutes < 60) return `${minutes} 分钟`
+  const hours = minutes / 60
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} 小时`
 }
 
 const COLLECT_ERRORS: Record<string, string> = {
@@ -111,6 +123,7 @@ function CollectPanel({
   const [scheduleForm] = Form.useForm<ScheduleValues>()
   const manualMode = Form.useWatch('mode', manualForm) ?? 'incremental'
   const scheduleMode = Form.useWatch('mode', scheduleForm) ?? 'incremental'
+  const scheduleTiming = Form.useWatch('timing', scheduleForm) ?? 'interval'
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -157,19 +170,23 @@ function CollectPanel({
       mode: 'incremental',
       fetchRange: '24h',
       allowEmpty: false,
-      cacheDetail: false
+      cacheDetail: true
     })
   }, [manualTarget, manualForm])
 
   useEffect(() => {
     if (!scheduleTarget) return
     const existing = schedules.get(scheduleTarget.id)
+    const dailyTime = existing?.dailyTime || '08:00'
+    const [hour, minute] = dailyTime.split(':').map(Number)
     scheduleForm.setFieldsValue({
       enabled: existing?.enabled ?? false,
+      timing: existing?.timing ?? 'interval',
       intervalMinutes: existing?.intervalMinutes ?? 360,
+      dailyTime: dayjs().hour(hour).minute(minute).second(0),
       mode: existing?.mode ?? 'incremental',
       fetchRange: existing?.fetchRange ?? '24h',
-      cacheDetail: existing?.cacheDetail ?? false
+      cacheDetail: existing?.cacheDetail ?? true
     })
   }, [scheduleTarget, schedules, scheduleForm])
 
@@ -214,10 +231,13 @@ function CollectPanel({
     }
     setSaving(true)
     try {
+      const timing: ScheduleTiming = values.timing === 'daily' ? 'daily' : 'interval'
       const result = await window.api.videos.saveSchedule({
         siteId: scheduleTarget.id,
         enabled: values.enabled,
+        timing,
         intervalMinutes: values.intervalMinutes,
+        dailyTime: timing === 'daily' && values.dailyTime ? values.dailyTime.format('HH:mm') : '',
         mode: values.mode,
         fetchRange: values.mode === 'full' ? 'all' : values.fetchRange,
         cacheDetail: values.cacheDetail
@@ -349,8 +369,16 @@ function CollectPanel({
                     {schedule?.enabled && schedule.nextRunAt
                       ? formatDateTime(schedule.nextRunAt, true)
                       : '未启用'}
-                    {schedule?.cacheDetail ? ' · 含详情缓存' : ''}
                   </span>
+                  {schedule && (
+                    <span>
+                      定时：
+                      {schedule.timing === 'daily'
+                        ? `每天 ${schedule.dailyTime}`
+                        : `每 ${intervalLabel(schedule.intervalMinutes)}`}
+                      {schedule.cacheDetail ? ' · 含详情缓存' : ''}
+                    </span>
+                  )}
                 </div>
 
                 <div className="collect-actions">
@@ -442,7 +470,7 @@ function CollectPanel({
         confirmLoading={saving}
         onOk={() => void saveSchedule()}
         onCancel={() => setScheduleTarget(null)}
-        width={480}
+        width={640}
         footer={
           <Space>
             {scheduleTarget && schedules.has(scheduleTarget.id) && (
@@ -457,43 +485,66 @@ function CollectPanel({
           </Space>
         }
       >
-        <Form form={scheduleForm} layout="vertical" requiredMark={false}>
-          <Form.Item name="enabled" label="启用定时采集" valuePropName="checked">
-            <Checkbox>按固定间隔自动入队</Checkbox>
+        <Form form={scheduleForm} layout="vertical" requiredMark={false} className="schedule-form">
+          <Form.Item name="enabled" valuePropName="checked">
+            <Checkbox>启用定时采集，按下面的计划自动入队</Checkbox>
           </Form.Item>
-          <Form.Item
-            name="intervalMinutes"
-            label="间隔"
-            rules={[{ required: true, message: '请填写间隔分钟数' }]}
-            extra="最小 5 分钟，最长 7 天。"
-          >
-            <InputNumber
-              min={5}
-              max={10080}
-              step={30}
-              style={{ width: '100%' }}
-              addonAfter="分钟"
-            />
+          <Form.Item name="timing" label="定时方式" rules={[{ required: true }]}>
+            <Radio.Group>
+              <Radio.Button value="interval">按时间间隔</Radio.Button>
+              <Radio.Button value="daily">每天固定时间</Radio.Button>
+            </Radio.Group>
           </Form.Item>
-          <Form.Item name="mode" label="模式" rules={[{ required: true }]}>
-            <Select options={MODE_OPTIONS} />
-          </Form.Item>
-          <Form.Item name="fetchRange" label="采集方式" rules={[{ required: true }]}>
-            <Select
-              options={scheduleMode === 'full' ? RANGE_OPTIONS.slice(0, 1) : RANGE_OPTIONS}
-              disabled={scheduleMode === 'full'}
-            />
-          </Form.Item>
-          <div className="collect-interval-presets">
-            {INTERVAL_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                size="small"
-                onClick={() => scheduleForm.setFieldValue('intervalMinutes', option.value)}
-              >
-                {option.label}
-              </Button>
-            ))}
+          {scheduleTiming === 'daily' ? (
+            <Form.Item
+              name="dailyTime"
+              label="每天执行时间"
+              rules={[{ required: true, message: '请选择时间点' }]}
+              extra="到点自动入队；那会儿应用没开着，会在下次启动时补跑一次。"
+            >
+              <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="intervalMinutes"
+              label="间隔"
+              rules={[
+                { required: true, message: '请填写间隔分钟数' },
+                { type: 'number', min: 5, max: 10080, message: '间隔需在 5 分钟到 7 天之间' }
+              ]}
+            >
+              <InputNumber
+                min={5}
+                max={10080}
+                step={30}
+                style={{ width: '100%' }}
+                addonAfter="分钟"
+              />
+            </Form.Item>
+          )}
+          {scheduleTiming !== 'daily' && (
+            <div className="collect-interval-presets">
+              {INTERVAL_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  size="small"
+                  onClick={() => scheduleForm.setFieldValue('intervalMinutes', option.value)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          )}
+          <div className="schedule-form-row">
+            <Form.Item name="mode" label="模式" rules={[{ required: true }]}>
+              <Select options={MODE_OPTIONS} />
+            </Form.Item>
+            <Form.Item name="fetchRange" label="采集方式" rules={[{ required: true }]}>
+              <Select
+                options={scheduleMode === 'full' ? RANGE_OPTIONS.slice(0, 1) : RANGE_OPTIONS}
+                disabled={scheduleMode === 'full'}
+              />
+            </Form.Item>
           </div>
           <Form.Item
             name="cacheDetail"
