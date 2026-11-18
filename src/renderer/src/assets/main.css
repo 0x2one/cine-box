@@ -2598,6 +2598,21 @@ body .collect-form .ant-form-item-extra {
 
 /* ── 控制台：日志 ── */
 
+/*
+ * 标题行 + 筛选工具条整体吸顶：日志列表改用页面滚动条后，往下翻时操作栏不会滚走。
+ * 标题行自带的 sticky 在包装层里不需要了，置成 static 由外层统一钉住。
+ */
+.log-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+}
+
+.log-sticky .settings-panel-head {
+  position: static;
+}
+
 .log-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -2625,11 +2640,22 @@ body .collect-form .ant-form-item-extra {
   font-size: 11.5px;
 }
 
+/* 保留策略的说明挂在顶部「最近 N 条」右边，不再单独占底部一行 */
+.log-retention {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.log-retention::before {
+  content: '·';
+  margin: 0 6px;
+}
+
+/* 和视频列表一样用页面滚动条：列表本身不再单独滚动，底部也不会留一截空隙 */
 .log-list {
   display: flex;
-  max-height: calc(100vh - 310px);
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -2727,12 +2753,6 @@ body .collect-form .ant-form-item-extra {
   .log-mode {
     display: none;
   }
-}
-
-.log-foot {
-  margin-top: 8px;
-  color: var(--text-faint);
-  font-size: 11.5px;
 }
 
 @media (max-width: 960px) {

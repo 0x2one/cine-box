@@ -133,8 +133,10 @@ function LogsPanel({
   }, [siteId, level, view])
 
   useEffect(() => {
-    if (!autoScroll || view !== 'latest' || !listRef.current) return
-    listRef.current.scrollTop = listRef.current.scrollHeight
+    if (!autoScroll || view !== 'latest') return
+    // 列表本身不再单独滚动（和视频列表一致用页面滚动条），自动滚到底部时滚页面
+    const scroller = listRef.current?.closest('.page')
+    if (scroller instanceof HTMLElement) scroller.scrollTop = scroller.scrollHeight
   }, [logs, autoScroll, view])
 
   const clear = async (): Promise<void> => {
@@ -152,88 +154,92 @@ function LogsPanel({
 
   return (
     <>
-      <div className="settings-panel-head has-actions">
-        <h2 className="settings-panel-title">{title}</h2>
-        <span className="settings-panel-sep">·</span>
-        <p className="settings-panel-desc">
-          {desc}
-          <span className="sites-count">
-            {view === 'earliest' ? '最早' : '最近'} {logs.length} 条
-          </span>
-          {hasNew && <span className="log-new-hint">有新日志</span>}
-        </p>
-        <div className="settings-panel-actions">
-          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
-            刷新
-          </Button>
-          <Popconfirm
-            title="清空采集日志"
-            description={
-              siteId ? '只清空当前站点筛选下的日志。' : '会清空全部采集日志，不影响采集任务。'
-            }
-            okText="清空"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => void clear()}
-          >
-            <Button danger icon={<ClearOutlined />} loading={clearing}>
-              清空
-            </Button>
-          </Popconfirm>
-        </div>
-      </div>
-
-      <div className="log-toolbar">
-        <Space wrap>
-          <Select
-            style={{ width: 220 }}
-            placeholder="全部站点"
-            allowClear
-            value={siteId || undefined}
-            onChange={(value) => setSiteId(value ?? '')}
-            options={siteOptions}
-          />
-          <Select
-            style={{ width: 140 }}
-            value={level}
-            onChange={setLevel}
-            options={LEVEL_OPTIONS}
-          />
-          <Select
-            style={{ width: 120 }}
-            value={range}
-            onChange={(value) => setRange(value as RangeKey)}
-            options={RANGE_OPTIONS}
-          />
-        </Space>
-        <Space size={10} align="center">
-          <Tooltip title="有新日志时自动滚到列表底部">
-            <span className="log-auto">
-              <Switch size="small" checked={autoScroll} onChange={setAutoScroll} />
-              自动滚动
+      {/* 标题行 + 筛选工具条整体吸顶：日志用页面滚动条后，往下翻时操作栏不会滚走 */}
+      <div className="log-sticky">
+        <div className="settings-panel-head has-actions">
+          <h2 className="settings-panel-title">{title}</h2>
+          <span className="settings-panel-sep">·</span>
+          <p className="settings-panel-desc">
+            {desc}
+            <span className="sites-count">
+              {view === 'earliest' ? '最早' : '最近'} {logs.length} 条
             </span>
-          </Tooltip>
-          <Tooltip title="跳到这批筛选结果里最早的 100 条，从旧往新看">
-            <Button
-              size="small"
-              icon={<VerticalAlignTopOutlined />}
-              disabled={loading || view === 'earliest'}
-              onClick={() => void load('earliest')}
-            >
-              跳到最早
+            <span className="log-retention">最多保留 5000 条 / 30 天，清空视频缓存时一并清空</span>
+            {hasNew && <span className="log-new-hint">有新日志</span>}
+          </p>
+          <div className="settings-panel-actions">
+            <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
+              刷新
             </Button>
-          </Tooltip>
-          <Tooltip title="回到最近 100 条，并继续实时追加新日志">
-            <Button
-              size="small"
-              icon={<VerticalAlignBottomOutlined />}
-              disabled={loading || view === 'latest'}
-              onClick={() => void load('latest')}
+            <Popconfirm
+              title="清空采集日志"
+              description={
+                siteId ? '只清空当前站点筛选下的日志。' : '会清空全部采集日志，不影响采集任务。'
+              }
+              okText="清空"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => void clear()}
             >
-              回到最新
-            </Button>
-          </Tooltip>
-        </Space>
+              <Button danger icon={<ClearOutlined />} loading={clearing}>
+                清空
+              </Button>
+            </Popconfirm>
+          </div>
+        </div>
+
+        <div className="log-toolbar">
+          <Space wrap>
+            <Select
+              style={{ width: 220 }}
+              placeholder="全部站点"
+              allowClear
+              value={siteId || undefined}
+              onChange={(value) => setSiteId(value ?? '')}
+              options={siteOptions}
+            />
+            <Select
+              style={{ width: 140 }}
+              value={level}
+              onChange={setLevel}
+              options={LEVEL_OPTIONS}
+            />
+            <Select
+              style={{ width: 120 }}
+              value={range}
+              onChange={(value) => setRange(value as RangeKey)}
+              options={RANGE_OPTIONS}
+            />
+          </Space>
+          <Space size={10} align="center">
+            <Tooltip title="有新日志时自动滚到列表底部">
+              <span className="log-auto">
+                <Switch size="small" checked={autoScroll} onChange={setAutoScroll} />
+                自动滚动
+              </span>
+            </Tooltip>
+            <Tooltip title="跳到这批筛选结果里最早的 100 条，从旧往新看">
+              <Button
+                size="small"
+                icon={<VerticalAlignTopOutlined />}
+                disabled={loading || view === 'earliest'}
+                onClick={() => void load('earliest')}
+              >
+                跳到最早
+              </Button>
+            </Tooltip>
+            <Tooltip title="回到最近 100 条，并继续实时追加新日志">
+              <Button
+                size="small"
+                icon={<VerticalAlignBottomOutlined />}
+                disabled={loading || view === 'latest'}
+                onClick={() => void load('latest')}
+              >
+                回到最新
+              </Button>
+            </Tooltip>
+          </Space>
+        </div>
       </div>
 
       {loading ? (
@@ -285,14 +291,6 @@ function LogsPanel({
               </article>
             )
           })}
-        </div>
-      )}
-
-      {!loading && logs.length > 0 && (
-        <div className="log-foot">
-          <Tooltip title="一次显示 100 条；用右侧「最新 / 最早」切换两端，或先按时间范围缩小范围">
-            <span>日志最多保留 5000 条 / 30 天；清空视频缓存时日志也会一并清空。</span>
-          </Tooltip>
         </div>
       )}
     </>
