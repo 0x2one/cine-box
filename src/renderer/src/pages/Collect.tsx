@@ -64,6 +64,9 @@ const INTERVAL_OPTIONS = [
   { value: 1440, label: '24 小时' }
 ]
 
+/** 上次手动采集是否勾了「同时生成详情缓存」，没记录过就按勾选处理 */
+const MANUAL_CACHE_DETAIL_KEY = 'collect-manual-cache-detail'
+
 interface ManualValues {
   mode: CollectMode
   fetchRange: FetchRange
@@ -170,7 +173,8 @@ function CollectPanel({
       mode: 'incremental',
       fetchRange: '24h',
       allowEmpty: false,
-      cacheDetail: true
+      // 记住上一次手动采集时是否勾了「同时生成详情缓存」，没记录过就默认勾选
+      cacheDetail: localStorage.getItem(MANUAL_CACHE_DETAIL_KEY) !== '0'
     })
   }, [manualTarget, manualForm])
 
@@ -448,7 +452,13 @@ function CollectPanel({
             valuePropName="checked"
             extra="勾选后本次采集会顺带抓取详情（简介、演员、播放线路）并缓存到本地，多花一些时间和磁盘；不勾选则打开视频时再按需生成。"
           >
-            <Checkbox>同时生成详情缓存</Checkbox>
+            <Checkbox
+              onChange={(event) =>
+                localStorage.setItem(MANUAL_CACHE_DETAIL_KEY, event.target.checked ? '1' : '0')
+              }
+            >
+              同时生成详情缓存
+            </Checkbox>
           </Form.Item>
           {manualMode === 'full' && (
             <Form.Item
