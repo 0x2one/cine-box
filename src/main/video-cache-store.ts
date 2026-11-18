@@ -114,6 +114,10 @@ export interface VideoCacheStore {
     query: VideoListQuery,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ) => VideoListResult
+  /** 指定视频各来源的在线分类，列表页据此解析绑定后的本地分类 */
+  listSourceCategories: (
+    videoIds: number[]
+  ) => { videoId: number; siteId: string; categoryId: string }[]
   updateVideo: (videoId: number, patch: VideoUpdateInput) => VideoUpdateResult
   stats: () => VideoStats
   capacity: (siteNames?: Map<string, string>) => VideoCapacity
@@ -837,6 +841,26 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     return { ok: true, items, total, page, pageSize }
   }
 
+  /** 指定视频各来源的在线分类（一个视频可能来自多个站点、多个分类） */
+  function listSourceCategories(
+    videoIds: number[]
+  ): { videoId: number; siteId: string; categoryId: string }[] {
+    const ids = [...new Set(videoIds.filter((id) => Number.isFinite(id)))]
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(', ')
+    const rows = database()
+      .prepare(
+        `SELECT video_id, site_id, category_id FROM video_sources
+         WHERE video_id IN (${placeholders})`
+      )
+      .all(...ids) as Record<string, unknown>[]
+    return rows.map((row) => ({
+      videoId: num(row.video_id),
+      siteId: text(row.site_id),
+      categoryId: text(row.category_id)
+    }))
+  }
+
   /**
    * 保存人工编辑：空串表示清掉这条覆盖、回落到采集值；hidden 始终写入。
    * 名称是合并键，不在可改字段里。
@@ -1370,6 +1394,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     deleteSources,
     recomputeVideos,
     listVideos,
+    listSourceCategories,
     updateVideo,
     stats,
     capacity,

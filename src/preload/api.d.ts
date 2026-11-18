@@ -581,6 +581,8 @@ interface VideoListItem {
   sourceVideoId: string
   categoryId: string
   categoryName: string
+  /** 绑定后的本地分类路径（如「电影 / 动作片」），未绑定时为空数组 */
+  localCategoryPaths: string[]
   hidden: boolean
   edited: boolean
 }

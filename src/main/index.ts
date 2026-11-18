@@ -433,7 +433,33 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
       .map((binding) => ({ siteId: binding.siteId, categoryId: binding.sourceId }))
     if (filters.length === 0) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
   }
-  return videoStore.listVideos(query ?? {}, filters)
+  const result = videoStore.listVideos(query ?? {}, filters)
+  if (!result.ok || result.items.length === 0) return result
+
+  // 列表要显示「绑定后类型」：把本页视频各来源的在线分类映射成本地分类路径
+  const bindingPaths = new Map(
+    bindingStore
+      .pathsForSourceCategories()
+      .map((row) => [`${row.siteId}\u0000${row.sourceCategoryId}`, row.categoryPath])
+  )
+  const byVideo = new Map<number, string[]>()
+  for (const source of videoStore.listSourceCategories(result.items.map((item) => item.id))) {
+    const path = bindingPaths.get(`${source.siteId}\u0000${source.categoryId}`)
+    if (!path) continue
+    const paths = byVideo.get(source.videoId) ?? []
+    if (!paths.includes(path)) paths.push(path)
+    byVideo.set(source.videoId, paths)
+  }
+
+  return {
+    ...result,
+    items: result.items.map((item) => ({
+      ...item,
+      localCategoryPaths: (byVideo.get(item.id) ?? []).sort((left, right) =>
+        left.localeCompare(right, 'zh-Hans-CN')
+      )
+    }))
+  }
 })
 
 ipcMain.handle('videos:update', (_event, videoId: number, patch: VideoUpdateInput) => {

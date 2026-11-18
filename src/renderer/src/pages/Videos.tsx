@@ -414,6 +414,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
             actions={[
               <Tooltip key="detail" title="查看详情">
                 <Button
+                  className="video-action"
                   type="text"
                   size="small"
                   icon={<FileSearchOutlined />}
@@ -423,6 +424,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               </Tooltip>,
               <Tooltip key="edit" title="编辑信息">
                 <Button
+                  className="video-action"
                   type="text"
                   size="small"
                   icon={<EditOutlined />}
@@ -432,6 +434,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               </Tooltip>,
               <Tooltip key="hidden" title={item.hidden ? '恢复显示' : '隐藏'}>
                 <Button
+                  className="video-action"
                   type="text"
                   size="small"
                   icon={item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
@@ -454,14 +457,22 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               }
               description={
                 <div className="video-meta">
+                  <span className="video-meta-strong">{item.sourceCount} 个来源</span>
+                  <span className="video-meta-dot" />
+                  {item.localCategoryPaths.length > 0 ? (
+                    <span className="video-meta-class" title={item.localCategoryPaths.join('、')}>
+                      {item.localCategoryPaths.join('、')}
+                    </span>
+                  ) : (
+                    <span className="video-meta-class is-empty">未绑定分类</span>
+                  )}
+                  <span className="video-meta-dot" />
                   <span
-                    className="video-meta-class"
+                    className="video-meta-class video-meta-raw"
                     title={item.vodClass || item.categoryName || '未分类'}
                   >
                     {item.vodClass || item.categoryName || '未分类'}
                   </span>
-                  <span className="video-meta-dot" />
-                  <span className="video-meta-strong">{item.sourceCount} 个来源</span>
                   <span className="video-meta-dot" />
                   <span className="video-meta-strong">更新 {item.latestTime}</span>
                 </div>

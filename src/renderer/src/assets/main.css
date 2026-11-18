@@ -2449,6 +2449,21 @@
   margin-top: 10px;
 }
 
+/* 行内操作按钮整体压淡，hover 时再提亮，避免抢标题和封面的注意力 */
+.video-list .ant-list-item-action .video-action.ant-btn {
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
+.video-list .ant-list-item-action .video-action.ant-btn:hover {
+  color: var(--text);
+  opacity: 1;
+}
+
+.video-list .ant-list-item-action .ant-list-item-action-split {
+  background: color-mix(in srgb, var(--border-strong) 60%, transparent);
+}
+
 .video-list .ant-list-pagination {
   margin: 16px 0 4px;
   text-align: right;
@@ -2501,13 +2516,22 @@
   white-space: nowrap;
 }
 
-/* 分类可能很长，限宽后省略，完整内容看 title */
+/* 绑定后的分类可能很长，限宽后省略，完整内容看 title */
 .video-meta-class {
   min-width: 0;
   overflow: hidden;
-  max-width: 220px;
+  max-width: 260px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.video-meta-class.is-empty {
+  color: color-mix(in srgb, var(--text-faint) 70%, transparent);
+}
+
+/* 原始 vod_class 跟在绑定类型后面，同样限宽省略 */
+.video-meta-raw {
+  max-width: 200px;
 }
 
 .video-meta-strong {

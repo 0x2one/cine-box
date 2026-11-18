@@ -32,6 +32,15 @@ export interface SiteCategoryBinding {
   categoryPath: string
 }
 
+/** 站点 + 在线分类 id → 绑定的本地分类路径，用于列表页显示「绑定后类型」 */
+export interface SourceCategoryPath {
+  siteId: string
+  /** site_categories.source_id，也就是在线接口返回的分类 id */
+  sourceCategoryId: string
+  /** 本地分类完整路径，如「电影 / 动作片」 */
+  categoryPath: string
+}
+
 export type BindingError = 'INVALID_INPUT' | 'NOT_FOUND'
 
 export interface BindingResult {
@@ -45,6 +54,8 @@ export interface BindingStore {
   forSite: (siteId: string) => SiteCategoryBinding[]
   /** 某个本地分类已绑定的在线分类，按站点名、在线分类名排序 */
   forCategory: (categoryId: string) => CategoryBinding[]
+  /** 全部「站点 + 在线分类 → 本地分类路径」，列表页批量解析绑定后类型 */
+  pathsForSourceCategories: () => SourceCategoryPath[]
   /** 每个本地分类的绑定数量，未绑定的分类不出现 */
   counts: () => Record<string, number>
   /** 把一批在线分类绑到指定本地分类，已绑定的直接改绑 */
@@ -92,6 +103,14 @@ GROUP BY video_category_id
 `
 
 const SELECT_CATEGORY_TREE = 'SELECT id, parent_id, name FROM video_categories'
+
+/** 绑定关系的「站点 + 在线分类 → 本地分类」三元组，列表页用来解析绑定后的类型 */
+const SELECT_SOURCE_BINDINGS = `
+SELECT b.site_id AS site_id, sc.source_id AS source_category_id,
+       b.video_category_id AS video_category_id
+FROM category_bindings AS b
+JOIN site_categories AS sc ON sc.id = b.site_category_id
+`
 
 const SELECT_CATEGORY = 'SELECT id FROM video_categories WHERE id = ?'
 
@@ -220,6 +239,35 @@ export function createBindingStore(file: string): BindingStore {
       .filter((row) => row.id !== '')
   }
 
+  function pathsForSourceCategories(): SourceCategoryPath[] {
+    const connection = database()
+    const paths = buildPaths(
+      connection
+        .prepare(SELECT_CATEGORY_TREE)
+        .all()
+        .map((row) => {
+          const raw = row as Record<string, unknown>
+          return {
+            id: text(raw.id),
+            parentId: text(raw.parent_id) || null,
+            name: text(raw.name)
+          }
+        })
+    )
+    return connection
+      .prepare(SELECT_SOURCE_BINDINGS)
+      .all()
+      .map((row) => {
+        const raw = row as Record<string, unknown>
+        return {
+          siteId: text(raw.site_id),
+          sourceCategoryId: text(raw.source_category_id),
+          categoryPath: paths.get(text(raw.video_category_id)) ?? ''
+        }
+      })
+      .filter((row) => row.siteId !== '' && row.sourceCategoryId !== '' && row.categoryPath !== '')
+  }
+
   function counts(): Record<string, number> {
     const result: Record<string, number> = {}
     for (const row of database().prepare(SELECT_COUNTS).all()) {
@@ -291,6 +339,7 @@ export function createBindingStore(file: string): BindingStore {
     },
     forSite,
     forCategory,
+    pathsForSourceCategories,
     counts,
     bind,
     unbind,
