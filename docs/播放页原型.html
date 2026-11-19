@@ -18,6 +18,7 @@
       不加载真实视频；默认深色是「熄灯看片」的意思，?theme=light 可看浅色。
 
       直接看某个变体：?layout=focus 或 ?layout=immersive
+      侧栏标签：?tab=info 或 ?tab=related；播放态：?autoplay=1
       素材：docs/首页原型素材/，预览：docs/播放页原型预览/
     -->
     <style>
@@ -976,10 +977,6 @@
         color: var(--accent);
       }
 
-      .act.is-on .ic path {
-        fill: currentColor;
-      }
-
       .meta {
         margin: 9px 0 0;
         color: var(--text-muted);
@@ -1627,6 +1624,10 @@
         border-top: 0;
       }
 
+      body[data-layout='focus'] .eyebrow {
+        display: none;
+      }
+
       body[data-layout='focus'] .ep {
         height: 38px;
         grid-template-columns: 1fr;
@@ -1820,18 +1821,17 @@
       body[data-layout='immersive'] .side {
         position: absolute;
         z-index: 8;
-        top: 50%;
+        top: 104px;
         right: 24px;
         display: flex;
         width: 322px;
-        max-height: calc(100% - 128px);
+        max-height: calc(100% - 190px);
         flex-direction: column;
         padding: 15px 15px 11px;
         border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
         border-radius: 14px;
         background: color-mix(in srgb, var(--surface) 78%, transparent);
         box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
-        transform: translateY(-50%);
         backdrop-filter: blur(22px) saturate(1.2);
         transition:
           opacity 240ms ease,
@@ -1860,7 +1860,11 @@
       body[data-layout='immersive'] .side.is-hidden {
         opacity: 0;
         pointer-events: none;
-        transform: translate(calc(100% + 44px), -50%);
+        transform: translateX(calc(100% + 44px));
+      }
+
+      body[data-layout='immersive'] .ep {
+        height: 40px;
       }
 
       body[data-layout='immersive'] .side-exit {
@@ -2250,6 +2254,12 @@
           stroke-linejoin="round"
         />
       </symbol>
+      <symbol id="i-heart-fill" viewBox="0 0 16 16">
+        <path
+          d="M8 13.4S2.2 10.1 2.2 6.3A3 3 0 0 1 8 4.6a3 3 0 0 1 5.8 1.7c0 3.8-5.8 7.1-5.8 7.1z"
+          fill="currentColor"
+        />
+      </symbol>
       <symbol id="i-share" viewBox="0 0 16 16" fill="none">
         <path
           d="M8 2.8v7.4M5.2 5.6 8 2.8l2.8 2.8M3 9.4v2.8c0 .6.4 1 1 1h8c.6 0 1-.4 1-1V9.4"
@@ -2527,7 +2537,7 @@
                 <div class="title-row">
                   <h1 class="title">漫长的季节</h1>
                   <div class="actions">
-                    <button class="act" type="button" id="favBtn">
+                    <button class="act" type="button" id="favBtn" aria-pressed="false">
                       <svg class="ic" viewBox="0 0 16 16" aria-hidden="true">
                         <use href="#i-heart" />
                       </svg>
@@ -2946,6 +2956,15 @@
         toastTimer = window.setTimeout(() => els.toast.classList.remove('is-on'), 1900)
       }
 
+      /** 本地存储被禁用时不要让整页脚本挂掉 */
+      function readStorage(key) {
+        try {
+          return localStorage.getItem(key)
+        } catch (error) {
+          return null
+        }
+      }
+
       function copyText(text) {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           return navigator.clipboard.writeText(text).then(
@@ -2995,7 +3014,13 @@
               episode.n +
               ' 集 · ' +
               formatTime(episode.dur) +
-              (isCurrent ? ' · 正在播放' : isWatched ? ' · 已看完' : '')
+              (isCurrent
+                ? ' · ' + statusWord()
+                : isWatched
+                  ? ' · 已看完'
+                  : episode.progress > 0
+                    ? ' · 已看 ' + Math.round(episode.progress * 100) + '%'
+                    : '')
             return (
               '<li>' +
               '<button class="ep' +
@@ -3131,6 +3156,17 @@
         if (row) {
           const sub = row.querySelector('.ep-sub')
           if (sub) sub.textContent = statusWord() + ' · ' + formatTime(state.time)
+          row.setAttribute(
+            'aria-label',
+            '第 ' +
+              state.ep +
+              ' 集，' +
+              statusWord() +
+              ' ' +
+              formatTime(state.time) +
+              '，时长 ' +
+              formatTime(currentEpisode().dur)
+          )
         }
         els.resumeHint.textContent = state.time > 0 ? '继续观看 · ' + formatTime(state.time) : '播放本集'
         els.resumeHint.hidden = state.playing
@@ -3183,6 +3219,8 @@
           setTime(episode.dur)
           if (state.ep < EPISODES.length) {
             selectEpisode(state.ep + 1, { autoplay: true, silent: true })
+            lastFrame = 0
+            rafId = window.requestAnimationFrame(tick)
             showToast('第 ' + state.ep + ' 集自动接上了')
           } else {
             setPlaying(false)
@@ -3486,6 +3524,7 @@
         button.addEventListener('keydown', (event) => {
           if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
           event.preventDefault()
+          event.stopPropagation()
           const index = els.tabs.indexOf(button)
           const next =
             event.key === 'ArrowRight'
@@ -3521,6 +3560,8 @@
       els.favBtn.addEventListener('click', () => {
         state.fav = !state.fav
         els.favBtn.classList.toggle('is-on', state.fav)
+        els.favBtn.setAttribute('aria-pressed', String(state.fav))
+        els.favBtn.querySelector('use').setAttribute('href', state.fav ? '#i-heart-fill' : '#i-heart')
         els.favText.textContent = state.fav ? '已收藏' : '收藏'
         showToast(state.fav ? '已加入收藏' : '已取消收藏')
       })
@@ -3591,11 +3632,11 @@
 
       function init() {
         const params = new URLSearchParams(window.location.search)
-        const storedTheme = localStorage.getItem('watch-theme')
+        const storedTheme = readStorage('watch-theme')
         const theme = params.get('theme') || storedTheme || 'dark'
         applyTheme(theme === 'light' ? 'light' : 'dark')
 
-        const storedLayout = localStorage.getItem('watch-layout')
+        const storedLayout = readStorage('watch-layout')
         const requestedLayout = params.get('layout') || storedLayout || 'classic'
         const layout = ['classic', 'focus', 'immersive'].includes(requestedLayout)
           ? requestedLayout
