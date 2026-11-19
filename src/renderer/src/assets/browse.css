@@ -206,6 +206,48 @@
   font-size: 12.5px;
 }
 
+/* 回到顶部：滚过一屏后浮出，半透明磨砂底，固定定位在内容列右下角（窄窗口退回 24px） */
+
+.browse-backtop {
+  position: fixed;
+  right: max(24px, calc((100vw - 1120px) / 2 + 32px));
+  bottom: 24px;
+  z-index: 30;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgb(8 12 18 / 12%);
+  backdrop-filter: blur(10px);
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.browse-backtop:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text);
+}
+
+.browse-backtop.is-hidden {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+
 @media (max-width: 1080px) {
   .browse-head-inner,
   .browse-body {
@@ -224,6 +266,7 @@
 @media (prefers-reduced-motion: reduce) {
   .browse-head,
   .browse-head-top,
+  .browse-backtop,
   .browse-chip {
     transition: none;
   }

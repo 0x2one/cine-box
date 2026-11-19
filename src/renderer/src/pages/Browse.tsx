@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
+import { ArrowUpOutlined } from '@ant-design/icons'
 import VideoCard from '../components/VideoCard'
 import { visibleCategoryIds } from '../lib/category-tree'
 import { formatCount } from '../utils/format'
@@ -9,6 +10,8 @@ import '../assets/browse.css'
 const PAGE_SIZE = 30
 /** 距底部这么多像素就预取下一页 */
 const LOAD_AHEAD = 600
+/** 滚过这么多像素浮出「回到顶部」 */
+const BACK_TOP_AT = 600
 /** 头部折叠 / 展开的滞回阈值：滚过 128px 折叠，回到 16px 内再展开。
  *  两个阈值之间的距离要大于折叠掉的高度，万一浏览器做了滚动锚定也不会来回切 */
 const COLLAPSE_AT = 128
@@ -94,6 +97,7 @@ function BrowseView({
   const [failed, setFailed] = useState(false)
   const [exhausted, setExhausted] = useState(false)
   const [compact, setCompact] = useState(false)
+  const [showBackTop, setShowBackTop] = useState(false)
 
   const guard = useRef<ScrollGuard>({
     generation: 0,
@@ -274,6 +278,7 @@ function BrowseView({
     const sync = (): void => {
       // 滞回：滚过 COLLAPSE_AT 才折叠，回到 EXPAND_AT 内才展开，避免在阈值上抖动
       setCompact((previous) => page.scrollTop > (previous ? EXPAND_AT : COLLAPSE_AT))
+      setShowBackTop(page.scrollTop > BACK_TOP_AT)
       maybeLoadMore()
     }
     const onScroll = (): void => {
@@ -294,6 +299,15 @@ function BrowseView({
     const page = rootRef.current?.closest('.page') as HTMLElement | null
     page?.scrollTo({ top: 0 })
     setCompact(false)
+    setShowBackTop(false)
+  }
+
+  /** 回到顶部：列表页的滚动容器是 .page，不是 window */
+  const backToTop = (): void => {
+    const page = rootRef.current?.closest('.page') as HTMLElement | null
+    if (!page) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    page.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' })
   }
 
   const selectAll = (): void => {
@@ -484,6 +498,17 @@ function BrowseView({
           </>
         )}
       </div>
+
+      <button
+        type="button"
+        className={`browse-backtop${showBackTop ? '' : ' is-hidden'}`}
+        aria-label="回到顶部"
+        title="回到顶部"
+        tabIndex={showBackTop ? 0 : -1}
+        onClick={backToTop}
+      >
+        <ArrowUpOutlined />
+      </button>
     </div>
   )
 }
