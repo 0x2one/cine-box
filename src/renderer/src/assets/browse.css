@@ -1,5 +1,6 @@
 /* ── 视频列表页：两级类型吸顶 + 卡片网格 ──
-   头部是 .page（应用滚动容器）里的 sticky；紧凑态把标题行折起来，类型行始终可见。
+   头部是 .page（应用滚动容器）里的 sticky；紧凑态把标题行折起来，两级类型始终完整可见。
+   类型 chip 只换行、不做横向滚动：电影的子类型有十几个，横向滚动会把末尾几个裁在视口外。
    卡片沿用 home.css 的 .home-item*，保证和首页轨道完全同款。 */
 
 .browse-view {
@@ -103,51 +104,48 @@
   font-weight: 500;
 }
 
-/* 两级类型 */
+/* 两级类型：芯片一律换行排满，不藏进横向滚动条。
+   电影这类子类型特别多的分类一收窄就会被裁掉半个 chip，鼠标又没有横向滚动，
+   所以宁可让头部多占一行，也不做「单行横向滚动」的紧凑态。 */
 
 .browse-types,
 .browse-subs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
 
 .browse-types {
-  flex-wrap: wrap;
   row-gap: 8px;
-  /* 行本身是横向滚动容器（overflow-y 会被算成 auto），留一点上边距免得聚焦描边被裁掉 */
   padding-top: 2px;
   padding-bottom: 10px;
 }
 
+/* 子类型比一级类型多得多（电影一行能排十几二十个），间距和胶囊内边距都再紧一点，
+   常见窗口下一整行放得下；窗口更窄时继续换行，不会裁掉最后一个 */
 .browse-subs {
-  flex-wrap: wrap;
-  row-gap: 6px;
+  gap: 6px;
   padding-top: 2px;
   padding-bottom: 12px;
 }
 
-.browse-types::-webkit-scrollbar,
-.browse-subs::-webkit-scrollbar {
-  display: none;
-}
-
-/* 紧凑态：类型压成单行横向滚动，头部更矮但类型始终在 */
+/* 紧凑态：芯片尺寸不变（钉住时不会跳一下宽度），只收掉行间距，腾出来的高度给列表 */
 .browse-head.is-compact .browse-types {
-  flex-wrap: nowrap;
   padding-top: 8px;
   padding-bottom: 6px;
 }
 
 .browse-head.is-compact .browse-subs {
-  flex-wrap: nowrap;
+  padding-top: 1px;
   padding-bottom: 8px;
 }
 
 .browse-chip {
   flex: none;
+  /* 分类名可以随便起，长到超出内容列时宁可省略，也不让整行把页面撑出横向滚动 */
+  max-width: 100%;
+  overflow: hidden;
   padding: 4px 13px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -156,6 +154,8 @@
   font: inherit;
   font-size: 13px;
   line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     color 0.15s ease,
@@ -176,7 +176,7 @@
 }
 
 .browse-subs .browse-chip {
-  padding: 2px 11px;
+  padding: 2px 10px;
   font-size: 12.5px;
 }
 
