@@ -17,6 +17,8 @@ import {
 } from 'antd'
 import {
   ArrowDownOutlined,
+  ArrowLeftOutlined,
+  ArrowRightOutlined,
   ArrowUpOutlined,
   CheckOutlined,
   DeleteOutlined,
@@ -28,6 +30,7 @@ import {
   LinkOutlined,
   PictureOutlined,
   ReloadOutlined,
+  RightOutlined,
   UndoOutlined,
   UploadOutlined
 } from '@ant-design/icons'
@@ -749,6 +752,148 @@ function HomeItemRow({
 }
 
 /**
+ * 一张推荐卡片：封面按轨道比例取景（和首页看到的一致），点封面或片名编辑。
+ * 整卡可拖，落点按指针在卡片的左 / 右半边决定插到前面还是后面；操作条悬停或聚焦时浮出。
+ */
+function HomeItemCard({
+  item,
+  ratio,
+  index,
+  total,
+  removeTitle,
+  onMove,
+  onEdit,
+  onToggleHidden,
+  onRemove,
+  drag
+}: {
+  item: HomeItemView
+  ratio: number
+  index: number
+  total: number
+  removeTitle: string
+  onMove: (delta: number) => void
+  onEdit: () => void
+  onToggleHidden: () => void
+  onRemove: () => void
+  drag?: RowDrag
+}): React.JSX.Element {
+  /** 落点：指针在左半边就插到它前面，右半边插到后面 */
+  const edgeFromPointer = (event: React.DragEvent<HTMLDivElement>): DragEdge => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return event.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
+  }
+  const classes = ['home-shelf-card']
+  if (item.hidden) classes.push('is-hidden')
+  if (drag?.dragging) classes.push('is-dragging')
+  if (drag?.edge) classes.push(`is-drop-${drag.edge}`)
+  /** 卡片放不下的一行信息放进 title，悬停能看到完整的时间和备注 */
+  const meta = [
+    item.videoName && item.videoName !== item.title ? item.videoName : '',
+    item.latestTime ? `更新 ${item.latestTime}` : '暂无更新时间',
+    item.note
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <div
+      className={classes.join(' ')}
+      draggable={Boolean(drag)}
+      onDragStart={(event) => {
+        if (!drag) return
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', String(item.videoId))
+        drag.onStart()
+      }}
+      onDragOver={(event) => {
+        if (!drag) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        drag.onOver(edgeFromPointer(event))
+      }}
+      onDrop={(event) => {
+        if (!drag) return
+        event.preventDefault()
+        drag.onDrop(edgeFromPointer(event))
+      }}
+      onDragEnd={() => drag?.onEnd()}
+    >
+      <div className="home-shelf-frame" style={{ aspectRatio: String(ratio) }}>
+        <button
+          type="button"
+          className="home-shelf-open"
+          title={meta}
+          aria-label={`编辑 ${item.title}`}
+          onClick={onEdit}
+        >
+          <HomePicture item={item} />
+        </button>
+        <span className="home-shelf-index" aria-hidden="true">
+          {index + 1}
+        </span>
+        {(item.missing || item.videoHidden || item.hidden) && (
+          <span className="home-shelf-flags">
+            {item.missing && <span className="home-shelf-flag is-error">已丢失</span>}
+            {item.videoHidden && <span className="home-shelf-flag is-warn">视频隐藏</span>}
+            {item.hidden && <span className="home-shelf-flag">已隐藏</span>}
+          </span>
+        )}
+        <div className="home-shelf-actions">
+          <button
+            type="button"
+            className="home-shelf-action"
+            title="前移"
+            aria-label="前移"
+            disabled={index <= 0}
+            onClick={() => onMove(-1)}
+          >
+            <ArrowLeftOutlined />
+          </button>
+          <button
+            type="button"
+            className="home-shelf-action"
+            title="后移"
+            aria-label="后移"
+            disabled={index >= total - 1}
+            onClick={() => onMove(1)}
+          >
+            <ArrowRightOutlined />
+          </button>
+          <button
+            type="button"
+            className="home-shelf-action"
+            title={item.hidden ? '恢复显示' : '在首页隐藏'}
+            aria-label={item.hidden ? '恢复显示' : '在首页隐藏'}
+            onClick={onToggleHidden}
+          >
+            {item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+          </button>
+          <Popconfirm title={removeTitle} okText="移除" cancelText="取消" onConfirm={onRemove}>
+            <button
+              type="button"
+              className="home-shelf-action is-danger"
+              title="移除"
+              aria-label="移除"
+            >
+              <DeleteOutlined />
+            </button>
+          </Popconfirm>
+        </div>
+      </div>
+      <button
+        type="button"
+        className="home-shelf-name"
+        title={`${item.title} · ${meta}`}
+        onClick={onEdit}
+      >
+        {item.title}
+      </button>
+    </div>
+  )
+}
+
+/**
  * 控制台「首页」：海报叠层的排序 / 隐藏 / 移除，一级分类在首页的显示与推荐规则。
  * 条目本身（视频信息覆盖、自定义图片与裁剪）走同一个编辑弹窗。
  */
@@ -768,6 +913,9 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   /** 拖动排序的源行与落点：海报和分类推荐共用，同一时间只会有一个拖动 */
   const [dragId, setDragId] = useState<number | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: number; edge: DragEdge } | null>(null)
+  /** 收起的分类、展开的「已移除」列表：只影响本页显示，不落盘 */
+  const [collapsed, setCollapsed] = useState<string[]>([])
+  const [removedOpen, setRemovedOpen] = useState<string[]>([])
 
   const load = useCallback(async (silent = false): Promise<void> => {
     if (!silent) setLoading(true)
@@ -823,6 +971,11 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   const clearDrag = (): void => {
     setDragId(null)
     setDropTarget(null)
+  }
+
+  /** 折叠 / 展开这类只影响本页显示的开关 */
+  const toggleKey = (setter: React.Dispatch<React.SetStateAction<string[]>>, key: string): void => {
+    setter((prev) => (prev.includes(key) ? prev.filter((entry) => entry !== key) : [...prev, key]))
   }
 
   /** 把拖动行插到目标行的前 / 后，再按新顺序提交 */
@@ -961,49 +1114,53 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           description="还没有一级分类，先去「分类」创建"
         />
       ) : (
-        sections.map((section) => (
-          <section className="home-config-section" key={section.categoryId}>
-            <div className="home-config-section-head">
-              <div className="home-config-section-name">
-                <h3>{section.name}</h3>
-                {!section.categoryVisible && <Tag color="warning">分类已在展示端隐藏</Tag>}
-                {!section.visible && <Tag color="default">不在首页显示</Tag>}
-              </div>
-              <div className="home-config-section-actions">
-                <label className="home-config-field">
-                  <span>在首页显示</span>
-                  <Switch
-                    checked={section.visible}
-                    onChange={(checked) =>
-                      void act(
-                        window.api.home.saveSection(section.categoryId, { visible: checked })
-                      )
-                    }
-                  />
-                </label>
-                <label className="home-config-field">
-                  <span>显示名</span>
+        sections.map((section) => {
+          const isCollapsed = collapsed.includes(section.categoryId)
+          const showRemoved = removedOpen.includes(section.categoryId)
+          return (
+            <section
+              className={`home-config-section${isCollapsed ? ' is-collapsed' : ''}`}
+              key={section.categoryId}
+            >
+              <div className="home-config-section-head">
+                <div className="home-config-section-title">
+                  <button
+                    type="button"
+                    className="home-config-fold"
+                    aria-expanded={!isCollapsed}
+                    aria-label={isCollapsed ? '展开' : '收起'}
+                    onClick={() => toggleKey(setCollapsed, section.categoryId)}
+                  >
+                    <RightOutlined className={isCollapsed ? undefined : 'is-open'} />
+                  </button>
                   <Input
                     key={`${section.categoryId}:${section.title}`}
-                    defaultValue={section.title === section.name ? '' : section.title}
-                    placeholder={section.name}
+                    defaultValue={section.title}
                     maxLength={60}
-                    className="home-config-title-input"
+                    variant="borderless"
+                    className="home-config-name-input"
+                    title="点一下改首页显示名，留空使用分类名"
                     onBlur={(event) => {
                       const value = event.target.value.trim()
-                      const current = section.title === section.name ? '' : section.title
-                      if (value !== current) {
-                        void act(
-                          window.api.home.saveSection(section.categoryId, { title: value }),
-                          '已更新显示名'
-                        )
-                      }
+                      if (value === section.title) return
+                      void act(
+                        window.api.home.saveSection(section.categoryId, {
+                          title: value === section.name ? '' : value
+                        }),
+                        '已更新显示名'
+                      )
                     }}
                     onPressEnter={(event) => event.currentTarget.blur()}
                   />
-                </label>
-                <label className="home-config-field">
-                  <span>规则</span>
+                  <span className="home-config-section-count">
+                    {section.rule === 'manual'
+                      ? `${section.total} 部推荐`
+                      : `共 ${section.total} 部`}
+                  </span>
+                  {!section.categoryVisible && <Tag color="warning">分类已隐藏</Tag>}
+                  {!section.visible && <Tag color="default">不在首页显示</Tag>}
+                </div>
+                <div className="home-config-section-actions">
                   <Radio.Group
                     size="small"
                     optionType="button"
@@ -1014,116 +1171,143 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                     ]}
                     onChange={(event) => void changeRule(section, event.target.value as HomeRule)}
                   />
-                </label>
-                {section.rule === 'latest' && (
+                  {section.rule === 'latest' && (
+                    <label className="home-config-field">
+                      <span>取前</span>
+                      <InputNumber
+                        size="small"
+                        min={1}
+                        max={50}
+                        value={section.topN}
+                        className="home-config-topn"
+                        onChange={(value) => {
+                          if (typeof value === 'number') {
+                            void act(
+                              window.api.home.saveSection(section.categoryId, { topN: value })
+                            )
+                          }
+                        }}
+                      />
+                    </label>
+                  )}
                   <label className="home-config-field">
-                    <span>数量</span>
-                    <InputNumber
+                    <span>在首页显示</span>
+                    <Switch
                       size="small"
-                      min={1}
-                      max={50}
-                      value={section.topN}
-                      className="home-config-topn"
-                      onChange={(value) => {
-                        if (typeof value === 'number') {
-                          void act(window.api.home.saveSection(section.categoryId, { topN: value }))
-                        }
-                      }}
-                    />
-                  </label>
-                )}
-              </div>
-            </div>
-
-            {section.rule === 'latest' && (
-              <p className="home-config-section-meta">
-                该分类共 {section.total} 个视频，按更新时间取前 {section.topN} 部
-              </p>
-            )}
-
-            {section.items.length === 0 ? (
-              <p className="home-config-empty">
-                {section.rule === 'manual'
-                  ? '还没有推荐视频，去「视频」页点「推荐」加进来'
-                  : '这个分类下还没有视频，或者绑定还没配好'}
-              </p>
-            ) : (
-              <div className="home-config-list">
-                {section.items.map((item, index) => (
-                  <HomeItemRow
-                    key={item.videoId}
-                    item={item}
-                    ratio={CARD_RATIO}
-                    index={index}
-                    total={section.items.length}
-                    removeTitle={
-                      section.rule === 'manual'
-                        ? '从推荐里移除？'
-                        : '从首页移除这部剧？之后可以在下方恢复'
-                    }
-                    onMove={(delta) => moveSectionItem(section, item.videoId, delta)}
-                    onEdit={() =>
-                      setEditor({
-                        kind: 'section',
-                        categoryId: section.categoryId,
-                        ratio: CARD_RATIO,
-                        item
-                      })
-                    }
-                    onToggleHidden={() =>
-                      void act(
-                        window.api.home.updateSectionItem(section.categoryId, item.videoId, {
-                          hidden: !item.hidden
-                        }),
-                        item.hidden ? '已恢复显示' : '已在首页隐藏'
-                      )
-                    }
-                    onRemove={() =>
-                      void act(
-                        window.api.home.removeSectionItem(section.categoryId, item.videoId),
-                        '已从首页移除'
-                      )
-                    }
-                    drag={rowDrag(
-                      section.items.map((entry) => entry.videoId),
-                      item.videoId,
-                      (next) =>
-                        void act(window.api.home.reorderSectionItems(section.categoryId, next))
-                    )}
-                  />
-                ))}
-              </div>
-            )}
-
-            {section.rule === 'latest' && section.removedItems.length > 0 && (
-              <div className="home-config-removed">
-                <span className="home-config-removed-title">
-                  已移除 {section.removedItems.length} 部
-                </span>
-                {section.removedItems.map((item) => (
-                  <div className="home-config-removed-row" key={item.videoId}>
-                    <span className="home-config-removed-name" title={item.title}>
-                      {item.title}
-                    </span>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<UndoOutlined />}
-                      onClick={() =>
+                      checked={section.visible}
+                      onChange={(checked) =>
                         void act(
-                          window.api.home.restoreSectionItem(section.categoryId, item.videoId),
-                          '已恢复到首页'
+                          window.api.home.saveSection(section.categoryId, { visible: checked })
                         )
                       }
-                    >
-                      恢复
-                    </Button>
-                  </div>
-                ))}
+                    />
+                  </label>
+                </div>
               </div>
-            )}
-          </section>
-        ))
+
+              {!isCollapsed && (
+                <>
+                  {section.items.length === 0 ? (
+                    <p className="home-config-empty">
+                      {section.rule === 'manual'
+                        ? '还没有推荐视频，去「视频」页点「推荐」加进来'
+                        : '这个分类下还没有视频，或者绑定还没配好'}
+                    </p>
+                  ) : (
+                    <div className="home-config-shelf">
+                      {section.items.map((item, index) => (
+                        <HomeItemCard
+                          key={item.videoId}
+                          item={item}
+                          ratio={CARD_RATIO}
+                          index={index}
+                          total={section.items.length}
+                          removeTitle={
+                            section.rule === 'manual'
+                              ? '从推荐里移除？'
+                              : '从首页移除这部剧？之后可以在下方恢复'
+                          }
+                          onMove={(delta) => moveSectionItem(section, item.videoId, delta)}
+                          onEdit={() =>
+                            setEditor({
+                              kind: 'section',
+                              categoryId: section.categoryId,
+                              ratio: CARD_RATIO,
+                              item
+                            })
+                          }
+                          onToggleHidden={() =>
+                            void act(
+                              window.api.home.updateSectionItem(section.categoryId, item.videoId, {
+                                hidden: !item.hidden
+                              }),
+                              item.hidden ? '已恢复显示' : '已在首页隐藏'
+                            )
+                          }
+                          onRemove={() =>
+                            void act(
+                              window.api.home.removeSectionItem(section.categoryId, item.videoId),
+                              '已从首页移除'
+                            )
+                          }
+                          drag={rowDrag(
+                            section.items.map((entry) => entry.videoId),
+                            item.videoId,
+                            (next) =>
+                              void act(
+                                window.api.home.reorderSectionItems(section.categoryId, next)
+                              )
+                          )}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {section.rule === 'latest' && section.removedItems.length > 0 && (
+                    <div className="home-config-removed">
+                      <button
+                        type="button"
+                        className="home-config-removed-toggle"
+                        aria-expanded={showRemoved}
+                        onClick={() => toggleKey(setRemovedOpen, section.categoryId)}
+                      >
+                        <RightOutlined className={showRemoved ? 'is-open' : undefined} />
+                        已移除 {section.removedItems.length} 部
+                      </button>
+                      {showRemoved && (
+                        <div className="home-config-removed-list">
+                          {section.removedItems.map((item) => (
+                            <button
+                              key={item.videoId}
+                              type="button"
+                              className="home-config-removed-chip"
+                              title={`${item.title} · 点击恢复到首页`}
+                              onClick={() =>
+                                void act(
+                                  window.api.home.restoreSectionItem(
+                                    section.categoryId,
+                                    item.videoId
+                                  ),
+                                  '已恢复到首页'
+                                )
+                              }
+                            >
+                              <span className="home-config-removed-thumb">
+                                <HomePicture item={item} />
+                              </span>
+                              <span className="home-config-removed-name">{item.title}</span>
+                              <UndoOutlined className="home-config-removed-icon" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+          )
+        })
       )}
     </div>
   )

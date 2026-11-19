@@ -3465,6 +3465,181 @@ button.video-episode:focus-visible {
   align-items: center;
 }
 
+/* 分类推荐：一排封面卡，按可用宽度自动排列 */
+.home-config-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.home-shelf-card {
+  position: relative;
+  min-width: 0;
+}
+
+.home-shelf-card[draggable='true'] {
+  cursor: grab;
+}
+
+.home-shelf-card.is-hidden {
+  opacity: 0.6;
+}
+
+.home-shelf-card.is-dragging {
+  opacity: 0.4;
+}
+
+/* 落点用卡片左侧 / 右侧的一条主色竖线标出 */
+.home-shelf-card.is-drop-before::before,
+.home-shelf-card.is-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.home-shelf-card.is-drop-before::before {
+  left: -6px;
+}
+
+.home-shelf-card.is-drop-after::after {
+  right: -6px;
+}
+
+.home-shelf-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.home-shelf-open {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.home-shelf-index {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  pointer-events: none;
+}
+
+.home-shelf-flags {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  pointer-events: none;
+}
+
+.home-shelf-flag {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.home-shelf-flag.is-error {
+  background: #c62828;
+}
+
+.home-shelf-flag.is-warn {
+  background: #b26a00;
+}
+
+/* 操作条：悬停或键盘聚焦时出现；一直渲染所以 Tab 也能走到 */
+.home-shelf-actions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  padding: 6px 4px 5px;
+  background: linear-gradient(to top, rgb(0 0 0 / 78%), transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.home-shelf-card:hover .home-shelf-actions,
+.home-shelf-card:focus-within .home-shelf-actions {
+  opacity: 1;
+}
+
+.home-shelf-action {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 14%);
+  color: #fff;
+  font-size: 12px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.home-shelf-action:hover:not(:disabled) {
+  background: rgb(255 255 255 / 30%);
+}
+
+.home-shelf-action:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.home-shelf-action.is-danger:hover:not(:disabled) {
+  background: #c62828;
+}
+
+.home-shelf-name {
+  display: block;
+  width: 100%;
+  padding: 6px 1px 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.home-shelf-name:hover {
+  color: var(--accent);
+}
+
 .home-config-section {
   margin-top: 18px;
   padding: 14px 16px 10px;
@@ -3477,31 +3652,92 @@ button.video-episode:focus-visible {
   margin-top: 6px;
 }
 
-.home-config-section-head {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 10px;
+/* 收起的分组只剩一行头：去掉列表的底部留白，上下内边距对称才看着居中 */
+.home-config-section.is-collapsed {
+  padding-bottom: 14px;
 }
 
-.home-config-section-name {
+.home-config-section.is-collapsed .home-config-section-head {
+  margin-bottom: 0;
+}
+
+.home-config-section-head {
   display: flex;
+  gap: 10px 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.home-config-section-title {
+  display: flex;
+  min-width: 0;
   gap: 8px;
   align-items: center;
 }
 
-.home-config-section-name h3 {
-  margin: 0;
+.home-config-fold {
+  display: grid;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  place-items: center;
+  cursor: pointer;
+}
+
+.home-config-fold:hover {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.home-config-fold .anticon {
+  transition: transform 120ms ease;
+}
+
+.home-config-fold .anticon.is-open {
+  transform: rotate(90deg);
+}
+
+/* 分类名就是首页显示名，无边框就地编辑，留空回到分类名；宽度跟着文字走 */
+.home-config-section-title input.home-config-name-input {
+  width: auto;
+  min-width: 48px;
+  max-width: 220px;
+  padding: 0 4px;
+  border-radius: 4px;
   color: var(--text);
   font-size: 15px;
   font-weight: 600;
+  field-sizing: content;
+}
+
+.home-config-section-title input.home-config-name-input:hover,
+.home-config-section-title input.home-config-name-input:focus {
+  background: var(--surface-muted);
+}
+
+.home-config-section-count {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.home-config-section-title .ant-tag {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 18px;
 }
 
 .home-config-section-actions {
   display: flex;
-  gap: 14px;
+  gap: 8px 12px;
   flex-wrap: wrap;
   align-items: center;
 }
@@ -3514,18 +3750,8 @@ button.video-episode:focus-visible {
   font-size: 12px;
 }
 
-.home-config-title-input {
-  width: 150px;
-}
-
 .home-config-topn {
   width: 70px;
-}
-
-.home-config-section-meta {
-  margin: 0 0 10px;
-  color: var(--text-faint);
-  font-size: 11.5px;
 }
 
 .home-config-empty {
@@ -3535,30 +3761,84 @@ button.video-episode:focus-visible {
 }
 
 .home-config-removed {
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 2px;
+  padding-top: 8px;
   border-top: 1px dashed var(--border);
 }
 
-.home-config-removed-title {
+.home-config-removed-toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 11.5px;
+  cursor: pointer;
 }
 
-.home-config-removed-row {
+.home-config-removed-toggle:hover {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.home-config-removed-toggle .anticon {
+  font-size: 9px;
+  transition: transform 120ms ease;
+}
+
+.home-config-removed-toggle .anticon.is-open {
+  transform: rotate(90deg);
+}
+
+.home-config-removed-list {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.home-config-removed-chip {
+  display: inline-flex;
+  gap: 6px;
   align-items: center;
-  justify-content: space-between;
-  padding: 2px 0;
+  max-width: 200px;
+  padding: 3px 9px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.home-config-removed-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.home-config-removed-thumb {
+  position: relative;
+  flex: none;
+  width: 20px;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--surface-muted);
 }
 
 .home-config-removed-name {
   overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.home-config-removed-icon {
+  flex: none;
+  font-size: 10px;
+  opacity: 0.7;
 }
 
 /* 首页条目的编辑弹窗 */
