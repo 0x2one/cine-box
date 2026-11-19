@@ -56,6 +56,23 @@ const HOME_ERRORS: Record<string, string> = {
   CACHE_UNAVAILABLE: '视频缓存库不可用'
 }
 
+/** 分类推荐默认收起，展开过的分组记在这里，下次进来还开着 */
+const EXPANDED_KEY = 'home-sections-expanded'
+
+function readExpanded(): string[] {
+  try {
+    const raw = localStorage.getItem(EXPANDED_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === 'string')
+      : []
+  } catch {
+    // 记录坏掉就当没展开过，默认收起
+    return []
+  }
+}
+
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
   return Math.min(Math.max(value, min), max)
@@ -914,9 +931,17 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   /** 拖动排序的源行与落点：海报和分类推荐共用，同一时间只会有一个拖动 */
   const [dragId, setDragId] = useState<number | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: number; edge: DragEdge } | null>(null)
-  /** 收起的分类、展开的「已移除」列表：只影响本页显示，不落盘 */
-  const [collapsed, setCollapsed] = useState<string[]>([])
+  /** 展开的分组（默认全收起，展开状态记到 localStorage）；「已移除」列表只在本页 */
+  const [expanded, setExpanded] = useState<string[]>(readExpanded)
   const [removedOpen, setRemovedOpen] = useState<string[]>([])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded))
+    } catch {
+      // 存不下就只在本次会话里生效
+    }
+  }, [expanded])
 
   const load = useCallback(async (silent = false): Promise<void> => {
     if (!silent) setLoading(true)
@@ -1116,7 +1141,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
         />
       ) : (
         sections.map((section) => {
-          const isCollapsed = collapsed.includes(section.categoryId)
+          const isCollapsed = !expanded.includes(section.categoryId)
           const showRemoved = removedOpen.includes(section.categoryId)
           return (
             <section
@@ -1130,7 +1155,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                     className="home-config-fold"
                     aria-expanded={!isCollapsed}
                     aria-label={isCollapsed ? '展开' : '收起'}
-                    onClick={() => toggleKey(setCollapsed, section.categoryId)}
+                    onClick={() => toggleKey(setExpanded, section.categoryId)}
                   >
                     <RightOutlined className={isCollapsed ? undefined : 'is-open'} />
                   </button>
