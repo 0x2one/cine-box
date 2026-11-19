@@ -1,0 +1,753 @@
+/* ── 搜索页：居中的搜索落地页 + 结果页吸顶搜索条 ──
+   初始态没有顶部搜索条，搜索框落在页面中央；提交后搜索条才吸顶，结果一页页往下接。
+   搜索只认回车 / 「搜索」按钮，不在输入时发请求。 */
+
+.search-view {
+  display: flex;
+  flex-direction: column;
+  /* 初始态要撑满一屏，内容少时也不在半腰截断；出结果后自然长高 */
+  min-height: 100%;
+  /* 切结果时内容高度会骤变，关掉滚动锚定，避免浏览器反过来拽 scrollTop */
+  overflow-anchor: none;
+  padding-bottom: 8px;
+}
+
+/* ── 搜索条：左边搜索图标 + 右边「搜索」文字按钮 ── */
+
+.search-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(8 12 18 / 5%);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.search-form:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 10px 28px rgb(8 12 18 / 7%);
+}
+
+.search-form.is-hero {
+  width: min(100%, 620px);
+}
+
+.search-form.is-header {
+  width: min(100%, 560px);
+  box-shadow: none;
+}
+
+.search-form.is-header:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* 输入框本体融进胶囊：只留左侧图标，边框和底色交给 form */
+.search-form-field.ant-input-affix-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-inline: 14px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.search-form-field.ant-input-affix-wrapper:focus,
+.search-form-field.ant-input-affix-wrapper-focused {
+  box-shadow: none;
+}
+
+.search-form-field .ant-input {
+  background: transparent;
+}
+
+.search-form-field .ant-input-prefix {
+  color: var(--text-faint);
+}
+
+.search-form-submit.ant-btn {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  box-shadow: none;
+  font-size: 13px;
+}
+
+.search-form.is-hero .search-form-submit.ant-btn {
+  min-width: 88px;
+  height: 40px;
+}
+
+.search-form.is-header .search-form-submit.ant-btn {
+  min-width: 72px;
+  height: 32px;
+  font-size: 12.5px;
+}
+
+/* ── 结果页吸顶头部 ── */
+
+.search-head {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  background: var(--bg);
+  border-bottom: 1px solid transparent;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+  animation: search-head-in 0.2s ease-out;
+}
+
+@keyframes search-head-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.search-head.is-elevated {
+  border-bottom-color: var(--border);
+  box-shadow: 0 10px 24px rgb(8 12 18 / 6%);
+}
+
+.search-head-inner {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 14px 32px;
+}
+
+/* 结果总数：对齐内容列右缘，和搜索条同一行，不参与居中 */
+.search-count {
+  position: absolute;
+  top: 50%;
+  right: 32px;
+  max-width: 190px;
+  min-height: 19px;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.search-count b {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* ── 页面主体 ── */
+
+.search-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 4px 32px 72px;
+}
+
+/* 初始态：底部不留结果页那么大的空 */
+.search-body.is-intro {
+  padding-bottom: 24px;
+}
+
+/* ── 初始态：居中搜索 + 历史 + 分类 + 封面带 ── */
+
+.search-intro {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-height: 540px;
+}
+
+.search-intro-main {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 36px 0 28px;
+  text-align: center;
+}
+
+/* 搜索框和标题后面一层很淡的主色光晕：让初始态不是一块死白 */
+.search-intro-main::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: -1;
+  width: 620px;
+  height: 340px;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--accent) 9%, transparent),
+    transparent
+  );
+  content: '';
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.search-intro-title {
+  margin: 0 0 8px;
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.search-intro-desc {
+  max-width: 460px;
+  margin: 0 0 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.search-intro-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  max-width: 620px;
+  margin: 14px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.search-intro-meta b {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 历史 / 分类共用的分组：一个标签 + 一排 chips */
+.search-intro-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 24px;
+}
+
+.search-block-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.search-cats-label {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+}
+
+/* ── 搜索历史 ── */
+
+.search-history-clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.search-history-clear:hover {
+  color: var(--accent);
+}
+
+.search-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 700px;
+}
+
+.search-history-item {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 220px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.search-history-item .anticon {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.search-history-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-history-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+.search-history-item:hover .anticon {
+  color: var(--accent);
+}
+
+/* ── 分类快捷入口 ── */
+
+.search-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 640px;
+}
+
+.search-cat {
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.search-cat:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+.search-cat.is-all {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+/* ── 初始态底部的装饰封面带 ── */
+
+.search-intro-shelf {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 12px;
+  justify-content: center;
+  width: 100%;
+  padding-top: 32px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* 顶部用页面底色盖一层渐变，封面从背景里淡出来；比 mask 更稳，也自动跟随主题 */
+.search-intro-shelf::before {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: 76px;
+  background: linear-gradient(to bottom, var(--bg), transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.search-shelf-item {
+  flex: 0 0 92px;
+  width: 92px;
+  height: 124px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  box-shadow: 0 12px 26px rgb(8 12 18 / 12%);
+  opacity: 0.56;
+}
+
+.search-shelf-item:nth-child(even) {
+  transform: translateY(12px);
+}
+
+.search-shelf-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ── 结果列表 ── */
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 和控制台「视频」一样：正文在左、3:4 封面在右，行与行之间只用一条细线分隔 */
+.search-result {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 2px;
+}
+
+.search-result + .search-result {
+  border-top: 1px solid var(--border);
+}
+
+.search-result-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 标题行固定单行：片名省略，备注跟在后面 */
+.search-result-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-result-title {
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 命中片段：淡主色底，不改变字重，长标题里也能一眼扫到 */
+.search-hit {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+}
+
+.search-result-note {
+  flex: 0 0 auto;
+  overflow: hidden;
+  max-width: 220px;
+  color: var(--accent);
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 元信息一行：来源 / 分类 / 更新时间，分隔点用 2px 圆点 */
+.search-result-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  margin-top: 5px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.search-meta-strong {
+  flex: 0 0 auto;
+}
+
+/* 绑定分类可能很长，限宽省略，完整内容看 title */
+.search-meta-class {
+  min-width: 0;
+  overflow: hidden;
+  max-width: 320px;
+  text-overflow: ellipsis;
+}
+
+.search-meta-dot {
+  flex: 0 0 auto;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+/* 简介固定两行高度：一行也占两行，行高才整齐 */
+.search-result-intro {
+  display: -webkit-box;
+  overflow: hidden;
+  min-height: calc(1.65em * 2);
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.65;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 主演固定一行，过长省略 */
+.search-result-actor {
+  display: block;
+  max-width: 100%;
+  min-height: 1.5em;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右侧封面：3:4 竖版，和控制台预览一致；缺图时露首字占位 */
+.search-result-cover {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  width: 96px;
+  height: 128px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.search-result-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.search-cover-letter {
+  color: var(--text-faint);
+  font-size: 23px;
+  font-weight: 600;
+}
+
+/* ── 加载 / 到底的脚注 ── */
+
+.search-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 76px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+.search-loading {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 360px;
+  place-items: center;
+}
+
+/* ── 无结果 / 失败 ── */
+
+.search-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 420px;
+  padding: 48px 0 40px;
+  text-align: center;
+}
+
+.search-empty-title {
+  max-width: 100%;
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  /* 关键词可能很长，宁可在中间折行也不撑出横向滚动 */
+  overflow-wrap: anywhere;
+}
+
+.search-empty-desc {
+  max-width: 430px;
+  margin: 8px 0 0;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+
+.search-empty .ant-btn {
+  margin-top: 16px;
+}
+
+/* 回到顶部：滚过一屏后浮出，固定定位在内容列右下角（窄窗口退回 24px） */
+.search-backtop {
+  position: fixed;
+  right: max(24px, calc((100vw - 980px) / 2 + 32px));
+  bottom: 24px;
+  z-index: 30;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgb(8 12 18 / 12%);
+  backdrop-filter: blur(10px);
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.search-backtop:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text);
+}
+
+.search-backtop.is-hidden {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+
+@media (max-width: 1080px) {
+  .search-head-inner,
+  .search-body {
+    padding-inline: 26px;
+  }
+
+  .search-count {
+    right: 26px;
+  }
+
+  .search-result {
+    gap: 18px;
+  }
+
+  .search-result-cover {
+    width: 84px;
+    height: 112px;
+  }
+}
+
+/* 窄窗口：结果数落到搜索条下面一行，搜索条仍然居中 */
+@media (max-width: 900px) {
+  .search-head-inner {
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 12px;
+    padding-bottom: 10px;
+  }
+
+  .search-count {
+    position: static;
+    max-width: 100%;
+    min-height: 0;
+    transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .search-intro-title {
+    font-size: 22px;
+  }
+
+  .search-intro-main {
+    padding-top: 28px;
+    padding-bottom: 22px;
+  }
+
+  .search-intro-block {
+    margin-top: 20px;
+  }
+
+  .search-result-title-row {
+    flex-wrap: wrap;
+    gap: 2px 10px;
+  }
+
+  .search-history-item {
+    max-width: 170px;
+  }
+
+  .search-form.is-hero .search-form-submit.ant-btn {
+    min-width: 72px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-head {
+    animation: none;
+  }
+
+  .search-form,
+  .search-head,
+  .search-backtop,
+  .search-cat,
+  .search-history-item,
+  .search-history-clear {
+    transition: none;
+  }
+}

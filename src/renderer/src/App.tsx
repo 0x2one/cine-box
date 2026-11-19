@@ -15,7 +15,7 @@ function App(): React.JSX.Element {
   /** 每次进列表页都换一个 key：已经在列表页时再点「找片看」也回到「全部」 */
   const [browseEntry, setBrowseEntry] = useState(0)
 
-  const openBrowse = (categoryId: string): void => {
+  const openBrowse = (categoryId: string | null): void => {
     setBrowseCategoryId(categoryId)
     setBrowseEntry((entry) => entry + 1)
     setView('browse')
@@ -42,7 +42,7 @@ function App(): React.JSX.Element {
           {view === 'browse' && (
             <BrowseView key={browseEntry} initialCategoryId={browseCategoryId} />
           )}
-          {view === 'search' && <SearchView />}
+          {view === 'search' && <SearchView onOpenBrowse={openBrowse} />}
           {view === 'console' && <Console onBack={() => setView('home')} />}
           {view === 'settings' && <Settings onBack={() => setView('home')} />}
           {view === 'about' && <AboutPage onBack={() => setView('home')} />}

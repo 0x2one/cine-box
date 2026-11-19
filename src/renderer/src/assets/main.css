@@ -4315,17 +4315,3 @@ button.video-episode:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* ── 搜索页（占位，具体设计待定） ── */
-
-.search-placeholder {
-  display: grid;
-  height: 100%;
-  place-items: center;
-}
-
-.search-placeholder-text {
-  margin: 0;
-  color: var(--text-faint);
-  font-size: 13px;
-}

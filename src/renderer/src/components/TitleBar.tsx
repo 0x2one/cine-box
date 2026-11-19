@@ -125,7 +125,7 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
         >
           推荐
         </button>
-        {/* 长得像输入框的搜索按钮：点开搜索页，具体交互由搜索页承载 */}
+        {/* 长得像输入框的搜索按钮：点开搜索页，真正的搜索框在页面里 */}
         <button
           ref={searchRef}
           type="button"
