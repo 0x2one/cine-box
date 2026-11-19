@@ -14,6 +14,8 @@ const SLOTS = [
   { left: 72, dim: 0.78 }
 ]
 const AUTOPLAY_MS = 7000
+/** 叠层拖动超过这个距离才算翻页，太短就当作没拖 */
+const HERO_DRAG = 64
 
 /** 一个分类轨道：头部两个箭头控制横向滚动，两端到头就置灰 */
 function HomeRail({
@@ -27,6 +29,9 @@ function HomeRail({
 }): React.JSX.Element {
   const railRef = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ left: false, right: false })
+  /** 指针横向拖动：按住往左拖就是往后看，和箭头按钮等价 */
+  const dragRef = useRef<{ id: number; x: number; scroll: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
 
   const update = useCallback(() => {
     const rail = railRef.current
@@ -55,6 +60,31 @@ function HomeRail({
     rail.scrollBy({ left: direction * 3 * width })
   }
 
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const rail = railRef.current
+    if (!rail || event.button !== 0) return
+    dragRef.current = { id: event.pointerId, x: event.clientX, scroll: rail.scrollLeft }
+    setDragging(true)
+    rail.setPointerCapture(event.pointerId)
+  }
+
+  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const state = dragRef.current
+    const rail = railRef.current
+    if (!state || !rail || state.id !== event.pointerId) return
+    // 直接写 scrollLeft（不是 scrollBy），这样拖到一半停住不会继续滑
+    rail.scrollLeft = state.scroll - (event.clientX - state.x)
+  }
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const state = dragRef.current
+    if (!state || state.id !== event.pointerId) return
+    dragRef.current = null
+    setDragging(false)
+    const rail = railRef.current
+    if (rail?.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId)
+  }
+
   return (
     <section className="home-section">
       <div className="home-section-head">
@@ -81,17 +111,27 @@ function HomeRail({
           </button>
         </div>
       </div>
-      <div className="home-rail" ref={railRef} onScroll={update}>
+      <div
+        className={`home-rail${dragging ? ' is-dragging' : ''}`}
+        ref={railRef}
+        onScroll={update}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDragStart={(event) => event.preventDefault()}
+      >
         {items.map((item) => (
           <article className="home-item" key={item.videoId} title={item.title}>
             <div className="home-item-poster">
               <HomePicture item={item} />
+              {/* 更新进度压在封面右下角，卡片下方只留片名和简介 */}
+              {(item.note || item.latestTime) && (
+                <span className="home-item-badge">{item.note || `更新 ${item.latestTime}`}</span>
+              )}
             </div>
             <p className="home-item-title" title={item.title}>
               {item.title}
-            </p>
-            <p className="home-item-note">
-              {item.note || (item.latestTime ? `更新 ${item.latestTime}` : '')}
             </p>
             <p className="home-item-sub">
               {item.intro || (item.actors ? `主演 ${item.actors}` : '')}
@@ -195,6 +235,61 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
     return () => window.clearInterval(timer)
   }, [go, index, paused, posters.length])
 
+  /** 叠层拖动：往左拖翻到下一部，往右拖回上一部，和手机上滑动一致 */
+  const deckRef = useRef<HTMLDivElement>(null)
+  const dragState = useRef<{ id: number; x: number; moved: boolean } | null>(null)
+  /** 松手时浏览器还会补一个 click，用它挡住「拖完顺手翻两页」 */
+  const dragMoved = useRef(false)
+  const [dragging, setDragging] = useState(false)
+
+  const onHeroPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
+    if (event.button !== 0 || posters.length < 2) return
+    // 先不捕获指针：捕获会把 click 也挪到 section 上，翻页箭头和卡片就点不着了
+    dragState.current = { id: event.pointerId, x: event.clientX, moved: false }
+    dragMoved.current = false
+    setDragging(true)
+  }
+
+  const onHeroPointerMove = (event: React.PointerEvent<HTMLElement>): void => {
+    const state = dragState.current
+    if (!state || state.id !== event.pointerId) return
+    const dx = event.clientX - state.x
+    if (Math.abs(dx) > 6) {
+      state.moved = true
+      dragMoved.current = true
+      // 确认是在拖动才捕获，之后拖出叠层也能跟手
+      if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      }
+    }
+    // 跟手位移：只有最前面那张跟着指针走，边走边淡出，后面的那张才是下一部
+    const shifted = Math.max(-180, Math.min(180, dx))
+    const fade = Math.min(0.55, Math.abs(shifted) / 300)
+    const deck = deckRef.current
+    deck?.style.setProperty('--drag', `${shifted}px`)
+    deck?.style.setProperty('--drag-fade', String(fade))
+  }
+
+  const endHeroDrag = (event: React.PointerEvent<HTMLElement>, commit: boolean): void => {
+    const state = dragState.current
+    if (!state || state.id !== event.pointerId) return
+    const dx = event.clientX - state.x
+    dragState.current = null
+    setDragging(false)
+    deckRef.current?.style.setProperty('--drag', '0px')
+    deckRef.current?.style.setProperty('--drag-fade', '0')
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (commit && state.moved && Math.abs(dx) >= HERO_DRAG) go(index + (dx < 0 ? 1 : -1))
+  }
+
+  /** 拖完那一下的 click 不再翻页，纯点击照旧 */
+  const clickGo = (target: number): void => {
+    if (dragMoved.current) return
+    go(target)
+  }
+
   // 快捷键：Ctrl K 聚焦搜索、Esc 清空、左右键翻海报
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -297,14 +392,19 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
         <>
           {current && (
             <section
-              className="home-hero"
+              className={`home-hero${dragging ? ' is-dragging' : ''}`}
               style={{ '--stack': `${stack}px` } as React.CSSProperties}
               aria-label="海报推荐"
               aria-roledescription="carousel"
               onPointerEnter={() => setPaused(true)}
               onPointerLeave={() => setPaused(false)}
+              onPointerDown={onHeroPointerDown}
+              onPointerMove={onHeroPointerMove}
+              onPointerUp={(event) => endHeroDrag(event, true)}
+              onPointerCancel={(event) => endHeroDrag(event, false)}
+              onDragStart={(event) => event.preventDefault()}
             >
-              <div className="home-deck">
+              <div className="home-deck" ref={deckRef}>
                 {Array.from({ length: slotCount }, (_, slot) => {
                   const poster = posters[(index + slot) % posters.length]
                   const front = slot === 0
@@ -325,7 +425,7 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
                       tabIndex={front ? undefined : 0}
                       title={front ? undefined : `翻到《${poster.title}》`}
                       aria-label={front ? undefined : `翻到：${poster.title}`}
-                      onClick={front ? undefined : () => go(index + slot)}
+                      onClick={front ? undefined : () => clickGo(index + slot)}
                       onKeyDown={
                         front
                           ? undefined
@@ -363,7 +463,7 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
                       type="button"
                       className="home-pager-btn"
                       aria-label="上一部"
-                      onClick={() => go(index - 1)}
+                      onClick={() => clickGo(index - 1)}
                     >
                       <LeftOutlined style={{ fontSize: 11 }} />
                     </button>
@@ -371,7 +471,7 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
                       type="button"
                       className="home-pager-btn"
                       aria-label="下一部"
-                      onClick={() => go(index + 1)}
+                      onClick={() => clickGo(index + 1)}
                     >
                       <RightOutlined style={{ fontSize: 11 }} />
                     </button>

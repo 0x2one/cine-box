@@ -79,12 +79,37 @@
   position: relative;
   height: 420px;
   margin-bottom: 34px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+/* 拖到一半松手前的跟手位移：--drag 由 pointermove 直接写，松手弹回 */
+.home-hero.is-dragging {
+  cursor: grabbing;
 }
 
 .home-deck {
   position: absolute;
   inset: 0;
   z-index: 1;
+}
+
+/* 只让最前面那张跟着手指走：像把这张卡抽走，后面的自然顶上来 */
+.home-deck .home-card[data-slot='0'] {
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.home-hero.is-dragging .home-deck .home-card[data-slot='0'] {
+  opacity: calc(1 - var(--drag-fade, 0));
+  transform: translateX(var(--drag, 0px));
+  transition: none;
+}
+
+.home-hero.is-dragging .home-card {
+  cursor: grabbing;
 }
 
 .home-card {
@@ -402,8 +427,21 @@
   scrollbar-width: none;
   scroll-behavior: smooth;
   scroll-snap-type: x proximity;
+  cursor: grab;
+  touch-action: pan-y;
   /* 右侧渐隐，被裁掉的半张卡不会硬切；滚到末尾时也自然收口 */
   mask-image: linear-gradient(to right, #000 calc(100% - 46px), transparent 100%);
+}
+
+/* 拖动时关掉平滑和吸附，否则拖一下会被浏览器“顺”到下一格 */
+.home-rail.is-dragging {
+  cursor: grabbing;
+  scroll-behavior: auto;
+  scroll-snap-type: none;
+}
+
+.home-rail.is-dragging * {
+  cursor: grabbing;
 }
 
 .home-rail::-webkit-scrollbar {
@@ -449,14 +487,23 @@
   white-space: nowrap;
 }
 
-.home-item-note {
+/* 更新进度：压在封面右下角的小胶囊，避免占掉卡片下方的第二行 */
+.home-item-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 12px);
+  padding: 2px 7px;
   overflow: hidden;
-  margin: 5px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.35;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 55%);
+  color: #fff;
+  font-size: 10.5px;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
 }
 
 .home-item-sub {
