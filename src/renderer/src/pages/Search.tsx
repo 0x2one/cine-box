@@ -150,6 +150,21 @@ function SearchResultRow({
 
   return (
     <article className="search-result">
+      <div className="search-result-cover">
+        <span className="search-cover-letter">{item.name.trim().slice(0, 1) || '影'}</span>
+        {item.pic && (
+          <img
+            src={item.pic}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={(event) => {
+              event.currentTarget.style.visibility = 'hidden'
+            }}
+          />
+        )}
+      </div>
+
       <div className="search-result-main">
         <div className="search-result-title-row">
           <h3 className="search-result-title" title={item.name}>
@@ -176,21 +191,6 @@ function SearchResultRow({
         <p className="search-result-actor" title={`主演：${item.vodActor || '未知'}`}>
           主演：{item.vodActor || '未知'}
         </p>
-      </div>
-
-      <div className="search-result-cover">
-        <span className="search-cover-letter">{item.name.trim().slice(0, 1) || '影'}</span>
-        {item.pic && (
-          <img
-            src={item.pic}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={(event) => {
-              event.currentTarget.style.visibility = 'hidden'
-            }}
-          />
-        )}
       </div>
     </article>
   )

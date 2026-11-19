@@ -430,7 +430,7 @@
   flex-direction: column;
 }
 
-/* 和控制台「视频」一样：正文在左、3:4 封面在右，行与行之间只用一条细线分隔 */
+/* 封面在左、正文在右，行与行之间只用一条细线分隔 */
 .search-result {
   display: flex;
   gap: 24px;
@@ -547,7 +547,7 @@
   white-space: nowrap;
 }
 
-/* 右侧封面：3:4 竖版，和控制台预览一致；缺图时露首字占位 */
+/* 左侧封面：3:4 竖版；缺图时露首字占位 */
 .search-result-cover {
   position: relative;
   display: flex;
