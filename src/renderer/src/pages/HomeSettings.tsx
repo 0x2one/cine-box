@@ -8,7 +8,7 @@ import {
   Modal,
   Popconfirm,
   Radio,
-  Slider,
+  Space,
   Spin,
   Switch,
   Tabs,
@@ -18,11 +18,14 @@ import {
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  CheckOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
+  HolderOutlined,
   LinkOutlined,
+  PictureOutlined,
   ReloadOutlined,
   UndoOutlined,
   UploadOutlined
@@ -48,7 +51,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * 图片裁剪器：一个按目标比例固定的取景框，拖动图片改变显示区域，滑杆缩放。
+ * 图片裁剪器：一个按目标比例固定的取景框，拖动平移，双指捏合 / Ctrl + 滚轮缩放。
  * 内部用「显示尺寸 + 左上角偏移」表示，对外只输出归一化裁剪框，和渲染端的算法一致。
  */
 function ImageCropper({
@@ -152,23 +155,69 @@ function ImageCropper({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [natural, frame])
 
-  const zoomTo = (value: number): void => {
-    if (!view || !natural || baseScale <= 0) return
-    const width = natural.w * baseScale * view.zoom
-    const height = natural.h * baseScale * view.zoom
-    const centerX = (view.left + frame.w / 2) / width
-    const centerY = (view.top + frame.h / 2) / height
-    const zoom = clamp(value, 1, 4)
-    const nextWidth = natural.w * baseScale * zoom
-    const nextHeight = natural.h * baseScale * zoom
-    const next = clampView({
-      zoom,
-      left: frame.w / 2 - centerX * nextWidth,
-      top: frame.h / 2 - centerY * nextHeight
-    })
-    setView(next)
-    emit(next)
-  }
+  /**
+   * 缩放走原生 wheel：React 的 onWheel 是 passive 的，preventDefault 不生效会让页面跟着滚。
+   * 触控板双指捏合在 Chromium 里就是 Ctrl + wheel，所以一段监听同时覆盖两种手势。
+   * 监听只挂一次，最新状态通过 ref 读取。
+   */
+  const liveRef = useRef<{
+    view: { zoom: number; left: number; top: number } | null
+    natural: { w: number; h: number } | null
+    clamp: (next: { zoom: number; left: number; top: number }) => {
+      zoom: number
+      left: number
+      top: number
+    }
+    apply: (next: { zoom: number; left: number; top: number }) => void
+  }>({
+    view: null,
+    natural: null,
+    clamp: clampView,
+    apply: () => {
+      // 初始化前不会收到 wheel
+    }
+  })
+
+  useEffect(() => {
+    liveRef.current = {
+      view,
+      natural,
+      clamp: clampView,
+      apply: (next) => {
+        setView(next)
+        emit(next)
+      }
+    }
+  }, [clampView, emit, natural, view])
+
+  useEffect(() => {
+    const element = frameRef.current
+    if (!element) return
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) return
+      const live = liveRef.current
+      if (!live.view || !live.natural) return
+      event.preventDefault()
+      const rect = element.getBoundingClientRect()
+      const pointX = event.clientX - rect.left
+      const pointY = event.clientY - rect.top
+      // 行模式（部分鼠标）先换算成像素，步长才和触控板接近
+      const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16 : event.deltaY
+      const zoom = clamp(live.view.zoom * Math.exp(-delta * 0.0022), 1, 4)
+      if (Math.abs(zoom - live.view.zoom) < 0.001) return
+      // 以指针位置为中心缩放：指针下的那块画面保持不动
+      const scale = zoom / live.view.zoom
+      live.apply(
+        live.clamp({
+          zoom,
+          left: pointX - (pointX - live.view.left) * scale,
+          top: pointY - (pointY - live.view.top) * scale
+        })
+      )
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+  }, [])
 
   const reset = (): void => {
     if (!natural) return
@@ -241,22 +290,18 @@ function ImageCropper({
             setNatural({ w: image.naturalWidth || 1, h: image.naturalHeight || 1 })
           }}
         />
-        <span className="home-editor-crop-hint">拖动调整显示区域</span>
-      </div>
-      <div className="home-editor-crop-tools">
-        <span className="home-editor-crop-label">缩放</span>
-        <Slider
-          min={1}
-          max={4}
-          step={0.01}
-          value={view?.zoom ?? 1}
-          disabled={!natural}
-          onChange={zoomTo}
-          tooltip={{ formatter: (value) => `${Math.round((value ?? 1) * 100)}%` }}
-        />
-        <Button size="small" onClick={reset} disabled={!natural}>
-          重置
-        </Button>
+        <span className="home-editor-crop-hint">拖动平移 · 双指或 Ctrl + 滚轮缩放</span>
+        <button
+          type="button"
+          className="home-editor-crop-reset"
+          title="重置取景"
+          aria-label="重置取景"
+          disabled={!natural || !view}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={reset}
+        >
+          <UndoOutlined />
+        </button>
       </div>
     </div>
   )
@@ -425,42 +470,65 @@ function HomeItemEditor({
           <div className="home-editor-image-head">
             <span className="home-editor-label">图片</span>
             <span className="home-editor-hint">
-              {draftPic ? '拖动图片选择显示区域，保存后按这块区域显示' : '当前使用视频封面'}
+              {draftPic
+                ? '拖动平移，双指或 Ctrl + 滚轮缩放，保存后按取景框显示'
+                : '当前使用视频封面'}
             </span>
           </div>
 
-          {draftPic ? (
-            <ImageCropper
-              key={`${draftPic}:${ratio}`}
-              src={draftPic}
-              ratio={ratio}
-              initialCrop={crop}
-              onChange={setCrop}
-            />
-          ) : (
-            <div className="home-editor-default-frame" style={{ aspectRatio: String(ratio) }}>
-              <HomePicture item={previewItem} eager />
-            </div>
-          )}
+          <div className="home-editor-image-stage">
+            {draftPic ? (
+              <ImageCropper
+                key={`${draftPic}:${ratio}`}
+                src={draftPic}
+                ratio={ratio}
+                initialCrop={crop}
+                onChange={setCrop}
+              />
+            ) : (
+              <div className="home-editor-default-frame" style={{ aspectRatio: String(ratio) }}>
+                <HomePicture item={previewItem} eager />
+              </div>
+            )}
 
-          <div className="home-editor-image-actions">
-            <Button size="small" onClick={() => selectPic('')} disabled={!draftPic}>
-              使用视频封面
-            </Button>
-            <Button size="small" icon={<UploadOutlined />} onClick={() => void pickLocal()}>
-              本地上传
-            </Button>
-            <Button
-              size="small"
-              icon={<LinkOutlined />}
-              onClick={() => setUrlOpen((value) => !value)}
-            >
-              图片地址
-            </Button>
+            {/* 浮在图片右下角：换封面 / 上传 / 地址，不额外占一行 */}
+            <div className="home-editor-image-actions">
+              <Tooltip title="使用视频封面">
+                <button
+                  type="button"
+                  className="home-editor-image-action"
+                  aria-label="使用视频封面"
+                  disabled={!draftPic}
+                  onClick={() => selectPic('')}
+                >
+                  <PictureOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="本地上传">
+                <button
+                  type="button"
+                  className="home-editor-image-action"
+                  aria-label="本地上传"
+                  onClick={() => void pickLocal()}
+                >
+                  <UploadOutlined />
+                </button>
+              </Tooltip>
+              <Tooltip title="图片地址">
+                <button
+                  type="button"
+                  className="home-editor-image-action"
+                  aria-label="图片地址"
+                  onClick={() => setUrlOpen((value) => !value)}
+                >
+                  <LinkOutlined />
+                </button>
+              </Tooltip>
+            </div>
           </div>
 
           {urlOpen && (
-            <div className="home-editor-url">
+            <Space.Compact block>
               <Input
                 autoFocus
                 value={url}
@@ -468,15 +536,21 @@ function HomeItemEditor({
                 onChange={(event) => setUrl(event.target.value)}
                 onPressEnter={applyUrl}
               />
-              <Button size="small" onClick={applyUrl}>
-                应用
-              </Button>
-            </div>
+              <Button
+                icon={<CheckOutlined />}
+                aria-label="应用地址"
+                title="应用地址"
+                onClick={applyUrl}
+              />
+            </Space.Compact>
           )}
 
           {covers.length > 0 && (
             <div className="home-editor-covers">
               <span className="home-editor-covers-label">换来源封面</span>
+              <span className="home-editor-covers-hint">
+                选一张来源封面作为海报，选好后在上方取景框里拖动、缩放调整显示区域
+              </span>
               <div className="home-editor-covers-list">
                 {covers.map((cover) => (
                   <button
@@ -522,7 +596,19 @@ function HomeItemEditor({
   )
 }
 
-/** 一行条目：缩略图 + 标题 / 状态 + 排序、隐藏、编辑、移除 */
+type DragEdge = 'before' | 'after'
+
+/** 拖动排序：整行可拖，落点按行的上 / 下半区决定插到前面还是后面 */
+interface RowDrag {
+  dragging: boolean
+  edge: DragEdge | null
+  onStart: () => void
+  onOver: (edge: DragEdge) => void
+  onDrop: (edge: DragEdge) => void
+  onEnd: () => void
+}
+
+/** 一行条目：缩略图 + 标题 / 状态 + 拖动或按钮排序、隐藏、编辑、移除 */
 function HomeItemRow({
   item,
   ratio,
@@ -532,7 +618,8 @@ function HomeItemRow({
   onMove,
   onEdit,
   onToggleHidden,
-  onRemove
+  onRemove,
+  drag
 }: {
   item: HomeItemView
   ratio: number
@@ -543,9 +630,45 @@ function HomeItemRow({
   onEdit: () => void
   onToggleHidden: () => void
   onRemove: () => void
+  drag?: RowDrag
 }): React.JSX.Element {
+  /** 落点：指针在行的上半区就插到它前面，下半区插到后面 */
+  const edgeFromPointer = (event: React.DragEvent<HTMLDivElement>): DragEdge => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+  }
+  const classes = ['home-config-row']
+  if (item.hidden) classes.push('is-hidden')
+  if (drag?.dragging) classes.push('is-dragging')
+  if (drag?.edge) classes.push(`is-drop-${drag.edge}`)
   return (
-    <div className={`home-config-row${item.hidden ? ' is-hidden' : ''}`}>
+    <div
+      className={classes.join(' ')}
+      draggable={Boolean(drag)}
+      onDragStart={(event) => {
+        if (!drag) return
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', String(item.videoId))
+        drag.onStart()
+      }}
+      onDragOver={(event) => {
+        if (!drag) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        drag.onOver(edgeFromPointer(event))
+      }}
+      onDrop={(event) => {
+        if (!drag) return
+        event.preventDefault()
+        drag.onDrop(edgeFromPointer(event))
+      }}
+      onDragEnd={() => drag?.onEnd()}
+    >
+      {drag && (
+        <span className="home-config-grip" aria-hidden="true">
+          <HolderOutlined />
+        </span>
+      )}
       <div
         className={`home-thumb${ratio > 1 ? ' home-thumb--wide' : ''}`}
         style={{ aspectRatio: String(ratio) }}
@@ -635,6 +758,9 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
     ratio: number
     item: HomeItemView
   } | null>(null)
+  /** 拖动排序的源行与落点：海报和分类推荐共用，同一时间只会有一个拖动 */
+  const [dragId, setDragId] = useState<number | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ id: number; edge: DragEdge } | null>(null)
 
   const load = useCallback(async (silent = false): Promise<void> => {
     if (!silent) setLoading(true)
@@ -680,9 +806,55 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   const posters = feed?.posters ?? []
   const sections = feed?.sections ?? []
+  const posterIds = posters.map((item) => item.videoId)
   const visibleSections = sections.filter(
     (section) => section.visible && section.categoryVisible
   ).length
+
+  const clearDrag = (): void => {
+    setDragId(null)
+    setDropTarget(null)
+  }
+
+  /** 把拖动行插到目标行的前 / 后，再按新顺序提交 */
+  const dropInto = (
+    ids: number[],
+    targetId: number,
+    edge: DragEdge,
+    commit: (next: number[]) => void
+  ): void => {
+    const sourceId = dragId
+    clearDrag()
+    if (sourceId === null || sourceId === targetId) return
+    const from = ids.indexOf(sourceId)
+    const target = ids.indexOf(targetId)
+    if (from < 0 || target < 0) return
+    let to = target + (edge === 'after' ? 1 : 0)
+    if (from < to) to -= 1
+    if (to === from) return
+    const next = [...ids]
+    next.splice(from, 1)
+    next.splice(to, 0, sourceId)
+    commit(next)
+  }
+
+  const rowDrag = (ids: number[], itemId: number, commit: (next: number[]) => void): RowDrag => ({
+    dragging: dragId === itemId,
+    edge: dropTarget?.id === itemId ? dropTarget.edge : null,
+    onStart: () => {
+      setDragId(itemId)
+      setDropTarget(null)
+    },
+    onOver: (edge) => {
+      // 只在本列表内部排序：从别的列表拖过来时不显示落点
+      if (dragId === null || !ids.includes(dragId)) return
+      setDropTarget((prev) =>
+        prev?.id === itemId && prev.edge === edge ? prev : { id: itemId, edge }
+      )
+    },
+    onDrop: (edge) => dropInto(ids, itemId, edge, commit),
+    onEnd: clearDrag
+  })
 
   const movePoster = (videoId: number, delta: number): void => {
     const ids = posters.map((item) => item.videoId)
@@ -737,7 +909,8 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   const posterTab = (
     <div className="home-config">
       <p className="home-config-hint">
-        顺序就是首页叠层的顺序；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在首页，配置仍保留。
+        顺序就是首页叠层的顺序，拖动行或点上 /
+        下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在首页，配置仍保留。
       </p>
       {posters.length === 0 ? (
         <Empty
@@ -763,6 +936,11 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                 )
               }
               onRemove={() => void act(window.api.home.removePoster(item.videoId), '已移除')}
+              drag={rowDrag(
+                posterIds,
+                item.videoId,
+                (next) => void act(window.api.home.reorderPosters(next))
+              )}
             />
           ))}
         </div>
@@ -905,6 +1083,12 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                         '已从首页移除'
                       )
                     }
+                    drag={rowDrag(
+                      section.items.map((entry) => entry.videoId),
+                      item.videoId,
+                      (next) =>
+                        void act(window.api.home.reorderSectionItems(section.categoryId, next))
+                    )}
                   />
                 ))}
               </div>
@@ -979,8 +1163,8 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           activeKey={tab}
           onChange={(key) => setTab(key as 'poster' | 'section')}
           items={[
-            { key: 'poster', label: `海报叠层（${posters.length}）`, children: posterTab },
-            { key: 'section', label: `分类推荐（${sections.length}）`, children: sectionTab }
+            { key: 'poster', label: '海报叠层', children: posterTab },
+            { key: 'section', label: '分类推荐', children: sectionTab }
           ]}
         />
       )}

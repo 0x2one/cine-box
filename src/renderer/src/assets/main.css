@@ -3369,6 +3369,34 @@ button.video-episode:focus-visible {
   opacity: 0.62;
 }
 
+/* 拖动排序：整行可拖，落点用一条主色线标出 */
+.home-config-row[draggable='true'] {
+  cursor: grab;
+}
+
+.home-config-row.is-dragging {
+  opacity: 0.45;
+}
+
+.home-config-row.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.home-config-row.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.home-config-grip {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 12px;
+  cursor: grab;
+}
+
+.home-config-row:hover .home-config-grip {
+  color: var(--text-muted);
+}
+
 .home-thumb {
   position: relative;
   flex: none;
@@ -3621,21 +3649,32 @@ button.video-episode:focus-visible {
   pointer-events: none;
 }
 
-.home-editor-crop-tools {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.home-editor-crop-label {
-  flex: none;
-  color: var(--text-muted);
+/* 重置取景：浮在取景框右上角，不单独占一行 */
+.home-editor-crop-reset {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(8, 12, 18, 0.55);
+  color: #fff;
   font-size: 12px;
+  cursor: default;
+  transition: background-color 120ms ease;
 }
 
-.home-editor-crop-tools .ant-slider {
-  flex: 1;
-  margin: 4px 6px;
+.home-editor-crop-reset:hover:not(:disabled) {
+  background: rgba(8, 12, 18, 0.8);
+}
+
+.home-editor-crop-reset:disabled {
+  background: rgba(8, 12, 18, 0.3);
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .home-editor-default-frame {
@@ -3646,15 +3685,42 @@ button.video-episode:focus-visible {
   background: var(--surface-muted);
 }
 
-.home-editor-image-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+/* 图片右下角的浮动动作：换封面 / 上传 / 地址 */
+.home-editor-image-stage {
+  position: relative;
 }
 
-.home-editor-url {
+.home-editor-image-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
   display: flex;
-  gap: 8px;
+  gap: 6px;
+}
+
+.home-editor-image-action {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(8, 12, 18, 0.55);
+  color: #fff;
+  font-size: 12.5px;
+  cursor: default;
+  transition: background-color 120ms ease;
+}
+
+.home-editor-image-action:hover:not(:disabled) {
+  background: rgba(8, 12, 18, 0.8);
+}
+
+.home-editor-image-action:disabled {
+  background: rgba(8, 12, 18, 0.28);
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .home-editor-covers {
@@ -3666,6 +3732,12 @@ button.video-episode:focus-visible {
 .home-editor-covers-label {
   color: var(--text-faint);
   font-size: 11.5px;
+}
+
+.home-editor-covers-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
 }
 
 .home-editor-covers-list {
