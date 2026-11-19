@@ -4,7 +4,7 @@
 export type HomeRule = 'manual' | 'latest'
 
 /** 默认的「TOP N」条数 */
-export const HOME_DEFAULT_TOP_N = 12
+export const HOME_DEFAULT_TOP_N = 18
 /** TOP N 的上下限：上限是缓存库单次查询能取到的条数 */
 export const HOME_MIN_TOP_N = 1
 export const HOME_MAX_TOP_N = 50

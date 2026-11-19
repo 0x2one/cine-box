@@ -25,9 +25,14 @@ const EMPTY_CROP: HomeCrop = { x: 0, y: 0, w: 1, h: 1 }
 
 interface StoreFile {
   version: 1
+  /** 写入时生效的「TOP 默认条数」，用来识别旧默认值并迁移 */
+  topDefault?: number
   posters?: unknown
   sections?: unknown
 }
+
+/** 早先的默认条数：老配置里没记 topDefault，按这个值判断要不要迁移 */
+const LEGACY_TOP_N = 12
 
 export interface HomeStore {
   init: () => Promise<void>
@@ -159,6 +164,7 @@ export function createHomeStore(directory: string): HomeStore {
   function persist(): void {
     const payload: StoreFile = {
       version: 1,
+      topDefault: HOME_DEFAULT_TOP_N,
       posters: config.posters,
       sections: config.sections
     }
@@ -172,6 +178,10 @@ export function createHomeStore(directory: string): HomeStore {
 
   function parseConfig(raw: string): HomeConfig {
     const data = JSON.parse(raw) as StoreFile
+    // 文件里记着写入时的默认条数（老文件没有这个字段，那会儿是 12）：
+    // 和当前默认值不一样，就把还停在那档的 section 一起抬到新默认值
+    const fileDefault = typeof data?.topDefault === 'number' ? data.topDefault : LEGACY_TOP_N
+    const migrateTopN = fileDefault !== HOME_DEFAULT_TOP_N
     const posters: HomePosterItem[] = []
     const seenPosters = new Set<number>()
     for (const entry of Array.isArray(data?.posters) ? data.posters : []) {
@@ -213,7 +223,11 @@ export function createHomeStore(directory: string): HomeStore {
         visible: record.visible !== false,
         title: typeof record.title === 'string' ? truncate(record.title, 60) : '',
         rule,
-        topN: clampTopN(record.topN),
+        // 旧文件里还停在老默认值的，跟着新默认值走；用户自己填的其它值不动
+        topN:
+          migrateTopN && clampTopN(record.topN) === fileDefault
+            ? HOME_DEFAULT_TOP_N
+            : clampTopN(record.topN),
         // 自定义列表有内容才算「编辑过」，空列表切回来要能继续用 TOP 自动填充。
         // 老配置没有这个字段时，按「自定义规则下有条目」推断。
         customized: items.length > 0 && (record.customized === true || rule === 'manual'),
