@@ -21,6 +21,7 @@ import {
   CheckOutlined,
   DeleteOutlined,
   EditOutlined,
+  ExclamationCircleOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   HolderOutlined,
@@ -36,6 +37,12 @@ import HomePicture from '../components/HomePicture'
 const HERO_RATIO = 2.34
 /** 分类轨道的封面比例，和首页卡片一致 */
 const CARD_RATIO = 2 / 3
+
+/** 两个 tab 的说明：放在标题行右侧，超长省略，悬停看全文 */
+const POSTER_HINT =
+  '顺序就是首页叠层的顺序，拖动行或点上 / 下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在首页，配置仍保留。'
+const SECTION_HINT =
+  '每个一级分类对应首页上的一条轨道。手动推荐用「视频」页的「推荐」按钮加片；最新 TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
 
 const HOME_ERRORS: Record<string, string> = {
   NOT_FOUND: '条目已不存在，刷新后再试',
@@ -810,6 +817,8 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   const visibleSections = sections.filter(
     (section) => section.visible && section.categoryVisible
   ).length
+  /** 标题行右侧的说明跟着当前 tab 走 */
+  const hint = tab === 'poster' ? POSTER_HINT : SECTION_HINT
 
   const clearDrag = (): void => {
     setDragId(null)
@@ -908,10 +917,6 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   const posterTab = (
     <div className="home-config">
-      <p className="home-config-hint">
-        顺序就是首页叠层的顺序，拖动行或点上 /
-        下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在首页，配置仍保留。
-      </p>
       {posters.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -950,10 +955,6 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   const sectionTab = (
     <div className="home-config">
-      <p className="home-config-hint">
-        每个一级分类对应首页上的一条轨道。手动推荐用「视频」页的「推荐」按钮加片；最新 TOP
-        按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。
-      </p>
       {sections.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -1137,6 +1138,12 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           <span className="sites-count">
             海报 {posters.length} 张 · 分类 {visibleSections}/{sections.length} 个
           </span>
+          <Tooltip title={<div style={{ maxWidth: 360 }}>{hint}</div>} placement="bottomLeft">
+            <span className="home-config-tip" tabIndex={0}>
+              <ExclamationCircleOutlined className="home-config-tip-icon" />
+              <span className="home-config-tip-text">{hint}</span>
+            </span>
+          </Tooltip>
         </p>
         <div className="settings-panel-actions">
           <Tooltip title="重新读取首页配置">

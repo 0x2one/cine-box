@@ -3335,11 +3335,29 @@ button.video-episode:focus-visible {
   padding-bottom: 8px;
 }
 
-.home-config-hint {
-  margin: 14px 0 12px;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  line-height: 1.7;
+/* 标题行右侧的说明：跟着 tab 切换，超长省略，悬停看全文 */
+.home-config-tip {
+  display: inline-flex;
+  max-width: 400px;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+  vertical-align: -2px;
+}
+
+.home-config-tip-icon {
+  flex: none;
+  font-size: 12px;
+}
+
+.home-config-tip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-config-loading {
