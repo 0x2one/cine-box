@@ -1067,8 +1067,8 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   /**
    * 规则切换：
-   * - TOP → 自定义：只有「从没编辑过自定义列表」时才把当前 TOP 列表落成人工列表；
-   *   编辑过（改信息 / 移除 / 排序 / 清空）就原样保留，不再被 TOP 覆盖。
+   * - TOP → 自定义：自定义列表还是空的（没建过 / 被清空），就把当前 TOP 列表落成人工列表；
+   *   列表里有内容就原样保留，不再被 TOP 覆盖。
    * - 自定义 → TOP：TOP 自己按设置的条数算，自定义列表留着，切回来还在。
    */
   const changeRule = async (section: HomeSectionView, rule: HomeRule): Promise<void> => {
