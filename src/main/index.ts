@@ -6,11 +6,14 @@ import {
   ipcMain,
   nativeImage,
   Menu,
+  net,
+  protocol,
   Tray,
   globalShortcut,
   screen
 } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createAppSettingsStore, DEFAULT_SHOW_SHORTCUT } from './app-settings'
@@ -25,6 +28,9 @@ import {
 import { createCollectLogStore } from './collect-log-store'
 import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
+import { buildHomeFeed } from './home-feed'
+import { createHomeStore } from './home-store'
+import type { HomeFeedResult, HomeItemPatch, HomeSectionPatch } from './home-types'
 import { fetchSiteCategories } from './site-categories'
 import { clampPageSize, probePageSize } from './video-collect-probe'
 import {
@@ -47,6 +53,11 @@ import type {
 } from './video-types'
 
 const gotTheLock = app.requestSingleInstanceLock()
+
+// 首页自定义图片走自己的协议，避免把图片整段塞进配置 JSON 或放开 file://
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'cine-img', privileges: { standard: true, secure: true, supportFetchAPI: true } }
+])
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -94,6 +105,8 @@ const scheduler = createCollectScheduler({
   collector,
   logs: collectLogs
 })
+// 首页配置（海报叠层 + 分类推荐）与自定义图片：userData/Data/Home
+const homeStore = createHomeStore(join(app.getPath('userData'), 'Data', 'Home'))
 /** 缓存库初始化失败时不影响应用启动，视频相关 IPC 返回 CACHE_UNAVAILABLE */
 let videoCacheReady = false
 /** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
@@ -126,6 +139,24 @@ async function reconcileVideoCache(): Promise<void> {
 
 function cacheUnavailable(): { ok: false; error: string } {
   return { ok: false, error: 'CACHE_UNAVAILABLE' }
+}
+
+/** 首页数据：配置 + 分类绑定 + 视频库解析成一份可以直接渲染的 feed */
+function readHomeFeed(): HomeFeedResult {
+  try {
+    const feed = buildHomeFeed({
+      config: homeStore.get(),
+      categories: categoryStore.list(),
+      bindingsFor: (categoryId) => bindingStore.forCategory(categoryId),
+      videosByIds: (videoIds) => videoStore.listVideosByIds(videoIds),
+      listVideos: (query, filters) => videoStore.listVideos(query, filters),
+      cacheReady: videoCacheReady
+    })
+    return { ok: true, feed }
+  } catch (error) {
+    console.error('读取首页数据失败', error)
+    return { ok: false, error: 'DB' }
+  }
 }
 
 /* ── 主窗口显示 / 隐藏 ── */
@@ -454,13 +485,32 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
     byVideo.set(source.videoId, paths)
   }
 
+  // 首页状态：已加进海报 / 已推荐到哪些分类，视频列表直接显示出来，不用再点开看
+  const homeConfig = homeStore.get()
+  const posterIds = new Set(homeConfig.posters.map((poster) => poster.videoId))
+  const categoryNames = new Map(categoryStore.list().map((category) => [category.id, category.name]))
+  const sectionsByVideo = new Map<number, { categoryId: string; title: string }[]>()
+  for (const section of homeConfig.sections) {
+    const title = section.title || categoryNames.get(section.categoryId) || ''
+    for (const item of section.items) {
+      if (item.removed) continue
+      const list = sectionsByVideo.get(item.videoId) ?? []
+      if (!list.some((entry) => entry.categoryId === section.categoryId)) {
+        list.push({ categoryId: section.categoryId, title })
+      }
+      sectionsByVideo.set(item.videoId, list)
+    }
+  }
+
   return {
     ...result,
     items: result.items.map((item) => ({
       ...item,
       localCategoryPaths: (byVideo.get(item.id) ?? []).sort((left, right) =>
         left.localeCompare(right, 'zh-Hans-CN')
-      )
+      ),
+      inPoster: posterIds.has(item.id),
+      homeSections: sectionsByVideo.get(item.id) ?? []
     }))
   }
 })
@@ -776,6 +826,63 @@ ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: str
 
 ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => bindingStore.unbind(items))
 
+/* ── IPC：首页配置（海报叠层 + 分类推荐） ── */
+
+ipcMain.handle('home:get', () => readHomeFeed())
+
+ipcMain.handle('home:posters:add', (_event, videoId: number) => homeStore.addPoster(Number(videoId)))
+
+ipcMain.handle('home:posters:update', (_event, videoId: number, patch: HomeItemPatch) =>
+  homeStore.updatePoster(Number(videoId), patch ?? {})
+)
+
+ipcMain.handle('home:posters:remove', (_event, videoId: number) =>
+  homeStore.removePoster(Number(videoId))
+)
+
+ipcMain.handle('home:posters:reorder', (_event, videoIds: number[]) =>
+  homeStore.reorderPosters(Array.isArray(videoIds) ? videoIds : [])
+)
+
+ipcMain.handle('home:sections:save', (_event, categoryId: string, patch: HomeSectionPatch) =>
+  homeStore.saveSection(String(categoryId), patch ?? {})
+)
+
+ipcMain.handle('home:sections:addItem', (_event, categoryId: string, videoId: number) =>
+  homeStore.addSectionItem(String(categoryId), Number(videoId))
+)
+
+ipcMain.handle(
+  'home:sections:updateItem',
+  (_event, categoryId: string, videoId: number, patch: HomeItemPatch) =>
+    homeStore.updateSectionItem(String(categoryId), Number(videoId), patch ?? {})
+)
+
+ipcMain.handle('home:sections:removeItem', (_event, categoryId: string, videoId: number) =>
+  homeStore.removeSectionItem(String(categoryId), Number(videoId))
+)
+
+ipcMain.handle('home:sections:restoreItem', (_event, categoryId: string, videoId: number) =>
+  homeStore.restoreSectionItem(String(categoryId), Number(videoId))
+)
+
+ipcMain.handle('home:sections:reorder', (_event, categoryId: string, videoIds: number[]) =>
+  homeStore.reorderSectionItems(String(categoryId), Array.isArray(videoIds) ? videoIds : [])
+)
+
+ipcMain.handle('home:image:pick', async () => {
+  const options: Electron.OpenDialogOptions = {
+    title: '选择首页图片',
+    properties: ['openFile'],
+    filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'] }]
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
+  return homeStore.importImage(result.filePaths[0])
+})
+
 /* ── IPC：备份与恢复 ── */
 
 ipcMain.handle('backup:list', () => backupStore.list())
@@ -894,6 +1001,20 @@ if (!gotTheLock) {
     await bindingStore.init().catch(() => {})
     await scheduleStore.init().catch((error) => console.error('采集计划初始化失败', error))
     await backupStore.init().catch(() => {})
+    await homeStore.init().catch((error) => console.error('首页配置初始化失败', error))
+    // 自定义图片：cine-img://home/<文件名> → userData/Data/Home/images/<文件名>
+    protocol.handle('cine-img', (request) => {
+      try {
+        const url = new URL(request.url)
+        if (url.hostname !== 'home') return new Response('Not found', { status: 404 })
+        const file = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+        const path = homeStore.imageFile(file)
+        if (!path) return new Response('Not found', { status: 404 })
+        return net.fetch(pathToFileURL(path).toString())
+      } catch {
+        return new Response('Bad request', { status: 400 })
+      }
+    })
     try {
       await videoStore.init()
       videoCacheReady = true

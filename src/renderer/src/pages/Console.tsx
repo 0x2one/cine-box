@@ -8,6 +8,7 @@ import {
   DatabaseOutlined,
   FileTextOutlined,
   GlobalOutlined,
+  HomeOutlined,
   SaveOutlined,
   VideoCameraOutlined
 } from '@ant-design/icons'
@@ -15,6 +16,7 @@ import BackupPanel from './Backup'
 import CapacityPanel from './Capacity'
 import CategoriesPanel from './Categories'
 import CollectPanel from './Collect'
+import HomeSettingsPanel from './HomeSettings'
 import LogsPanel from './Logs'
 import OverviewPanel from './Overview'
 import ProgressPanel from './Progress'
@@ -24,6 +26,7 @@ import type { ConsoleSection } from '../types'
 
 const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOutlined }[] = [
   { key: 'overview', label: '概览', icon: DashboardOutlined },
+  { key: 'home', label: '首页', icon: HomeOutlined },
   { key: 'sites', label: '站点', icon: GlobalOutlined },
   { key: 'categories', label: '分类', icon: ApartmentOutlined },
   { key: 'collect', label: '采集', icon: CloudDownloadOutlined },
@@ -36,6 +39,7 @@ const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOut
 
 const SECTION_META: Record<ConsoleSection, { title: string; desc: string }> = {
   overview: { title: '概览', desc: '运行状态与统计' },
+  home: { title: '首页', desc: '海报叠层与分类推荐' },
   sites: { title: '站点', desc: '管理采集站点' },
   categories: { title: '视频分类', desc: '层级管理本地分类' },
   collect: { title: '采集', desc: '手动采集与定时计划' },
@@ -70,6 +74,8 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
     switch (section) {
       case 'overview':
         return <OverviewPanel title={meta.title} desc={meta.desc} onNavigate={goSection} />
+      case 'home':
+        return <HomeSettingsPanel title={meta.title} desc={meta.desc} />
       case 'sites':
         return (
           <SitesPanel

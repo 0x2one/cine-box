@@ -599,6 +599,10 @@ interface VideoListItem {
   localCategoryPaths: string[]
   hidden: boolean
   edited: boolean
+  /** 已在首页海报叠层里 */
+  inPoster?: boolean
+  /** 已在哪些首页分类里推荐 */
+  homeSections?: { categoryId: string; title: string }[]
 }
 
 interface VideoListResult {
@@ -752,6 +756,127 @@ interface VideosApi {
   onLogAppend: (callback: (log: VideoCollectLog) => void) => () => void
 }
 
+/** 首页分类推荐规则：manual 用视频列表里「推荐」进来的视频，latest 按更新时间取前 N 部 */
+type HomeRule = 'manual' | 'latest'
+
+/** 图片裁剪：原图中要显示的区域，按原图宽高归一化到 0–1 */
+interface HomeCrop {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+/** 条目的展示覆盖字段：空串表示沿用视频库里的值 */
+interface HomeItemFields {
+  title: string
+  note: string
+  actors: string
+  intro: string
+  /** 自定义图片：http(s) 或 cine-img://home/<文件名>，空串表示用视频封面 */
+  pic: string
+  crop: HomeCrop
+  hidden: boolean
+}
+
+/** 条目可改字段的补丁，未传的字段保持原样 */
+type HomeItemPatch = Partial<HomeItemFields>
+
+interface HomeSectionPatch {
+  visible?: boolean
+  title?: string
+  rule?: HomeRule
+  topN?: number
+}
+
+/** 首页条目 + 视频库解析结果 */
+interface HomeItemView {
+  videoId: number
+  title: string
+  note: string
+  actors: string
+  intro: string
+  pic: string
+  crop: HomeCrop
+  /** 是否自定义了图片（决定要不要按 crop 裁剪） */
+  customPic: boolean
+  hidden: boolean
+  /** 是否由配置指定；false 表示 latest 自动带出来的 */
+  pinned: boolean
+  /** 视频在「视频」页被隐藏，展示端不出现 */
+  videoHidden: boolean
+  /** 视频已不在缓存库里 */
+  missing: boolean
+  videoName: string
+  videoPic: string
+  videoNote: string
+  videoActors: string
+  videoIntro: string
+  latestTime: string
+  vodClass: string
+}
+
+interface HomeSectionView {
+  categoryId: string
+  /** 分类原名 */
+  name: string
+  /** 首页显示名 */
+  title: string
+  visible: boolean
+  categoryVisible: boolean
+  rule: HomeRule
+  topN: number
+  /** latest：分类里的视频总数；manual：推荐条数 */
+  total: number
+  items: HomeItemView[]
+  /** latest 规则下被移除的视频，可以恢复 */
+  removedItems: HomeItemView[]
+}
+
+interface HomeFeed {
+  posters: HomeItemView[]
+  sections: HomeSectionView[]
+}
+
+interface HomeFeedResult {
+  ok: boolean
+  error?: string
+  feed?: HomeFeed
+}
+
+interface HomeActionResult {
+  ok: boolean
+  /** NOT_FOUND / DUPLICATE / INVALID_INPUT / FULL / CACHE_UNAVAILABLE */
+  error?: string
+}
+
+interface HomeImageResult {
+  ok: boolean
+  canceled?: boolean
+  error?: string
+  /** cine-img://home/<文件名> */
+  url?: string
+}
+
+interface HomeApi {
+  get: () => Promise<HomeFeedResult>
+  addPoster: (videoId: number) => Promise<HomeActionResult>
+  updatePoster: (videoId: number, patch: HomeItemPatch) => Promise<HomeActionResult>
+  removePoster: (videoId: number) => Promise<HomeActionResult>
+  reorderPosters: (videoIds: number[]) => Promise<HomeActionResult>
+  saveSection: (categoryId: string, patch: HomeSectionPatch) => Promise<HomeActionResult>
+  addSectionItem: (categoryId: string, videoId: number) => Promise<HomeActionResult>
+  updateSectionItem: (
+    categoryId: string,
+    videoId: number,
+    patch: HomeItemPatch
+  ) => Promise<HomeActionResult>
+  removeSectionItem: (categoryId: string, videoId: number) => Promise<HomeActionResult>
+  restoreSectionItem: (categoryId: string, videoId: number) => Promise<HomeActionResult>
+  reorderSectionItems: (categoryId: string, videoIds: number[]) => Promise<HomeActionResult>
+  pickImage: () => Promise<HomeImageResult>
+}
+
 type UpdaterState =
   'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
 
@@ -785,6 +910,7 @@ interface Api {
   categories: CategoriesApi
   bindings: BindingsApi
   backup: BackupApi
+  home: HomeApi
   videos: VideosApi
   cache: CacheApi
   updater: UpdaterApi

@@ -3,6 +3,7 @@ import {
   App,
   Button,
   Drawer,
+  Empty,
   Form,
   Input,
   List,
@@ -18,8 +19,10 @@ import {
   EyeOutlined,
   EditOutlined,
   FileSearchOutlined,
+  PictureOutlined,
   ReloadOutlined,
-  RightOutlined
+  RightOutlined,
+  StarOutlined
 } from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
 
@@ -191,6 +194,10 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
   const [draftPic, setDraftPic] = useState('')
   const [draftHidden, setDraftHidden] = useState(false)
   const [saving, setSaving] = useState(false)
+  /** 首页一级分类：推荐时选目标 */
+  const [homeCategories, setHomeCategories] = useState<VideoCategory[]>([])
+  const [recommendTarget, setRecommendTarget] = useState<VideoListItem | null>(null)
+  const [recommending, setRecommending] = useState<string>('')
   /** 快速翻页时只认最后一次请求的结果 */
   const requestId = useRef(0)
 
@@ -202,6 +209,12 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
       .then(setSites)
       .catch(() => {
         // 站点名缺失只影响展示，列表本身照常
+      })
+    window.api.categories
+      .list()
+      .then((categories) => setHomeCategories(categories.filter((item) => !item.parentId)))
+      .catch(() => {
+        // 分类读不到时「推荐」弹窗提示去建分类，不影响列表
       })
   }, [])
 
@@ -392,6 +405,47 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     }
   }
 
+  /** 加进首页的海报叠层；已经在里面的按钮是禁用的 */
+  const addToPoster = async (item: VideoListItem): Promise<void> => {
+    try {
+      const result = await window.api.home.addPoster(item.id)
+      if (!result.ok) {
+        message.error(
+          result.error === 'DUPLICATE'
+            ? '已经在首页海报里了'
+            : result.error === 'FULL'
+              ? '海报数量已达上限'
+              : '添加失败'
+        )
+        return
+      }
+      message.success('已添加到首页海报')
+      await loadPage()
+    } catch {
+      message.error('添加失败')
+    }
+  }
+
+  /** 推荐到某个一级分类：manual 规则直接进列表，latest 规则会排在最前面 */
+  const recommendTo = async (categoryId: string, categoryName: string): Promise<void> => {
+    if (!recommendTarget) return
+    setRecommending(categoryId)
+    try {
+      const result = await window.api.home.addSectionItem(categoryId, recommendTarget.id)
+      if (!result.ok) {
+        message.error('推荐失败')
+        return
+      }
+      message.success(`已推荐到「${categoryName}」`)
+      setRecommendTarget(null)
+      await loadPage()
+    } catch {
+      message.error('推荐失败')
+    } finally {
+      setRecommending('')
+    }
+  }
+
   /** 可选的封面：来自该视频的所有来源，同一张图只留一个；同名站点带上来源短号区分 */
   const coverOptions = useMemo(() => {
     const seen = new Set<string>()
@@ -524,6 +578,27 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               </div>
             }
             actions={[
+              <Tooltip key="poster" title={item.inPoster ? '已在首页海报中' : '添加到首页海报'}>
+                <Button
+                  className="video-action"
+                  type="text"
+                  size="small"
+                  icon={<PictureOutlined />}
+                  aria-label="添加到海报"
+                  disabled={item.inPoster}
+                  onClick={() => void addToPoster(item)}
+                />
+              </Tooltip>,
+              <Tooltip key="recommend" title="推荐到首页分类">
+                <Button
+                  className="video-action"
+                  type="text"
+                  size="small"
+                  icon={<StarOutlined />}
+                  aria-label="推荐"
+                  onClick={() => setRecommendTarget(item)}
+                />
+              </Tooltip>,
               <Tooltip key="detail" title="查看详情">
                 <Button
                   className="video-action"
@@ -569,6 +644,18 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                     {item.name}
                   </button>
                   {item.note && <span className="video-title-note">{item.note}</span>}
+                  {item.inPoster && <Tag color="blue">海报</Tag>}
+                  {item.homeSections && item.homeSections.length > 0 && (
+                    <Tag
+                      color="gold"
+                      title={`已推荐到：${item.homeSections.map((section) => section.title).join('、')}`}
+                    >
+                      推荐 ·{' '}
+                      {item.homeSections.length > 1
+                        ? `${item.homeSections.length} 个分类`
+                        : item.homeSections[0].title}
+                    </Tag>
+                  )}
                   {item.hidden && <Tag color="default">已隐藏</Tag>}
                   {item.edited && <Tag color="processing">已编辑</Tag>}
                 </div>
@@ -712,6 +799,55 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
             </div>
           </Form>
         </Spin>
+      </Modal>
+
+      <Modal
+        title="推荐到首页"
+        open={!!recommendTarget}
+        width={520}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => setRecommendTarget(null)}
+      >
+        {recommendTarget && (
+          <div className="video-recommend">
+            <p className="video-recommend-hint">
+              选一个一级分类。推荐后可以在 控制台 › 首页
+              调整顺序、隐藏、换图或移除；「最新 TOP」规则的分类会把推荐的片排在最前面。
+            </p>
+            {homeCategories.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="还没有一级分类，先去控制台「分类」创建"
+              />
+            ) : (
+              <div className="video-recommend-list">
+                {homeCategories.map((category) => {
+                  const already = recommendTarget.homeSections?.some(
+                    (section) => section.categoryId === category.id
+                  )
+                  return (
+                    <div className="video-recommend-row" key={category.id}>
+                      <div className="video-recommend-name">
+                        <span>{category.name}</span>
+                        {!category.visible && <Tag color="default">分类已隐藏</Tag>}
+                      </div>
+                      <Button
+                        size="small"
+                        type={already ? 'default' : 'primary'}
+                        disabled={already}
+                        loading={recommending === category.id}
+                        onClick={() => void recommendTo(category.id, category.name)}
+                      >
+                        {already ? '已推荐' : '推荐'}
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <Drawer

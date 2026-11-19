@@ -1,0 +1,535 @@
+/* ── 首页：搜索 + 海报叠层 + 分类轨道 ──
+   样式按 docs/首页原型.html 落地，全部收在 .home-view 下，避免和设置页 / antd 撞名。 */
+
+.home-view {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px 32px 72px;
+}
+
+/* 搜索 */
+
+.home-search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 22px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border-strong);
+  transition: border-color 0.18s ease;
+}
+
+.home-search:focus-within {
+  border-bottom-color: var(--accent);
+}
+
+.home-search-icon {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.home-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+}
+
+.home-search input::placeholder {
+  color: var(--text-faint);
+}
+
+.home-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.home-search-hint {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.home-search-clear {
+  display: grid;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.home-search-clear:hover {
+  color: var(--text);
+}
+
+/* 海报叠层：宽图铺满整张卡，右侧露出后面几张的竖条 */
+
+.home-hero {
+  --stack: 72px;
+  position: relative;
+  height: 420px;
+  margin-bottom: 34px;
+}
+
+.home-deck {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+.home-card {
+  position: absolute;
+  top: 0;
+  left: var(--left);
+  width: calc(100% - var(--stack));
+  height: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--accent) 12%, var(--surface-muted)),
+    var(--surface-muted) 72%
+  );
+  box-shadow:
+    0 6px 18px rgba(8, 12, 18, 0.16),
+    0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.home-card[data-slot='0'] {
+  box-shadow:
+    0 24px 54px rgba(8, 12, 18, 0.3),
+    0 2px 8px rgba(8, 12, 18, 0.16),
+    0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.home-card:not([data-slot='0']) {
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* 鼠标停在哪一条上，那一条就亮一点，提示可以翻 */
+.home-card::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: #05080c;
+  content: '';
+  opacity: var(--dim);
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.home-card:not([data-slot='0']):hover::after,
+.home-card:not([data-slot='0']):focus-visible::after {
+  opacity: calc(var(--dim) * 0.5);
+}
+
+/* 压在最前面那张的文字压暗层：底部压暗给文字让位，左上只留一点点 */
+.home-card[data-slot='0']::before {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background:
+    linear-gradient(
+      0deg,
+      rgba(6, 10, 16, 0.92) 0%,
+      rgba(6, 10, 16, 0.72) 24%,
+      rgba(6, 10, 16, 0.3) 46%,
+      rgba(6, 10, 16, 0) 68%
+    ),
+    linear-gradient(90deg, rgba(6, 10, 16, 0.5) 0%, rgba(6, 10, 16, 0) 50%);
+  content: '';
+  pointer-events: none;
+}
+
+/* 图片：默认 object-fit cover；自定义图片按 crop 定位，由 HomePicture 写内联样式 */
+.home-picture {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.home-picture img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 50%;
+}
+
+.home-picture img.is-crop {
+  inset: auto;
+  max-width: none;
+  object-fit: fill;
+}
+
+.home-picture-letter {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: color-mix(in srgb, var(--text) 34%, transparent);
+  font-family: var(--font-display);
+  font-size: 44px;
+  transform: translate(-50%, -50%);
+}
+
+/* 文字浮在前面那张海报上；点不到底下的卡，按钮单独放行 */
+.home-hero-info {
+  position: absolute;
+  inset: 0 var(--stack) 0 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 40px 44px;
+  color: #fff;
+  pointer-events: none;
+  transition:
+    opacity 0.26s ease,
+    transform 0.26s ease;
+}
+
+.home-hero-info.is-swapping {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.home-hero-meta {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-hero-title {
+  display: -webkit-box;
+  overflow: hidden;
+  max-width: 660px;
+  margin: 10px 0 0;
+  font-family: var(--font-display);
+  font-size: 46px;
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(4, 8, 14, 0.35);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.home-hero-actors {
+  overflow: hidden;
+  max-width: 560px;
+  margin: 14px 0 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-hero-actors span {
+  margin-right: 6px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.home-hero-intro {
+  display: -webkit-box;
+  overflow: hidden;
+  max-width: 560px;
+  margin: 14px 0 0;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 14.5px;
+  line-height: 1.78;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.home-hero-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 26px;
+}
+
+.home-pager {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-left: auto;
+  pointer-events: auto;
+}
+
+.home-pager-count {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-pager-count b {
+  color: #fff;
+  font-weight: 600;
+}
+
+.home-pager-btn {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.home-pager-btn:hover {
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.home-pager-btn:active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 搜索结果状态行 */
+
+.home-result-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.home-result-line em {
+  color: var(--text);
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分类区块 */
+
+.home-section {
+  margin-top: 42px;
+}
+
+.home-section-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.home-section-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.home-section-count {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-section-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.home-rail-btn {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    opacity 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.home-rail-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.home-rail-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.home-rail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 146px;
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  /* 右侧渐隐，被裁掉的半张卡不会硬切；滚到末尾时也自然收口 */
+  mask-image: linear-gradient(to right, #000 calc(100% - 46px), transparent 100%);
+}
+
+.home-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.home-item {
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.home-item-poster {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--accent) 10%, var(--surface-muted)),
+    var(--surface-muted) 72%
+  );
+  box-shadow:
+    0 1px 2px rgba(13, 20, 30, 0.08),
+    0 0 0 1px color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.home-item-poster .home-picture img {
+  transition: transform 0.4s cubic-bezier(0.2, 0.7, 0.25, 1);
+}
+
+.home-item:hover .home-item-poster .home-picture img {
+  transform: scale(1.035);
+}
+
+.home-item-title {
+  overflow: hidden;
+  margin: 9px 0 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-item-note {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-item-sub {
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.78;
+}
+
+/* 空状态 */
+
+.home-empty-state {
+  padding: 64px 0 40px;
+  text-align: center;
+}
+
+.home-empty-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+
+.home-empty-desc {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.home-empty-state .ant-btn {
+  margin-top: 20px;
+}
+
+.home-loading {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+}
+
+@media (max-width: 1080px) {
+  .home-view {
+    padding-inline: 26px;
+  }
+
+  .home-hero {
+    height: 370px;
+  }
+
+  .home-hero-info {
+    padding: 32px;
+  }
+
+  .home-hero-title {
+    font-size: 38px;
+  }
+
+  .home-rail {
+    grid-auto-columns: 132px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-rail {
+    scroll-behavior: auto;
+  }
+
+  .home-hero-info,
+  .home-card::after,
+  .home-item-poster .home-picture img {
+    transition: none;
+  }
+}

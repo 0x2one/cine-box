@@ -114,6 +114,8 @@ export interface VideoCacheStore {
     query: VideoListQuery,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ) => VideoListResult
+  /** 按 id 批量取视频（首页海报 / 推荐条目用，可能不在分类前 100 条里） */
+  listVideosByIds: (videoIds: number[]) => VideoListItem[]
   /** 指定视频各来源的在线分类，列表页据此解析绑定后的本地分类 */
   listSourceCategories: (
     videoIds: number[]
@@ -347,6 +349,52 @@ function rowToDetailSource(row: Record<string, unknown>): DetailSourceRow {
     detailNote: text(row.detail_note),
     detailStale: num(row.detail_stale) !== 0,
     detailError: text(row.detail_error)
+  }
+}
+
+/**
+ * 列表项的统一查询片段：视频库的列表、按 id 批量取（首页推荐）共用，
+ * 保证「人工编辑的覆盖值 + 隐藏 + 已编辑」在两处的口径完全一致。
+ */
+const VIDEO_ITEM_SELECT = `
+  SELECT v.id, v.name,
+         COALESCE(e.pic, v.pic) AS pic,
+         COALESCE(e.note, v.note) AS note,
+         COALESCE(e.intro, v.intro_excerpt) AS intro_excerpt,
+         CASE WHEN e.intro IS NOT NULL THEN 0 ELSE v.intro_truncated END AS intro_truncated,
+         v.latest_ts, v.latest_time, v.source_count,
+         COALESCE(e.vod_actor, v.vod_actor) AS vod_actor,
+         COALESCE(e.vod_class, v.vod_class) AS vod_class,
+         s.site_id, s.source_video_id, s.category_id, s.category_name,
+         COALESCE(e.hidden, 0) AS hidden,
+         CASE WHEN e.note IS NOT NULL OR e.intro IS NOT NULL OR e.vod_actor IS NOT NULL
+                OR e.vod_class IS NOT NULL OR e.pic IS NOT NULL
+              THEN 1 ELSE 0 END AS edited`
+
+const VIDEO_ITEM_FROM = `
+  FROM videos v
+  JOIN video_sources s ON s.id = v.primary_source_id
+  LEFT JOIN video_edits e ON e.video_id = v.id`
+
+function rowToVideoItem(raw: Record<string, unknown>): VideoListItem {
+  return {
+    id: num(raw.id),
+    name: text(raw.name),
+    pic: text(raw.pic),
+    note: text(raw.note),
+    introExcerpt: text(raw.intro_excerpt),
+    introTruncated: num(raw.intro_truncated) !== 0,
+    latestTs: num(raw.latest_ts),
+    latestTime: text(raw.latest_time),
+    sourceCount: num(raw.source_count),
+    vodActor: text(raw.vod_actor),
+    vodClass: text(raw.vod_class),
+    siteId: text(raw.site_id),
+    sourceVideoId: text(raw.source_video_id),
+    categoryId: text(raw.category_id),
+    categoryName: text(raw.category_name),
+    hidden: num(raw.hidden) !== 0,
+    edited: num(raw.edited) !== 0
   }
 }
 
@@ -784,24 +832,10 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     if (visibility === 'shown') where.push('COALESCE(e.hidden, 0) = 0')
 
     const from = `
-      FROM videos v
-      JOIN video_sources s ON s.id = v.primary_source_id
-      LEFT JOIN video_edits e ON e.video_id = v.id
+      ${VIDEO_ITEM_FROM}
       ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}`
     const selectSql = `
-      SELECT v.id, v.name,
-             COALESCE(e.pic, v.pic) AS pic,
-             COALESCE(e.note, v.note) AS note,
-             COALESCE(e.intro, v.intro_excerpt) AS intro_excerpt,
-             CASE WHEN e.intro IS NOT NULL THEN 0 ELSE v.intro_truncated END AS intro_truncated,
-             v.latest_ts, v.latest_time, v.source_count,
-             COALESCE(e.vod_actor, v.vod_actor) AS vod_actor,
-             COALESCE(e.vod_class, v.vod_class) AS vod_class,
-             s.site_id, s.source_video_id, s.category_id, s.category_name,
-             COALESCE(e.hidden, 0) AS hidden,
-             CASE WHEN e.note IS NOT NULL OR e.intro IS NOT NULL OR e.vod_actor IS NOT NULL
-                    OR e.vod_class IS NOT NULL OR e.pic IS NOT NULL
-                  THEN 1 ELSE 0 END AS edited
+      ${VIDEO_ITEM_SELECT}
       ${from}
       ORDER BY v.latest_ts DESC, v.id DESC
       LIMIT ? OFFSET ?`
@@ -821,26 +855,26 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       return { ok: false, items: [], total: 0, page, pageSize, error: 'DB' }
     }
 
-    const items: VideoListItem[] = rows.map((raw) => ({
-      id: num(raw.id),
-      name: text(raw.name),
-      pic: text(raw.pic),
-      note: text(raw.note),
-      introExcerpt: text(raw.intro_excerpt),
-      introTruncated: num(raw.intro_truncated) !== 0,
-      latestTs: num(raw.latest_ts),
-      latestTime: text(raw.latest_time),
-      sourceCount: num(raw.source_count),
-      vodActor: text(raw.vod_actor),
-      vodClass: text(raw.vod_class),
-      siteId: text(raw.site_id),
-      sourceVideoId: text(raw.source_video_id),
-      categoryId: text(raw.category_id),
-      categoryName: text(raw.category_name),
-      hidden: num(raw.hidden) !== 0,
-      edited: num(raw.edited) !== 0
-    }))
+    const items: VideoListItem[] = rows.map(rowToVideoItem)
     return { ok: true, items, total, page, pageSize }
+  }
+
+  /**
+   * 按 id 批量取列表项，顺序不保证（调用方自己按配置排）。
+   * 不存在的 id 直接缺席——首页把它显示成「视频已丢失」，不会整块报错。
+   */
+  function listVideosByIds(videoIds: number[]): VideoListItem[] {
+    const ids = [...new Set(videoIds.filter((id) => Number.isInteger(id) && id > 0))]
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(', ')
+    try {
+      const rows = database()
+        .prepare(`${VIDEO_ITEM_SELECT} ${VIDEO_ITEM_FROM} WHERE v.id IN (${placeholders})`)
+        .all(...ids) as Record<string, unknown>[]
+      return rows.map(rowToVideoItem)
+    } catch {
+      return []
+    }
   }
 
   /** 指定视频各来源的在线分类（一个视频可能来自多个站点、多个分类） */
@@ -1400,6 +1434,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     deleteSources,
     recomputeVideos,
     listVideos,
+    listVideosByIds,
     listSourceCategories,
     updateVideo,
     stats,

@@ -177,6 +177,10 @@ export interface VideoListItem {
   hidden: boolean
   /** 备注 / 简介 / 主演 / 类型 / 封面被手动改过 */
   edited: boolean
+  /** 已在首页海报叠层里（控制台视频列表用，由 IPC 层补齐） */
+  inPoster?: boolean
+  /** 已在哪些首页分类里推荐（控制台视频列表用，由 IPC 层补齐） */
+  homeSections?: { categoryId: string; title: string }[]
 }
 
 export interface VideoListResult {

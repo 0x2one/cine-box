@@ -72,6 +72,35 @@ const api = {
     restore: (source: RestoreSource): Promise<BackupRestoreResult> =>
       ipcRenderer.invoke('backup:restore', source)
   },
+  home: {
+    get: (): Promise<HomeFeedResult> => ipcRenderer.invoke('home:get'),
+    addPoster: (videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:posters:add', videoId),
+    updatePoster: (videoId: number, patch: HomeItemPatch): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:posters:update', videoId, patch),
+    removePoster: (videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:posters:remove', videoId),
+    reorderPosters: (videoIds: number[]): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:posters:reorder', videoIds),
+    saveSection: (categoryId: string, patch: HomeSectionPatch): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:save', categoryId, patch),
+    addSectionItem: (categoryId: string, videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:addItem', categoryId, videoId),
+    updateSectionItem: (
+      categoryId: string,
+      videoId: number,
+      patch: HomeItemPatch
+    ): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:updateItem', categoryId, videoId, patch),
+    removeSectionItem: (categoryId: string, videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:removeItem', categoryId, videoId),
+    restoreSectionItem: (categoryId: string, videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:restoreItem', categoryId, videoId),
+    reorderSectionItems: (categoryId: string, videoIds: number[]): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:reorder', categoryId, videoIds),
+    /** 弹系统文件选择框，把选中的图片复制进配置目录，返回 cine-img:// 地址 */
+    pickImage: (): Promise<HomeImageResult> => ipcRenderer.invoke('home:image:pick')
+  },
   videos: {
     list: (query: VideoListQuery): Promise<VideoListResult> =>
       ipcRenderer.invoke('videos:list', query),

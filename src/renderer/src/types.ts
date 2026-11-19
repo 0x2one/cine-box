@@ -4,6 +4,7 @@ export type AppView = 'home' | 'console' | 'settings' | 'about'
 /** 控制台左侧导航的分区 */
 export type ConsoleSection =
   | 'overview'
+  | 'home'
   | 'sites'
   | 'categories'
   | 'collect'
