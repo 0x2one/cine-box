@@ -5,6 +5,7 @@ import {
   CloseOutlined,
   CompressOutlined,
   MinusOutlined,
+  SearchOutlined,
   SettingOutlined
 } from '@ant-design/icons'
 import logoUrl from '../assets/logo.svg'
@@ -63,6 +64,17 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
           onClick={() => onNavigate('home')}
         >
           推荐
+        </button>
+        {/* 长得像输入框的搜索按钮：点开搜索页，具体交互由搜索页承载 */}
+        <button
+          type="button"
+          className={`titlebar-search${view === 'search' ? ' is-active' : ''}`}
+          aria-current={view === 'search' ? 'page' : undefined}
+          title="搜索视频"
+          onClick={() => onNavigate('search')}
+        >
+          <span className="titlebar-search-text">搜索视频</span>
+          <SearchOutlined />
         </button>
         <button
           type="button"

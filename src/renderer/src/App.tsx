@@ -2,6 +2,7 @@ import { useState } from 'react'
 import TitleBar from './components/TitleBar'
 import BrowseView from './pages/Browse'
 import HomeView from './pages/Home'
+import SearchView from './pages/Search'
 import Settings from './pages/Settings'
 import Console from './pages/Console'
 import AboutPage from './pages/About'
@@ -41,6 +42,7 @@ function App(): React.JSX.Element {
           {view === 'browse' && (
             <BrowseView key={browseEntry} initialCategoryId={browseCategoryId} />
           )}
+          {view === 'search' && <SearchView />}
           {view === 'console' && <Console onBack={() => setView('home')} />}
           {view === 'settings' && <Settings onBack={() => setView('home')} />}
           {view === 'about' && <AboutPage onBack={() => setView('home')} />}
