@@ -110,13 +110,10 @@
   height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
-  animation: page-in 180ms ease-out;
-}
-
-/* 列表页切分类时内容高度会骤降（整屏卡片 → 一个加载态），滚动条出现 / 消失
-   会让内容区宽度来回跳 10px；预留滚动条槽位，横向不再抖 */
-.page--browse {
+  /* 内容高度变化（切分类 / 切控制台分区 / 换列表）会让滚动条出现或消失，
+     内容区宽度跟着跳 10px；所有页面统一预留滚动条槽位，横向不再抖 */
   scrollbar-gutter: stable;
+  animation: page-in 180ms ease-out;
 }
 
 @keyframes page-in {

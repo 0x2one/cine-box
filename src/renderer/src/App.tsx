@@ -33,8 +33,8 @@ function App(): React.JSX.Element {
     <div className="app-shell">
       <TitleBar view={view} onNavigate={navigate} />
       <main className="app-body">
-        {/* key 保证切换页面时重放一次轻微的淡入；列表页预留滚动条槽位，切分类不横向抖 */}
-        <div className={`page${view === 'browse' ? ' page--browse' : ''}`} key={view}>
+        {/* key 保证切换页面时重放一次轻微的淡入 */}
+        <div className="page" key={view}>
           {view === 'home' && (
             <HomeView onOpenConsole={() => setView('console')} onOpenBrowse={openBrowse} />
           )}
