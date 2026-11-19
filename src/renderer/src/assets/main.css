@@ -3997,6 +3997,11 @@ button.video-episode:focus-visible {
 /* 图片右下角的浮动动作：换封面 / 上传 / 地址 */
 .home-editor-image-stage {
   position: relative;
+  width: 100%;
+  /* 竖版封面（分类卡 2:3）按可视高度反推宽度：整张图一屏能看全，
+     右下角的换图按钮也不会被顶到滚动区外面。横版海报按列宽铺满。 */
+  max-width: calc(min(34vh, 290px) * var(--editor-ratio, 1));
+  margin: 0 auto;
 }
 
 .home-editor-image-actions {
@@ -4055,9 +4060,10 @@ button.video-episode:focus-visible {
   flex-wrap: wrap;
 }
 
+/* 两个编辑弹窗（海报 / 推荐条目）共用同一套尺寸，高度保持一致 */
 .home-editor-cover {
-  width: 46px;
-  height: 66px;
+  width: 72px;
+  height: 108px;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--border);
