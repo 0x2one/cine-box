@@ -134,6 +134,7 @@ export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
         categoryVisible: category.visible,
         rule,
         topN,
+        customized: stored?.customized === true,
         total: views.length,
         items: views,
         removedItems: []
@@ -187,6 +188,7 @@ export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
       categoryVisible: category.visible,
       rule,
       topN,
+      customized: stored?.customized === true,
       total,
       items: views,
       removedItems: removed.map((item) => toView(item, videos.get(item.videoId)))

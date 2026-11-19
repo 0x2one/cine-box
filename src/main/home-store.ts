@@ -207,12 +207,15 @@ export function createHomeStore(directory: string): HomeStore {
           ...fieldsFromObject(itemRecord)
         })
       }
+      const rule: HomeRule = isRule(record.rule) ? record.rule : 'latest'
       sections.push({
         categoryId,
         visible: record.visible !== false,
         title: typeof record.title === 'string' ? truncate(record.title, 60) : '',
-        rule: isRule(record.rule) ? record.rule : 'latest',
+        rule,
         topN: clampTopN(record.topN),
+        // 老配置没有这个字段：已经是「自定义」且有条目的，按编辑过处理，切换规则时不会被 TOP 覆盖
+        customized: record.customized === true || (rule === 'manual' && items.length > 0),
         items
       })
     }
@@ -232,6 +235,7 @@ export function createHomeStore(directory: string): HomeStore {
       title: '',
       rule: 'latest',
       topN: HOME_DEFAULT_TOP_N,
+      customized: false,
       items: []
     }
     config.sections.push(created)
@@ -247,6 +251,11 @@ export function createHomeStore(directory: string): HomeStore {
     if (!item) return false
     Object.assign(item, applyPatch(item, patch))
     return true
+  }
+
+  /** 自定义列表被动过：之后从 TOP 切回来时不再拿 TOP 覆盖它 */
+  function markCustomized(section: HomeSectionConfig): void {
+    if (section.rule === 'manual') section.customized = true
   }
 
   return {
@@ -322,7 +331,13 @@ export function createHomeStore(directory: string): HomeStore {
       const section = ensureSection(id)
       if (typeof patch?.visible === 'boolean') section.visible = patch.visible
       if (typeof patch?.title === 'string') section.title = truncate(patch.title, 60)
-      if (patch?.rule !== undefined) section.rule = patch.rule
+      if (patch?.rule !== undefined && patch.rule !== section.rule) {
+        section.rule = patch.rule
+        // 切回 TOP：自定义列表不能再往 TOP 前面插，列表本身留着，切回自定义时原样恢复
+        if (patch.rule === 'latest') {
+          for (const item of section.items) item.pinned = false
+        }
+      }
       if (patch?.topN !== undefined) section.topN = clampTopN(patch.topN)
       persist()
       return { ok: true }
@@ -333,6 +348,7 @@ export function createHomeStore(directory: string): HomeStore {
       const vid = videoIdOf(videoId)
       if (!id || vid === null) return { ok: false, error: 'INVALID_INPUT' }
       const section = ensureSection(id)
+      markCustomized(section)
       const existing = section.items.find((item) => item.videoId === vid)
       if (existing) {
         // 之前被移除过的，再推荐一次就当恢复，并且按推荐放到前面
@@ -350,6 +366,7 @@ export function createHomeStore(directory: string): HomeStore {
       const vid = videoIdOf(videoId)
       if (!id || vid === null) return { ok: false, error: 'INVALID_INPUT' }
       const section = ensureSection(id)
+      markCustomized(section)
       let item = section.items.find((entry) => entry.videoId === vid)
       if (!item) {
         // latest 规则里自动出现的视频没有配置行，改它就顺手补一行
@@ -371,6 +388,7 @@ export function createHomeStore(directory: string): HomeStore {
         const before = section.items.length
         section.items = section.items.filter((item) => item.videoId !== vid)
         if (section.items.length === before) return { ok: false, error: 'NOT_FOUND' }
+        section.customized = true
       } else {
         let item = section.items.find((entry) => entry.videoId === vid)
         if (!item) {
@@ -403,6 +421,8 @@ export function createHomeStore(directory: string): HomeStore {
       if (!section) return { ok: true }
       if (section.rule !== 'manual') return { ok: false, error: 'INVALID_INPUT' }
       section.items = []
+      // 清空也算编辑过：之后切回自定义不该再被 TOP 填满
+      section.customized = true
       persist()
       return { ok: true }
     },
@@ -426,6 +446,7 @@ export function createHomeStore(directory: string): HomeStore {
         } else {
           target.items.push({ ...item, removed: false, pinned: true })
         }
+        markCustomized(target)
       }
       persist()
       return { ok: true }
@@ -435,6 +456,8 @@ export function createHomeStore(directory: string): HomeStore {
       const id = typeof categoryId === 'string' ? categoryId.trim() : ''
       if (!id) return { ok: false, error: 'INVALID_INPUT' }
       const section = ensureSection(id)
+      // 排序（包括从 TOP 落成自定义列表的那一次）都算自定义列表被动过
+      section.customized = true
       const items = new Map(section.items.map((item) => [item.videoId, item]))
       const ordered: HomeSectionItem[] = []
       for (const raw of Array.isArray(videoIds) ? videoIds : []) {

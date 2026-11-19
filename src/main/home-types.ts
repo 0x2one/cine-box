@@ -67,6 +67,11 @@ export interface HomeSectionConfig {
   rule: HomeRule
   /** latest 规则下取多少部 */
   topN: number
+  /**
+   * 「自定义」列表是否被编辑过（加片 / 改信息 / 移除 / 排序 / 清空）。
+   * 只有「没编辑过」的列表才会在 TOP → 自定义时被当前 TOP 自动填充，编辑过的不再覆盖。
+   */
+  customized?: boolean
   items: HomeSectionItem[]
 }
 
@@ -117,6 +122,8 @@ export interface HomeSectionView {
   categoryVisible: boolean
   rule: HomeRule
   topN: number
+  /** 「自定义」列表是否被编辑过：编辑过之后切回自定义不再用 TOP 覆盖 */
+  customized: boolean
   /** latest：该分类（含子分类）里展示中的视频总数；manual：推荐条数 */
   total: number
   items: HomeItemView[]

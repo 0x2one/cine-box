@@ -504,7 +504,10 @@ function HomeItemEditor({
             </span>
           </div>
 
-          <div className="home-editor-image-stage">
+          <div
+            className="home-editor-image-stage"
+            style={{ '--editor-ratio': String(ratio) } as React.CSSProperties}
+          >
             {draftPic ? (
               <ImageCropper
                 key={`${draftPic}:${ratio}`}
@@ -1063,12 +1066,14 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   }
 
   /**
-   * TOP 切到自定义时，先把当前自动带上来的这十几部落成人工列表，
-   * 否则切过去会瞬间清空；反过来手动 → 最新，人工条目仍然排在前面。
+   * 规则切换：
+   * - TOP → 自定义：只有「从没编辑过自定义列表」时才把当前 TOP 列表落成人工列表；
+   *   编辑过（改信息 / 移除 / 排序 / 清空）就原样保留，不再被 TOP 覆盖。
+   * - 自定义 → TOP：TOP 自己按设置的条数算，自定义列表留着，切回来还在。
    */
   const changeRule = async (section: HomeSectionView, rule: HomeRule): Promise<void> => {
     if (rule === section.rule) return
-    if (rule === 'manual' && section.items.length > 0) {
+    if (rule === 'manual' && !section.customized && section.items.length > 0) {
       const ok = await act(
         window.api.home.reorderSectionItems(
           section.categoryId,

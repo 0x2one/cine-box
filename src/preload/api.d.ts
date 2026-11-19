@@ -828,6 +828,8 @@ interface HomeSectionView {
   categoryVisible: boolean
   rule: HomeRule
   topN: number
+  /** 「自定义」列表是否被编辑过：编辑过之后切回自定义不再用 TOP 覆盖 */
+  customized: boolean
   /** latest：分类里的视频总数；manual：推荐条数 */
   total: number
   items: HomeItemView[]
