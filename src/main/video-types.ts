@@ -181,6 +181,8 @@ export interface VideoListItem {
   inPoster?: boolean
   /** 已在哪些首页分类里推荐（控制台视频列表用，由 IPC 层补齐） */
   homeSections?: { categoryId: string; title: string }[]
+  /** 视频所属的本地一级分类（按绑定关系推导，顺序跟分类树一致；推荐只允许进这些分类） */
+  boundCategoryIds?: string[]
 }
 
 export interface VideoListResult {

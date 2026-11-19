@@ -37,6 +37,8 @@ export interface SourceCategoryPath {
   siteId: string
   /** site_categories.source_id，也就是在线接口返回的分类 id */
   sourceCategoryId: string
+  /** 绑定的本地分类 id（推荐只允许进它所属的一级分类） */
+  categoryId: string
   /** 本地分类完整路径，如「电影 / 动作片」 */
   categoryPath: string
 }
@@ -289,6 +291,7 @@ ORDER BY s.name, sc.name`
         return {
           siteId: text(raw.site_id),
           sourceCategoryId: text(raw.source_category_id),
+          categoryId: text(raw.video_category_id),
           categoryPath: paths.get(text(raw.video_category_id)) ?? ''
         }
       })

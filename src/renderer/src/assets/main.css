@@ -4121,9 +4121,21 @@ button.video-episode:focus-visible {
 
 .video-recommend-name {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   align-items: center;
   min-width: 0;
   color: var(--text);
   font-size: 13px;
+}
+
+/* 这个大类是靠哪些绑定来的（如「电影 / 动作片」），一行省略，完整内容在 title 里 */
+.video-recommend-sub {
+  flex-basis: 100%;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

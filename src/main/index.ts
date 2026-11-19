@@ -29,6 +29,7 @@ import { createCollectLogStore } from './collect-log-store'
 import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
 import { buildHomeFeed } from './home-feed'
+import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
 import type { HomeFeedResult, HomeItemPatch, HomeSectionPatch } from './home-types'
 import { fetchSiteCategories } from './site-categories'
@@ -157,6 +158,40 @@ function readHomeFeed(): HomeFeedResult {
     console.error('读取首页数据失败', error)
     return { ok: false, error: 'DB' }
   }
+}
+
+/* ── 首页推荐：只能推荐到视频实际绑定的大类 ── */
+
+/**
+ * 视频 → 它所属的本地一级分类（按绑定关系推导，顺序跟分类树一致）。
+ * 「推荐到首页」只能进这些分类；绑定变了推荐要跟着搬家，彻底解绑就删掉。
+ */
+function boundTopCategoriesByVideo(videoIds: number[]): Map<number, string[]> {
+  if (!videoCacheReady || videoIds.length === 0) return new Map()
+  return boundTopCategories(
+    categoryStore.list(),
+    bindingStore.pathsForSourceCategories(),
+    videoStore.listSourceCategories(videoIds)
+  )
+}
+
+/**
+ * 绑定 / 分类结构变了之后，把推荐条目挪到视频现在所属的大类：
+ * 还绑着别的分类就搬过去（保留原来的覆盖字段），彻底解绑的直接从推荐里删掉。
+ */
+function syncHomeRecommendations(): void {
+  if (!videoCacheReady) return
+  syncRecommendations({
+    config: homeStore.get(),
+    categories: categoryStore.list(),
+    bindings: bindingStore.pathsForSourceCategories(),
+    loadVideoData: (videoIds) => ({
+      sources: videoStore.listSourceCategories(videoIds),
+      knownVideoIds: videoStore.listVideosByIds(videoIds).map((video) => video.id)
+    }),
+    move: (fromCategoryId, toCategoryId, videoId) =>
+      homeStore.moveSectionItem(fromCategoryId, toCategoryId, videoId)
+  })
 }
 
 /* ── 主窗口显示 / 隐藏 ── */
@@ -493,6 +528,8 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
 
   // 首页状态：已加进海报 / 已推荐到哪些分类，视频列表直接显示出来，不用再点开看
   const homeConfig = homeStore.get()
+  // 推荐只能进视频绑定的大类，弹窗按这个列表给可选目标
+  const boundTops = boundTopCategoriesByVideo(result.items.map((item) => item.id))
   const posterIds = new Set(homeConfig.posters.map((poster) => poster.videoId))
   const categoryNames = new Map(
     categoryStore.list().map((category) => [category.id, category.name])
@@ -501,7 +538,8 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   for (const section of homeConfig.sections) {
     const title = section.title || categoryNames.get(section.categoryId) || ''
     for (const item of section.items) {
-      if (item.removed) continue
+      // 只有人工指定的才算「推荐」：latest 里自动出现的条目即使被改过图 / 隐藏也不打这个标
+      if (item.removed || !item.pinned) continue
       const list = sectionsByVideo.get(item.videoId) ?? []
       if (!list.some((entry) => entry.categoryId === section.categoryId)) {
         list.push({ categoryId: section.categoryId, title })
@@ -517,6 +555,7 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
       localCategoryPaths: (byVideo.get(item.id) ?? []).sort((left, right) =>
         left.localeCompare(right, 'zh-Hans-CN')
       ),
+      boundCategoryIds: boundTops.get(item.id) ?? [],
       inPoster: posterIds.has(item.id),
       homeSections: sectionsByVideo.get(item.id) ?? []
     }))
@@ -749,6 +788,8 @@ ipcMain.handle('sites:remove', async (_event, id: string) => {
     }
     // collect_schedules 由业务库外键级联删除
     scheduleStore.remove(siteId)
+    // 站点的绑定被级联删掉了，推荐要按剩下的绑定重算
+    syncHomeRecommendations()
   }
   return result
 })
@@ -787,7 +828,10 @@ ipcMain.handle('sites:categories:apply', (_event, id: string, mode: CategoryUpda
     return { ok: false, error: 'EXPIRED' }
   }
   pendingCategoryRefresh.delete(site.id)
-  return { ok: true, categories: siteStore.applyCategories(site.id, pending.categories, mode) }
+  const categories = siteStore.applyCategories(site.id, pending.categories, mode)
+  // 全量更新会删掉线上已不存在的分类，连带删绑定：推荐跟着重算
+  if (mode === 'full') syncHomeRecommendations()
+  return { ok: true, categories }
 })
 
 /* ── IPC：视频分类 ── */
@@ -798,9 +842,12 @@ ipcMain.handle('categories:create', (_event, input: VideoCategoryInput) =>
   categoryStore.create(input)
 )
 
-ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInput) =>
-  categoryStore.update(String(id), input)
-)
+ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInput) => {
+  const result = categoryStore.update(String(id), input)
+  // 改了上级分类，视频所属的大类可能跟着变
+  if (result.ok && input?.parentId !== undefined) syncHomeRecommendations()
+  return result
+})
 
 ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) =>
   categoryStore.setVisible(String(id), Boolean(visible))
@@ -808,15 +855,24 @@ ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) =
 
 ipcMain.handle(
   'categories:move',
-  (_event, id: string, targetId: string | null, placement: CategoryPlacement) =>
-    categoryStore.move(
+  (_event, id: string, targetId: string | null, placement: CategoryPlacement) => {
+    const result = categoryStore.move(
       String(id),
       targetId === null || targetId === undefined ? null : String(targetId),
       placement
     )
+    // 拖到别的大类下面（before / after 也可能换了上级），推荐跟着换分类
+    if (result.ok) syncHomeRecommendations()
+    return result
+  }
 )
 
-ipcMain.handle('categories:remove', (_event, id: string) => categoryStore.remove(String(id)))
+ipcMain.handle('categories:remove', (_event, id: string) => {
+  const result = categoryStore.remove(String(id))
+  // 分类删了，绑在它（或子树）上的视频就没有归属了，推荐一并清掉
+  if (result.ok) syncHomeRecommendations()
+  return result
+})
 
 /* ── IPC：在线分类与本地分类的绑定 ── */
 
@@ -828,11 +884,19 @@ ipcMain.handle('bindings:forCategory', (_event, categoryId: string) =>
 
 ipcMain.handle('bindings:counts', () => bindingStore.counts())
 
-ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: string) =>
-  bindingStore.bind(items, String(categoryId))
-)
+ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: string) => {
+  const result = bindingStore.bind(items, String(categoryId))
+  // 绑定关系变了：已推荐到这个在线分类的视频要跟着换大类
+  if (result.ok) syncHomeRecommendations()
+  return result
+})
 
-ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => bindingStore.unbind(items))
+ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => {
+  const result = bindingStore.unbind(items)
+  // 解绑后视频不再属于原来的大类，推荐会被挪到别处或直接删掉
+  if (result.ok) syncHomeRecommendations()
+  return result
+})
 
 /* ── IPC：首页配置（海报叠层 + 分类推荐） ── */
 
@@ -858,9 +922,17 @@ ipcMain.handle('home:sections:save', (_event, categoryId: string, patch: HomeSec
   homeStore.saveSection(String(categoryId), patch ?? {})
 )
 
-ipcMain.handle('home:sections:addItem', (_event, categoryId: string, videoId: number) =>
-  homeStore.addSectionItem(String(categoryId), Number(videoId))
-)
+ipcMain.handle('home:sections:addItem', (_event, categoryId: string, videoId: number) => {
+  const target = String(categoryId)
+  const vid = Number(videoId)
+  // 只能推荐到视频实际绑定的大类；解绑之后推荐会被 syncHomeRecommendations 挪走或删掉
+  const allowed = boundTopCategoriesByVideo([vid]).get(vid) ?? []
+  if (!allowed.includes(target)) return { ok: false, error: 'NOT_BOUND' }
+  const result = homeStore.addSectionItem(target, vid)
+  // 顺手把以前落在非绑定分类里的旧推荐拉回来（同一分类里会合并成一条）
+  if (result.ok) syncHomeRecommendations()
+  return result
+})
 
 ipcMain.handle(
   'home:sections:updateItem',
@@ -1039,6 +1111,9 @@ if (!gotTheLock) {
       videoCacheReady = false
       console.error('视频缓存初始化失败', error)
     }
+
+    // 启动时校正一次：老配置里可能有推荐到了非绑定分类的条目，按当前绑定拉回或清掉
+    syncHomeRecommendations()
 
     const savedShortcut = appSettingsStore.get().showShortcut
     if (savedShortcut) tryRegisterAccel(savedShortcut)

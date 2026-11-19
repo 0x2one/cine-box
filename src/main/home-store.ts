@@ -46,6 +46,15 @@ export interface HomeStore {
   /** 清空「自定义」轨道的全部推荐；TOP 规则下没有这个动作 */
   clearSectionItems: (categoryId: string) => HomeActionResult
   /**
+   * 绑定关系变了以后把一条推荐挪到别的大类（to 为 null 表示直接删掉）。
+   * 跟 removeSectionItem 不同：这里不会在 TOP 轨道里留下「已移除」记录。
+   */
+  moveSectionItem: (
+    fromCategoryId: string,
+    toCategoryId: string | null,
+    videoId: number
+  ) => HomeActionResult
+  /**
    * 把用户选中的本地图片复制进配置目录，返回 cine-img:// 地址。
    * 只接受主进程自己弹窗拿到的路径，渲染层不接触文件系统。
    */
@@ -394,6 +403,30 @@ export function createHomeStore(directory: string): HomeStore {
       if (!section) return { ok: true }
       if (section.rule !== 'manual') return { ok: false, error: 'INVALID_INPUT' }
       section.items = []
+      persist()
+      return { ok: true }
+    },
+
+    moveSectionItem: (fromCategoryId, toCategoryId, videoId) => {
+      const fromId = typeof fromCategoryId === 'string' ? fromCategoryId.trim() : ''
+      const toId = typeof toCategoryId === 'string' ? toCategoryId.trim() : ''
+      const vid = videoIdOf(videoId)
+      if (!fromId || vid === null) return { ok: false, error: 'INVALID_INPUT' }
+      const from = findSection(fromId)
+      const item = from?.items.find((entry) => entry.videoId === vid)
+      if (!from || !item) return { ok: false, error: 'NOT_FOUND' }
+      from.items = from.items.filter((entry) => entry.videoId !== vid)
+      if (toId) {
+        const target = ensureSection(toId)
+        const existing = target.items.find((entry) => entry.videoId === vid)
+        if (existing) {
+          // 目标分类里已经有这条（比如同时绑了两个大类），保留目标那份的覆盖字段
+          existing.removed = false
+          existing.pinned = true
+        } else {
+          target.items.push({ ...item, removed: false, pinned: true })
+        }
+      }
       persist()
       return { ok: true }
     },

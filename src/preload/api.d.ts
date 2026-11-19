@@ -603,6 +603,8 @@ interface VideoListItem {
   inPoster?: boolean
   /** 已在哪些首页分类里推荐 */
   homeSections?: { categoryId: string; title: string }[]
+  /** 视频所属的本地一级分类 id（按绑定关系推导，推荐只能进这些分类） */
+  boundCategoryIds?: string[]
 }
 
 interface VideoListResult {
