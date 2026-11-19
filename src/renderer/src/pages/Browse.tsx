@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
 import VideoCard from '../components/VideoCard'
 import { visibleCategoryIds } from '../lib/category-tree'
+import { formatCount } from '../utils/format'
 import '../assets/browse.css'
 
 /** 每页条数：缓存库单页上限 100，按设计文档的默认 30 取 */
@@ -15,10 +15,20 @@ const COLLAPSE_AT = 128
 const EXPAND_AT = 16
 
 interface Selection {
-  /** 一级分类 */
-  topId: string
+  /** 一级分类；null 表示跨大类的「全部」 */
+  topId: string | null
   /** 选中的子分类；null 表示这个大类下的「全部」 */
   subId: string | null
+}
+
+/** 一次列表查询的筛选：全部 = 所有可见一级分类的并集，分类 = 某个分类的子树 */
+interface BrowseFilter {
+  /** 稳定的筛选标识：全部用 all，分类用分类 id */
+  key: string
+  /** 单个分类（一级或子分类） */
+  categoryId?: string
+  /** 多个一级分类：主进程把它们各自的子树一起解析成绑定过滤 */
+  categoryIds?: string[]
 }
 
 /** 滚动回调要读的可变状态：放在 ref 里，避免闭包拿到过期的 page / loading */
@@ -38,7 +48,7 @@ function bySortOrder(left: VideoCategory, right: VideoCategory): number {
 
 /**
  * 初始选中：首页传进来的一级分类优先；
- * 分类被删 / 被隐藏时退回第一个可见的一级分类，保证页面总能落到一个真实分类上。
+ * 标题栏「找片看」进来（initialId 为空）或分类被删 / 隐藏时落到「全部」。
  */
 function resolveSelection(
   categories: VideoCategory[],
@@ -51,13 +61,13 @@ function resolveSelection(
   if (tops.length === 0) return null
 
   const initial = initialId ? categories.find((row) => row.id === initialId) : undefined
-  if (!initial || !visible.has(initial.id)) return { topId: tops[0].id, subId: null }
+  if (!initial || !visible.has(initial.id)) return { topId: null, subId: null }
   if (initial.parentId === null) return { topId: initial.id, subId: null }
 
-  // 只认二级：传进来的是更深层分类时同样退回第一个大类
+  // 只认二级：传进来的是更深层分类时同样退回「全部」
   const parent = categories.find((row) => row.id === initial.parentId)
   if (!parent || parent.parentId !== null || !visible.has(parent.id)) {
-    return { topId: tops[0].id, subId: null }
+    return { topId: null, subId: null }
   }
   return { topId: parent.id, subId: initial.id }
 }
@@ -67,11 +77,9 @@ function resolveSelection(
  * 滚动到底部自动取下一页。数据只读分类树与视频库，不读首页配置。
  */
 function BrowseView({
-  initialCategoryId,
-  onBack
+  initialCategoryId
 }: {
   initialCategoryId: string | null
-  onBack: () => void
 }): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const [categories, setCategories] = useState<VideoCategory[] | null>(null)
@@ -94,7 +102,7 @@ function BrowseView({
     failed: false,
     exhausted: false
   })
-  const filterRef = useRef<string | null>(null)
+  const filterRef = useRef<BrowseFilter | null>(null)
 
   const visibleIds = useMemo(
     () => (categories ? visibleCategoryIds(categories) : new Set<string>()),
@@ -113,7 +121,7 @@ function BrowseView({
 
   const subs = useMemo(
     () =>
-      categories && selection
+      categories && selection?.topId
         ? categories
             .filter((row) => row.parentId === selection.topId && visibleIds.has(row.id))
             .sort(bySortOrder)
@@ -122,13 +130,27 @@ function BrowseView({
   )
 
   const activeTop = useMemo(
-    () => categories?.find((row) => row.id === selection?.topId) ?? null,
+    () =>
+      selection?.topId ? (categories?.find((row) => row.id === selection.topId) ?? null) : null,
     [categories, selection]
   )
 
-  /** 选中分类和已加载分类不一致：正在换分类，先别渲染上一类的卡片 */
-  const activeFilter = selection ? (selection.subId ?? selection.topId) : null
-  const pending = activeFilter !== null && loadedFilter !== activeFilter && !failed
+  /** 选中的子分类：标题显示成「大类 / 子类」的面包屑 */
+  const activeSub = useMemo(
+    () => (selection?.subId ? (subs.find((row) => row.id === selection.subId) ?? null) : null),
+    [selection, subs]
+  )
+
+  /** 当前筛选：「全部」= 所有可见一级分类的并集（隐藏分类里的视频不会从这里漏出来） */
+  const filter = useMemo<BrowseFilter | null>(() => {
+    if (!selection) return null
+    if (selection.topId === null) return { key: 'all', categoryIds: tops.map((top) => top.id) }
+    const categoryId = selection.subId ?? selection.topId
+    return { key: categoryId, categoryId }
+  }, [selection, tops])
+
+  /** 选中筛选和已加载筛选不一致：正在换分类，先别渲染上一类的卡片 */
+  const pending = filter !== null && loadedFilter !== filter.key && !failed
 
   // 分类只读一次：列表页用分类原名，不带首页的显示名覆盖
   useEffect(() => {
@@ -153,20 +175,18 @@ function BrowseView({
   }, [initialCategoryId, reloadToken])
 
   const loadPage = useCallback(
-    async (page: number, categoryId: string, replace: boolean): Promise<void> => {
+    async (page: number, target: BrowseFilter, replace: boolean): Promise<void> => {
       const token = guard.current.generation
       guard.current.loading = true
       guard.current.failed = false
       setLoading(true)
       setFailed(false)
       try {
-        const result = await window.api.videos.list({
-          page,
-          pageSize: PAGE_SIZE,
-          categoryId,
-          visibility: 'shown'
-        })
-        // 切了分类：这一页的结果已经没用了
+        const query: VideoListQuery = { page, pageSize: PAGE_SIZE, visibility: 'shown' }
+        if (target.categoryId) query.categoryId = target.categoryId
+        if (target.categoryIds) query.categoryIds = target.categoryIds
+        const result = await window.api.videos.list(query)
+        // 切了筛选：这一页的结果已经没用了
         if (token !== guard.current.generation) return
         if (!result.ok) {
           guard.current.failed = true
@@ -180,7 +200,7 @@ function BrowseView({
           return [...previous, ...result.items.filter((item) => !seen.has(item.id))]
         })
         setTotal(result.total)
-        setLoadedFilter(categoryId)
+        setLoadedFilter(target.key)
         guard.current.page = page + 1
         const last = result.items.length < PAGE_SIZE || page * PAGE_SIZE >= result.total
         guard.current.exhausted = last
@@ -200,10 +220,10 @@ function BrowseView({
     []
   )
 
-  /** 换分类：作废旧请求、清空列表、回到第一页 */
-  const selectCategory = useCallback(
-    (categoryId: string): void => {
-      filterRef.current = categoryId
+  /** 换筛选：作废旧请求、清空列表、回到第一页 */
+  const startFilter = useCallback(
+    (target: BrowseFilter): void => {
+      filterRef.current = target
       guard.current = {
         generation: guard.current.generation + 1,
         page: 1,
@@ -216,28 +236,28 @@ function BrowseView({
       setLoading(true)
       setFailed(false)
       setExhausted(false)
-      void loadPage(1, categoryId, true)
+      void loadPage(1, target, true)
     },
     [loadPage]
   )
 
   useEffect(() => {
-    if (!selection) return
-    // 切换类型时先清掉上一类的残留再取第一页；setState 在 effect 里是刻意的，
+    if (!filter) return
+    // 切换筛选时先清掉上一类的残留再取第一页；setState 在 effect 里是刻意的，
     // 规则按调用点误报，这里显式关闭
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    selectCategory(selection.subId ?? selection.topId)
-  }, [selection, selectCategory])
+    startFilter(filter)
+  }, [filter, startFilter])
 
   /** 距离底部不到 LOAD_AHEAD 且还有下一页时继续取 */
   const maybeLoadMore = useCallback((): void => {
     const state = guard.current
-    const filter = filterRef.current
-    if (!filter || state.loading || state.failed || state.exhausted) return
+    const target = filterRef.current
+    if (!target || state.loading || state.failed || state.exhausted) return
     const page = rootRef.current?.closest('.page') as HTMLElement | null
     if (!page) return
     if (page.scrollHeight - page.scrollTop - page.clientHeight > LOAD_AHEAD) return
-    void loadPage(state.page, filter, false)
+    void loadPage(state.page, target, false)
   }, [loadPage])
 
   // 一页填不满窗口时接着取，否则要等用户再滚一下才会触发
@@ -276,6 +296,12 @@ function BrowseView({
     setCompact(false)
   }
 
+  const selectAll = (): void => {
+    if (selection?.topId === null) return
+    scrollToTop()
+    setSelection({ topId: null, subId: null })
+  }
+
   const selectTop = (topId: string): void => {
     if (selection?.topId === topId && selection.subId === null) return
     scrollToTop()
@@ -283,18 +309,18 @@ function BrowseView({
   }
 
   const selectSub = (subId: string | null): void => {
-    if (!selection || selection.subId === subId) return
+    if (!selection || selection.topId === null || selection.subId === subId) return
     scrollToTop()
     setSelection({ topId: selection.topId, subId })
   }
 
   const retry = (): void => {
     const state = guard.current
-    const filter = filterRef.current
-    if (state.loading || !filter) return
+    const target = filterRef.current
+    if (state.loading || !target) return
     state.failed = false
     setFailed(false)
-    void loadPage(state.page, filter, items.length === 0)
+    void loadPage(state.page, target, items.length === 0)
   }
 
   const reloadCategories = (): void => {
@@ -309,16 +335,40 @@ function BrowseView({
       <header className={`browse-head${compact ? ' is-compact' : ''}`}>
         <div className="browse-head-inner">
           <div className="browse-head-top">
-            <button type="button" className="browse-back" onClick={onBack}>
-              <ArrowLeftOutlined />
-              <span>首页</span>
-            </button>
-            <h1 className="browse-title">{activeTop?.name ?? '视频库'}</h1>
-            {total !== null && <span className="browse-count">共 {total} 部</span>}
+            <h1 className="browse-title">
+              {selection?.topId === null ? (
+                '全部视频'
+              ) : activeTop ? (
+                activeSub ? (
+                  <>
+                    <span className="browse-title-parent">{activeTop.name}</span>
+                    <span className="browse-title-sep">/</span>
+                    {activeSub.name}
+                  </>
+                ) : (
+                  activeTop.name
+                )
+              ) : (
+                '视频库'
+              )}
+            </h1>
+            {total !== null && (
+              <span className="browse-count">
+                共 <b>{formatCount(total)}</b> 部
+              </span>
+            )}
           </div>
 
           {tops.length > 0 && (
             <nav className="browse-types" aria-label="视频类型">
+              <button
+                type="button"
+                className={`browse-chip${selection?.topId === null ? ' is-active' : ''}`}
+                aria-pressed={selection?.topId === null}
+                onClick={selectAll}
+              >
+                全部
+              </button>
               {tops.map((top) => (
                 <button
                   key={top.id}
@@ -393,8 +443,14 @@ function BrowseView({
           </div>
         ) : items.length === 0 ? (
           <div className="home-empty-state">
-            <p className="home-empty-title">这个分类下还没有视频</p>
-            <p className="home-empty-desc">换一个类型看看，或者去控制台采集视频</p>
+            <p className="home-empty-title">
+              {filter?.key === 'all' ? '片库里还没有视频' : '这个分类下还没有视频'}
+            </p>
+            <p className="home-empty-desc">
+              {filter?.key === 'all'
+                ? '去控制台采集视频后，这里就会出现'
+                : '换一个类型看看，或者去控制台采集视频'}
+            </p>
           </div>
         ) : (
           <>

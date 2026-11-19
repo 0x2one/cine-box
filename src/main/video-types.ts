@@ -150,6 +150,8 @@ export interface VideoListQuery {
   keyword?: string
   /** 本地视频分类：先由业务库解析成在线分类，再在缓存库过滤 */
   categoryId?: string
+  /** 多个本地分类的并集（列表页「全部」用）：传了就按这些分类的子树一起过滤 */
+  categoryIds?: string[]
   /** 1 起的页码，配合 pageSize 做服务端分页 */
   page?: number
   pageSize?: number

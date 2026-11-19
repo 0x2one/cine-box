@@ -474,21 +474,21 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     }
   }
 
-  /** 加进首页的海报叠层；已经在里面的按钮是禁用的 */
+  /** 加进推荐页的海报叠层；已经在里面的按钮是禁用的 */
   const addToPoster = async (item: VideoListItem): Promise<void> => {
     try {
       const result = await window.api.home.addPoster(item.id)
       if (!result.ok) {
         message.error(
           result.error === 'DUPLICATE'
-            ? '已经在首页海报里了'
+            ? '已经在推荐页海报里了'
             : result.error === 'FULL'
               ? '海报数量已达上限'
               : '添加失败'
         )
         return
       }
-      message.success('已添加到首页海报')
+      message.success('已添加到推荐页海报')
       await loadPage()
     } catch {
       message.error('添加失败')
@@ -666,7 +666,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               </div>
             }
             actions={[
-              <Tooltip key="poster" title={item.inPoster ? '已在首页海报中' : '添加到首页海报'}>
+              <Tooltip key="poster" title={item.inPoster ? '已在推荐页海报中' : '添加到推荐页海报'}>
                 <Button
                   className="video-action"
                   type="text"
@@ -677,7 +677,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                   onClick={() => void addToPoster(item)}
                 />
               </Tooltip>,
-              <Tooltip key="recommend" title="推荐到首页分类">
+              <Tooltip key="recommend" title="加入推荐页分类">
                 <Button
                   className="video-action"
                   type="text"
@@ -890,7 +890,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
       </Modal>
 
       <Modal
-        title="推荐到首页"
+        title="加入推荐页"
         open={!!recommendTarget}
         width={520}
         footer={null}

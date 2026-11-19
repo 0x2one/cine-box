@@ -36,7 +36,7 @@ function HomePicture({
           loading={eager ? 'eager' : 'lazy'}
           decoding={eager ? 'sync' : 'async'}
           referrerPolicy="no-referrer"
-          // 控制台首页配置里整行可拖动排序，图片自己不能变成拖动源
+          // 控制台推荐页配置里整行可拖动排序，图片自己不能变成拖动源
           draggable={false}
           onError={(event) => {
             event.currentTarget.style.visibility = 'hidden'

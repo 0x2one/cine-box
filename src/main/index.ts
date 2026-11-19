@@ -386,19 +386,23 @@ function createWindow(): void {
 
   if (process.platform === 'win32') {
     // 无边框窗口丢掉了系统自带的「双击标题栏最大化」，用窗口消息补回来。
-    // 只在标题栏拖拽区生效，避免双击右侧按钮时误触。
+    // 只在标题栏拖拽区生效，避免双击右侧按钮时误触；中间的展示端导航是 no-drag 区，也排除掉。
     const WM_LBUTTONDBLCLK = 0x0203
     const TITLE_BAR_HEIGHT = 44
     const BRAND_ZONE_WIDTH = 150
     const ACTIONS_ZONE_WIDTH = 222
+    // 与 TitleBar 中间「推荐 / 找片看」胶囊的实际宽度对齐（main.css 的 .titlebar-nav）
+    const CENTER_NAV_WIDTH = 160
     mainWindow.hookWindowMessage(WM_LBUTTONDBLCLK, () => {
       if (!mainWindow || mainWindow.isDestroyed()) return
       const cursor = screen.getCursorScreenPoint()
       const bounds = mainWindow.getBounds()
+      const centerLeft = bounds.x + (bounds.width - CENTER_NAV_WIDTH) / 2
       const inTitleBar = cursor.y >= bounds.y && cursor.y <= bounds.y + TITLE_BAR_HEIGHT
       const inDragZone =
         cursor.x >= bounds.x + BRAND_ZONE_WIDTH &&
-        cursor.x <= bounds.x + bounds.width - ACTIONS_ZONE_WIDTH
+        cursor.x <= bounds.x + bounds.width - ACTIONS_ZONE_WIDTH &&
+        (cursor.x < centerLeft || cursor.x > centerLeft + CENTER_NAV_WIDTH)
       if (!inTitleBar || !inDragZone) return
       if (mainWindow.isMaximized()) {
         mainWindow.unmaximize()
@@ -496,15 +500,28 @@ ipcMain.handle('cache:clear', (event) =>
 ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
   let filters: { siteId: string; categoryId: string }[] | undefined
-  if (query?.categoryId) {
-    // 选中的是父分类时，把它下面各级子分类的绑定一起算进来
+  // 列表页「全部」会一次传多个一级分类，把它们各自的子树一起解析成绑定过滤
+  const rawCategoryIds = query?.categoryIds
+  const categoryIds: string[] = Array.isArray(rawCategoryIds)
+    ? rawCategoryIds.filter((id) => typeof id === 'string' && id !== '')
+    : query && query.categoryId
+      ? [query.categoryId]
+      : []
+  if (Array.isArray(rawCategoryIds) && categoryIds.length === 0) {
+    // 显式传了空数组（没有任何可见分类）：直接空结果，不要退化成全库
+    return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
+  }
+  if (categoryIds.length > 0) {
     const seen = new Set<string>()
     filters = []
-    for (const binding of bindingStore.forCategories(categoryStore.subtreeIds(query.categoryId))) {
-      const key = `${binding.siteId}\u0000${binding.sourceId}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      filters.push({ siteId: binding.siteId, categoryId: binding.sourceId })
+    for (const categoryId of categoryIds) {
+      // 选中的是父分类时，把它下面各级子分类的绑定一起算进来
+      for (const binding of bindingStore.forCategories(categoryStore.subtreeIds(categoryId))) {
+        const key = `${binding.siteId}\u0000${binding.sourceId}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        filters.push({ siteId: binding.siteId, categoryId: binding.sourceId })
+      }
     }
     if (filters.length === 0) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
   }

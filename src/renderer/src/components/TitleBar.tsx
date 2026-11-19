@@ -45,7 +45,7 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
         type="button"
         className="titlebar-brand"
         onClick={() => onNavigate('home')}
-        title="返回首页"
+        title="返回推荐页"
       >
         <img className="titlebar-logo" src={logoUrl} alt="" draggable={false} />
         <span className="titlebar-name">映盒剧场</span>
@@ -53,6 +53,26 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
 
       {/* 拖拽区：双击最大化由主进程的窗口消息处理（拖拽区不会派发 DOM 双击事件） */}
       <div className="titlebar-drag" />
+
+      {/* 展示端导航：居中的两段式胶囊，找片看 = 视频列表页 */}
+      <nav className="titlebar-nav" aria-label="展示端导航">
+        <button
+          type="button"
+          className={`titlebar-nav-btn${view === 'home' ? ' is-active' : ''}`}
+          aria-current={view === 'home' ? 'page' : undefined}
+          onClick={() => onNavigate('home')}
+        >
+          推荐
+        </button>
+        <button
+          type="button"
+          className={`titlebar-nav-btn${view === 'browse' ? ' is-active' : ''}`}
+          aria-current={view === 'browse' ? 'page' : undefined}
+          onClick={() => onNavigate('browse')}
+        >
+          找片看
+        </button>
+      </nav>
 
       <div className="titlebar-actions">
         <button

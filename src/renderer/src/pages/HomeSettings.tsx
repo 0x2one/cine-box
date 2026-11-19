@@ -39,14 +39,14 @@ import HomePicture from '../components/HomePicture'
 
 /** 海报叠层的宽高比：1180 窗口下约 984 × 420 */
 const HERO_RATIO = 2.34
-/** 分类轨道的封面比例，和首页卡片一致 */
+/** 分类轨道的封面比例，和推荐页卡片一致 */
 const CARD_RATIO = 2 / 3
 
 /** 两个 tab 的说明：放在标题行右侧，超长省略，悬停看全文 */
 const POSTER_HINT =
-  '顺序就是首页叠层的顺序，拖动行或点上 / 下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在首页，配置仍保留。'
+  '顺序就是推荐页叠层的顺序，拖动行或点上 / 下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在推荐页，配置仍保留。'
 const SECTION_HINT =
-  '每个一级分类对应首页上的一条轨道。自定义用「视频」页的「推荐」按钮加片；TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
+  '每个一级分类对应推荐页上的一条轨道。自定义用「视频」页的「推荐」按钮加片；TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
 
 const HOME_ERRORS: Record<string, string> = {
   NOT_FOUND: '条目已不存在，刷新后再试',
@@ -443,7 +443,7 @@ function HomeItemEditor({
       <div className="home-editor">
         <div className="home-editor-fields">
           <p className="home-editor-hint">
-            留空表示沿用视频库里的值；这里改的只影响首页，不会动采集到的数据。
+            留空表示沿用视频库里的值；这里改的只影响推荐页，不会动采集到的数据。
           </p>
           <label className="home-editor-field">
             <span className="home-editor-label">
@@ -488,7 +488,7 @@ function HomeItemEditor({
           <div className="home-editor-switch">
             <Switch checked={hidden} onChange={setHidden} />
             <div>
-              <span className="home-editor-label">在首页隐藏</span>
+              <span className="home-editor-label">在推荐页隐藏</span>
               <span className="home-editor-hint">隐藏后配置仍保留，随时可以恢复</span>
             </div>
           </div>
@@ -754,12 +754,12 @@ function HomeItemRow({
             onClick={() => onMove(1)}
           />
         </Tooltip>
-        <Tooltip title={item.hidden ? '恢复显示' : '在首页隐藏'}>
+        <Tooltip title={item.hidden ? '恢复显示' : '在推荐页隐藏'}>
           <Button
             type="text"
             size="small"
             icon={item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-            aria-label={item.hidden ? '恢复显示' : '在首页隐藏'}
+            aria-label={item.hidden ? '恢复显示' : '在推荐页隐藏'}
             onClick={onToggleHidden}
           />
         </Tooltip>
@@ -783,7 +783,7 @@ function HomeItemRow({
 }
 
 /**
- * 一张推荐卡片：封面按轨道比例取景（和首页看到的一致），点封面或片名编辑。
+ * 一张推荐卡片：封面按轨道比例取景（和推荐页看到的一致），点封面或片名编辑。
  * 整卡可拖，落点按指针在卡片的左 / 右半边决定插到前面还是后面；操作条悬停或聚焦时浮出。
  */
 function HomeItemCard({
@@ -894,8 +894,8 @@ function HomeItemCard({
           <button
             type="button"
             className="home-shelf-action"
-            title={item.hidden ? '恢复显示' : '在首页隐藏'}
-            aria-label={item.hidden ? '恢复显示' : '在首页隐藏'}
+            title={item.hidden ? '恢复显示' : '在推荐页隐藏'}
+            aria-label={item.hidden ? '恢复显示' : '在推荐页隐藏'}
             onClick={onToggleHidden}
           >
             {item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
@@ -925,7 +925,7 @@ function HomeItemCard({
 }
 
 /**
- * 控制台「首页」：海报叠层的排序 / 隐藏 / 移除，一级分类在首页的显示与推荐规则。
+ * 控制台「推荐页」：海报叠层的排序 / 隐藏 / 移除，一级分类在推荐页的显示与推荐规则。
  * 条目本身（视频信息覆盖、自定义图片与裁剪）走同一个编辑弹窗。
  */
 function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): React.JSX.Element {
@@ -1144,7 +1144,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
               onToggleHidden={() =>
                 void act(
                   window.api.home.updatePoster(item.videoId, { hidden: !item.hidden }),
-                  item.hidden ? '已恢复显示' : '已在首页隐藏'
+                  item.hidden ? '已恢复显示' : '已在推荐页隐藏'
                 )
               }
               onRemove={() => void act(window.api.home.removePoster(item.videoId), '已移除')}
@@ -1207,7 +1207,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                     maxLength={60}
                     variant="borderless"
                     className="home-config-name-input"
-                    title="点一下改首页显示名，留空使用分类名"
+                    title="点一下改推荐页显示名，留空使用分类名"
                     onBlur={(event) => {
                       const value = event.target.value.trim()
                       if (value === section.title) return
@@ -1226,7 +1226,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                       : `共 ${section.total} 部`}
                   </span>
                   {!section.categoryVisible && <Tag color="warning">分类已隐藏</Tag>}
-                  {!section.visible && <Tag color="default">不在首页显示</Tag>}
+                  {!section.visible && <Tag color="default">不在推荐页显示</Tag>}
                 </div>
                 <div className="home-config-section-actions">
                   <Radio.Group
@@ -1263,7 +1263,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                     <Switch
                       size="small"
                       checked={section.visible}
-                      title="在首页显示这条轨道"
+                      title="在推荐页显示这条轨道"
                       onChange={(checked) =>
                         void act(
                           window.api.home.saveSection(section.categoryId, { visible: checked })
@@ -1312,7 +1312,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                           removeTitle={
                             section.rule === 'manual'
                               ? '从推荐里移除？'
-                              : '从首页移除这部剧？之后可以在下方恢复'
+                              : '从推荐页移除这部剧？之后可以在下方恢复'
                           }
                           onMove={(delta) => moveSectionItem(section, item.videoId, delta)}
                           onEdit={() =>
@@ -1328,13 +1328,13 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                               window.api.home.updateSectionItem(section.categoryId, item.videoId, {
                                 hidden: !item.hidden
                               }),
-                              item.hidden ? '已恢复显示' : '已在首页隐藏'
+                              item.hidden ? '已恢复显示' : '已在推荐页隐藏'
                             )
                           }
                           onRemove={() =>
                             void act(
                               window.api.home.removeSectionItem(section.categoryId, item.videoId),
-                              '已从首页移除'
+                              '已从推荐页移除'
                             )
                           }
                           drag={rowDrag(
@@ -1368,14 +1368,14 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                               key={item.videoId}
                               type="button"
                               className="home-config-removed-chip"
-                              title={`${item.title} · 点击恢复到首页`}
+                              title={`${item.title} · 点击恢复到推荐页`}
                               onClick={() =>
                                 void act(
                                   window.api.home.restoreSectionItem(
                                     section.categoryId,
                                     item.videoId
                                   ),
-                                  '已恢复到首页'
+                                  '已恢复到推荐页'
                                 )
                               }
                             >
@@ -1417,7 +1417,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           </Tooltip>
         </p>
         <div className="settings-panel-actions">
-          <Tooltip title="重新读取首页配置">
+          <Tooltip title="重新读取推荐配置">
             <Button
               icon={<ReloadOutlined />}
               loading={loading}
@@ -1433,7 +1433,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           <Spin />
         </div>
       ) : failed && !feed ? (
-        <Empty description="首页配置读取失败">
+        <Empty description="推荐配置读取失败">
           <Button onClick={() => void load()}>重新读取</Button>
         </Empty>
       ) : (

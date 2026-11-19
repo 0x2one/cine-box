@@ -574,6 +574,8 @@ interface VideoStats {
 interface VideoListQuery {
   keyword?: string
   categoryId?: string
+  /** 多个本地分类的并集（列表页「全部」用）：传了就按这些分类的子树一起过滤 */
+  categoryIds?: string[]
   page?: number
   pageSize?: number
   visibility?: 'all' | 'shown' | 'hidden'

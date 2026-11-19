@@ -259,7 +259,7 @@ function HomeRail({
 }
 
 /**
- * 首页：海报叠层（宽图铺满、右侧露边、循环翻页）+ 按一级分类的推荐轨道。
+ * 推荐页：海报叠层（宽图铺满、右侧露边、循环翻页）+ 按一级分类的推荐轨道。
  * 暂时不做播放 / 详情页，卡片和海报只展示；分类标题和「全部」跳到视频列表页。
  */
 function HomeView({
@@ -482,7 +482,7 @@ function HomeView({
     ? [
         current.vodClass.split(',')[0],
         current.note,
-        // 来源时间带时分秒，首页上只留日期，避免压过片名
+        // 来源时间带时分秒，推荐页上只留日期，避免压过片名
         current.latestTime ? `更新 ${current.latestTime.split(' ')[0]}` : ''
       ].filter(Boolean)
     : []
@@ -524,7 +524,7 @@ function HomeView({
         </div>
       ) : failed ? (
         <div className="home-empty-state">
-          <p className="home-empty-title">首页数据读取失败</p>
+          <p className="home-empty-title">推荐页数据读取失败</p>
           <p className="home-empty-desc">视频缓存库可能正在初始化，稍后再试一次</p>
           <Button onClick={() => void load()}>重新加载</Button>
         </div>
@@ -655,8 +655,8 @@ function HomeView({
 
           {!keyword && !hasContent && (
             <div className="home-empty-state">
-              <p className="home-empty-title">首页还没有内容</p>
-              <p className="home-empty-desc">去控制台「首页」把视频加进海报，或者打开分类推荐</p>
+              <p className="home-empty-title">推荐页还没有内容</p>
+              <p className="home-empty-desc">去控制台「推荐」把视频加进海报，或者打开分类推荐</p>
               <Button onClick={onOpenConsole}>打开控制台</Button>
             </div>
           )}

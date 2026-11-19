@@ -113,6 +113,12 @@
   animation: page-in 180ms ease-out;
 }
 
+/* 列表页切分类时内容高度会骤降（整屏卡片 → 一个加载态），滚动条出现 / 消失
+   会让内容区宽度来回跳 10px；预留滚动条槽位，横向不再抖 */
+.page--browse {
+  scrollbar-gutter: stable;
+}
+
 @keyframes page-in {
   from {
     opacity: 0;
@@ -257,6 +263,53 @@
 .titlebar-drag {
   flex: 1;
   align-self: stretch;
+}
+
+/* 展示端导航：绝对居中，不参与左右两区的宽度分配（品牌 / 窗口按钮多宽都不影响它） */
+.titlebar-nav {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  transform: translate(-50%, -50%);
+  /* 落在拖拽区里，必须自己退出拖拽，否则按钮点不到 */
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+  cursor: default;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.titlebar-nav-btn:hover {
+  color: var(--text);
+}
+
+.titlebar-nav-btn.is-active {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .titlebar-actions {
