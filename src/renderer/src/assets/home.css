@@ -385,6 +385,38 @@
   letter-spacing: 0.02em;
 }
 
+/* 标题本身就是「看全部」的入口：保留标题排版，只把按钮默认样式清掉 */
+.home-section-title-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.home-section-title-btn:hover {
+  color: var(--accent);
+}
+
+/* 轨道右侧的「全部」，与原型 .section-more 一致 */
+.home-section-more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.home-section-more:hover {
+  color: var(--accent);
+}
+
 .home-section-count {
   color: var(--text-faint);
   font-size: 12px;

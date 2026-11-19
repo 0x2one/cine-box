@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
 import { CloseOutlined, LeftOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
 import HomePicture from '../components/HomePicture'
+import VideoCard from '../components/VideoCard'
 import '../assets/home.css'
 
 /** 叠层槽位：向右叠，露出的宽度越来越少（30 / 14 / 11 / 9 / 8） */
@@ -25,11 +26,13 @@ const HERO_DRAG = 64
 function HomeRail({
   section,
   items,
-  count
+  count,
+  onOpenBrowse
 }: {
   section: HomeSectionView
   items: HomeItemView[]
   count: number
+  onOpenBrowse: (categoryId: string) => void
 }): React.JSX.Element {
   const railRef = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ left: false, right: false })
@@ -181,9 +184,27 @@ function HomeRail({
   return (
     <section className="home-section">
       <div className="home-section-head">
-        <h2 className="home-section-title">{section.title}</h2>
+        <h2 className="home-section-title">
+          {/* 点大类名 = 看这个大类下的全部视频，和右侧「全部」等价 */}
+          <button
+            type="button"
+            className="home-section-title-btn"
+            title={`查看「${section.title}」的全部视频`}
+            onClick={() => onOpenBrowse(section.categoryId)}
+          >
+            {section.title}
+          </button>
+        </h2>
         <span className="home-section-count">共 {count} 部</span>
         <div className="home-section-tools">
+          <button
+            type="button"
+            className="home-section-more"
+            title={`查看「${section.title}」的全部视频`}
+            onClick={() => onOpenBrowse(section.categoryId)}
+          >
+            全部
+          </button>
           <button
             type="button"
             className="home-rail-btn"
@@ -218,27 +239,19 @@ function HomeRail({
         onDragStart={(event) => event.preventDefault()}
       >
         {track.map((item, index) => (
-          <article
-            className="home-item"
+          <VideoCard
             // 复制的第二份用下标区分 key，滚动时不会因为重复 id 报错
             key={`${item.videoId}-${index}`}
             title={item.title}
-            aria-hidden={looping && index >= items.length ? true : undefined}
-          >
-            <div className="home-item-poster">
-              <HomePicture item={item} />
-              {/* 更新进度压在封面右下角，卡片下方只留片名和简介 */}
-              {(item.note || item.latestTime) && (
-                <span className="home-item-badge">{item.note || `更新 ${item.latestTime}`}</span>
-              )}
-            </div>
-            <p className="home-item-title" title={item.title}>
-              {item.title}
-            </p>
-            <p className="home-item-sub">
-              {item.intro || (item.actors ? `主演 ${item.actors}` : '')}
-            </p>
-          </article>
+            pic={item.pic}
+            crop={item.crop}
+            customPic={item.customPic}
+            note={item.note}
+            intro={item.intro}
+            actors={item.actors}
+            latestTime={item.latestTime}
+            ariaHidden={looping && index >= items.length}
+          />
         ))}
       </div>
     </section>
@@ -247,9 +260,15 @@ function HomeRail({
 
 /**
  * 首页：海报叠层（宽图铺满、右侧露边、循环翻页）+ 按一级分类的推荐轨道。
- * 暂时不做播放 / 详情页，所以卡片和海报只展示，不挂跳转。
+ * 暂时不做播放 / 详情页，卡片和海报只展示；分类标题和「全部」跳到视频列表页。
  */
-function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.Element {
+function HomeView({
+  onOpenConsole,
+  onOpenBrowse
+}: {
+  onOpenConsole: () => void
+  onOpenBrowse: (categoryId: string) => void
+}): React.JSX.Element {
   const [feed, setFeed] = useState<HomeFeed | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -614,6 +633,7 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
               section={section}
               items={items}
               count={keyword ? items.length : section.total}
+              onOpenBrowse={onOpenBrowse}
             />
           ))}
 
