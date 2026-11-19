@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
-import { CloseOutlined, LeftOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
+import {
+  ArrowRightOutlined,
+  ArrowUpOutlined,
+  LeftOutlined,
+  RightOutlined,
+  SearchOutlined
+} from '@ant-design/icons'
 import HomePicture from '../components/HomePicture'
 import VideoCard from '../components/VideoCard'
+import { visibleCategoryIds } from '../lib/category-tree'
+import { formatCount, formatShortDateTime } from '../utils/format'
 import '../assets/home.css'
 
 /** 叠层槽位：向右叠，露出的宽度越来越少（30 / 14 / 11 / 9 / 8） */
@@ -259,24 +267,105 @@ function HomeRail({
 }
 
 /**
+ * 推荐页收尾：最后一条轨道下面不再是空白，补一块片库速览。
+ * 只放只读统计和三个入口，统计读不到就退化成文案 + 按钮。
+ */
+function HomeFooter({
+  stats,
+  categoryCount,
+  onOpenSearch,
+  onOpenAll,
+  onBackTop
+}: {
+  stats: VideoStats | null
+  categoryCount: number | null
+  onOpenSearch: () => void
+  onOpenAll: () => void
+  onBackTop: () => void
+}): React.JSX.Element {
+  return (
+    <footer className="home-footer">
+      <div className="home-footer-main">
+        <div className="home-footer-copy">
+          <p className="home-footer-eyebrow">片库速览</p>
+          <h2 className="home-footer-title">从片库里继续找</h2>
+          <p className="home-footer-desc">本地缓存 · 按更新时间排序</p>
+        </div>
+        <div className="home-footer-actions">
+          <button type="button" className="home-footer-primary" onClick={onOpenSearch}>
+            <SearchOutlined />
+            搜索片库
+          </button>
+          <button type="button" className="home-footer-ghost" onClick={onOpenAll}>
+            浏览全部视频
+            <ArrowRightOutlined />
+          </button>
+          <button
+            type="button"
+            className="home-footer-top"
+            aria-label="回到顶部"
+            title="回到顶部"
+            onClick={onBackTop}
+          >
+            <ArrowUpOutlined />
+          </button>
+        </div>
+      </div>
+
+      {(stats || categoryCount !== null) && (
+        <div className="home-footer-stats">
+          {stats && (
+            <div className="home-footer-stat">
+              <b>{formatCount(stats.videoCount)}</b>
+              <span>部视频</span>
+            </div>
+          )}
+          {stats && (
+            <div className="home-footer-stat">
+              <b>{formatCount(stats.sourceCount)}</b>
+              <span>个来源</span>
+            </div>
+          )}
+          {categoryCount !== null && (
+            <div className="home-footer-stat">
+              <b>{formatCount(categoryCount)}</b>
+              <span>个分类</span>
+            </div>
+          )}
+          {stats?.lastCollectedAt && (
+            <span className="home-footer-stamp">
+              最近采集 {formatShortDateTime(stats.lastCollectedAt)}
+            </span>
+          )}
+        </div>
+      )}
+    </footer>
+  )
+}
+
+/**
  * 推荐页：海报叠层（宽图铺满、右侧露边、循环翻页）+ 按一级分类的推荐轨道。
  * 暂时不做播放 / 详情页，卡片和海报只展示；分类标题和「全部」跳到视频列表页。
  */
 function HomeView({
   onOpenConsole,
-  onOpenBrowse
+  onOpenBrowse,
+  onOpenSearch
 }: {
   onOpenConsole: () => void
-  onOpenBrowse: (categoryId: string) => void
+  onOpenBrowse: (categoryId: string | null) => void
+  onOpenSearch: () => void
 }): React.JSX.Element {
   const [feed, setFeed] = useState<HomeFeed | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
-  const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
   const [swapping, setSwapping] = useState(false)
   const [paused, setPaused] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  /** 页脚用的只读统计：读失败就不显示对应数字，不影响推荐本身 */
+  const [stats, setStats] = useState<VideoStats | null>(null)
+  const [categoryCount, setCategoryCount] = useState<number | null>(null)
+  const viewRef = useRef<HTMLDivElement>(null)
   const swapTimer = useRef(0)
 
   const load = useCallback(async (): Promise<void> => {
@@ -301,6 +390,39 @@ function HomeView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
+
+  // 页脚统计：视频数 / 来源数 / 可见分类数，读失败就少显示一块
+  useEffect(() => {
+    let cancelled = false
+    window.api.videos
+      .stats()
+      .then((value) => {
+        if (!cancelled) setStats(value)
+      })
+      .catch(() => {
+        // 统计失败时页脚只保留文案和入口
+      })
+    window.api.categories
+      .list()
+      .then((rows) => {
+        if (cancelled) return
+        const visible = visibleCategoryIds(rows)
+        setCategoryCount(rows.filter((row) => visible.has(row.id)).length)
+      })
+      .catch(() => {
+        // 分类读不到就不显示分类数
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const backToTop = (): void => {
+    const page = viewRef.current?.closest('.page') as HTMLElement | null
+    if (!page) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    page.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' })
+  }
 
   useEffect(
     () => () => {
@@ -430,53 +552,32 @@ function HomeView({
     go(target)
   }
 
-  // 快捷键：Ctrl K 聚焦搜索、Esc 清空、左右键翻海报
+  // 左右键翻海报：焦点在输入框 / 文本域里时不抢按键
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null
       const typing =
         !!target &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        inputRef.current?.focus()
-        inputRef.current?.select()
-        return
-      }
-      if (event.key === 'Escape' && typing && query) {
-        setQuery('')
-        return
-      }
       if (typing) return
       if (event.key === 'ArrowLeft') go(index - 1)
       if (event.key === 'ArrowRight') go(index + 1)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [go, index, query])
+  }, [go, index])
 
-  const keyword = query.trim().toLowerCase()
-  const matchedSections = useMemo(() => {
+  const railSections = useMemo(() => {
     return sections
       .filter((section) => section.visible && section.categoryVisible)
-      .map((section) => {
-        const visible = section.items.filter(
-          (item) => !item.hidden && !item.missing && !item.videoHidden
-        )
-        const items = keyword
-          ? visible.filter((item) =>
-              `${item.title} ${item.note} ${item.actors} ${item.intro} ${section.title}`
-                .toLowerCase()
-                .includes(keyword)
-            )
-          : visible
-        return { section, items }
-      })
+      .map((section) => ({
+        section,
+        items: section.items.filter((item) => !item.hidden && !item.missing && !item.videoHidden)
+      }))
       .filter((entry) => entry.items.length > 0)
-  }, [keyword, sections])
+  }, [sections])
 
-  const matched = matchedSections.reduce((sum, entry) => sum + entry.items.length, 0)
-  const hasContent = posters.length > 0 || matchedSections.length > 0
+  const hasContent = posters.length > 0 || railSections.length > 0
 
   const meta = current
     ? [
@@ -488,36 +589,7 @@ function HomeView({
     : []
 
   return (
-    <div className="home-view">
-      <div className="home-search">
-        <SearchOutlined className="home-search-icon" />
-        <input
-          ref={inputRef}
-          type="search"
-          value={query}
-          placeholder="搜片名、演员、分类"
-          aria-label="搜索片库"
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        {query ? (
-          <button
-            type="button"
-            className="home-search-clear"
-            aria-label="清除搜索"
-            onClick={() => {
-              setQuery('')
-              inputRef.current?.focus()
-            }}
-          >
-            <CloseOutlined style={{ fontSize: 10 }} />
-          </button>
-        ) : (
-          <span className="home-search-hint">Ctrl K</span>
-        )}
-      </div>
-
+    <div className="home-view" ref={viewRef}>
       {loading ? (
         <div className="home-loading">
           <Spin />
@@ -621,39 +693,28 @@ function HomeView({
             </section>
           )}
 
-          {keyword && matched > 0 && (
-            <p className="home-result-line">
-              搜索「{query.trim()}」找到 <em>{matched}</em> 部影片
-            </p>
-          )}
-
-          {matchedSections.map(({ section, items }) => (
+          {railSections.map(({ section, items }) => (
             <HomeRail
               key={section.categoryId}
               section={section}
               items={items}
-              count={keyword ? items.length : section.total}
+              count={section.total}
               onOpenBrowse={onOpenBrowse}
             />
           ))}
 
-          {/* 有搜索词但一条都没中：海报还留着，下面单独给一个空状态 */}
-          {keyword && matched === 0 && (
-            <div className="home-empty-state">
-              <p className="home-empty-title">片库里没有「{query.trim()}」</p>
-              <p className="home-empty-desc">换个片名、演员或分类再试一次</p>
-              <Button
-                onClick={() => {
-                  setQuery('')
-                  inputRef.current?.focus()
-                }}
-              >
-                清除搜索
-              </Button>
-            </div>
+          {/* 最后一条轨道下面用片库速览收尾 */}
+          {hasContent && (
+            <HomeFooter
+              stats={stats}
+              categoryCount={categoryCount}
+              onOpenSearch={onOpenSearch}
+              onOpenAll={() => onOpenBrowse(null)}
+              onBackTop={backToTop}
+            />
           )}
 
-          {!keyword && !hasContent && (
+          {!hasContent && (
             <div className="home-empty-state">
               <p className="home-empty-title">推荐页还没有内容</p>
               <p className="home-empty-desc">去控制台「推荐」把视频加进海报，或者打开分类推荐</p>

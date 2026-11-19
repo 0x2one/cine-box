@@ -37,7 +37,11 @@ function App(): React.JSX.Element {
         {/* key 保证切换页面时重放一次轻微的淡入 */}
         <div className="page" key={view}>
           {view === 'home' && (
-            <HomeView onOpenConsole={() => setView('console')} onOpenBrowse={openBrowse} />
+            <HomeView
+              onOpenConsole={() => setView('console')}
+              onOpenBrowse={openBrowse}
+              onOpenSearch={() => setView('search')}
+            />
           )}
           {view === 'browse' && (
             <BrowseView key={browseEntry} initialCategoryId={browseCategoryId} />

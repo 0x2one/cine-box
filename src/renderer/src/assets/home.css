@@ -4,72 +4,7 @@
 .home-view {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 20px 32px 72px;
-}
-
-/* 搜索 */
-
-.home-search {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 22px;
-  padding-bottom: 9px;
-  border-bottom: 1px solid var(--border-strong);
-  transition: border-color 0.18s ease;
-}
-
-.home-search:focus-within {
-  border-bottom-color: var(--accent);
-}
-
-.home-search-icon {
-  flex: none;
-  color: var(--text-faint);
-}
-
-.home-search input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  outline: none;
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 15px;
-}
-
-.home-search input::placeholder {
-  color: var(--text-faint);
-}
-
-.home-search input::-webkit-search-cancel-button {
-  display: none;
-}
-
-.home-search-hint {
-  flex: none;
-  color: var(--text-faint);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-}
-
-.home-search-clear {
-  display: grid;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.home-search-clear:hover {
-  color: var(--text);
+  padding: 28px 32px 72px;
 }
 
 /* 海报叠层：宽图铺满整张卡，右侧露出后面几张的竖条 */
@@ -344,24 +279,6 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* 搜索结果状态行 */
-
-.home-result-line {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  margin: 0 0 6px;
-  color: var(--text-muted);
-  font-size: 12.5px;
-}
-
-.home-result-line em {
-  color: var(--text);
-  font-style: normal;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 /* 分类区块 */
 
 .home-section {
@@ -587,6 +504,213 @@
   place-items: center;
 }
 
+/* ── 页脚：片库速览 ──
+   最后一条轨道下面不再直接露出页面底色；统计读不到时只留文案和入口。 */
+
+.home-footer {
+  position: relative;
+  overflow: hidden;
+  margin-top: 58px;
+  padding: 28px 32px 20px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    radial-gradient(
+      120% 160% at 100% 0%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 56%
+    ),
+    var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+/* 背景大字水印：压到几乎看不见，只负责收尾的层次 */
+.home-footer::before {
+  position: absolute;
+  right: 28px;
+  bottom: -20px;
+  color: color-mix(in srgb, var(--text) 3.5%, transparent);
+  font-family: var(--font-display);
+  font-size: 104px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  content: '映盒剧场';
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* 底部一条断续的「胶片孔」装饰 */
+.home-footer::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 5px;
+  background: repeating-linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text) 7%, transparent) 0 16px,
+    transparent 16px 32px
+  );
+  content: '';
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.home-footer-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 32px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.home-footer-copy {
+  min-width: 0;
+}
+
+.home-footer-eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+.home-footer-title {
+  margin: 7px 0 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+}
+
+.home-footer-desc {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.home-footer-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.home-footer-primary,
+.home-footer-ghost {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.home-footer-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.home-footer-primary:hover {
+  filter: brightness(1.06);
+}
+
+.home-footer-primary .anticon {
+  font-size: 13px;
+}
+
+.home-footer-ghost {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.home-footer-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.home-footer-ghost .anticon {
+  font-size: 11px;
+}
+
+.home-footer-top {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.home-footer-top:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.home-footer-stats {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 36px;
+  align-items: baseline;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.home-footer-stat {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.home-footer-stat b {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.home-footer-stat span {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.home-footer-stamp {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 1080px) {
   .home-view {
     padding-inline: 26px;
@@ -607,6 +731,38 @@
   .home-rail {
     grid-auto-columns: 132px;
   }
+
+  .home-footer {
+    padding: 24px 24px 18px;
+  }
+
+  .home-footer::before {
+    font-size: 86px;
+  }
+
+  .home-footer-title {
+    font-size: 22px;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-footer-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 18px;
+  }
+
+  .home-footer-actions {
+    justify-content: flex-start;
+  }
+
+  .home-footer-stats {
+    gap: 10px 22px;
+  }
+
+  .home-footer-stamp {
+    margin-left: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -617,6 +773,12 @@
   .home-hero-info,
   .home-card::after,
   .home-item-poster .home-picture img {
+    transition: none;
+  }
+
+  .home-footer-primary,
+  .home-footer-ghost,
+  .home-footer-top {
     transition: none;
   }
 }
