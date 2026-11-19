@@ -46,6 +46,8 @@ interface ActiveTask {
 }
 
 const DEFAULT_MAX_PAGES: Record<CollectMode, number> = { full: 500, incremental: 100 }
+/** 单轮页数硬上限：站点总页数异常（例如 pagecount 一直涨）时兜底，避免无限翻页 */
+const MAX_PAGES_PER_RUN = 10000
 const REPLACE_BATCH = 1000
 
 function nowIso(): string {
@@ -323,10 +325,21 @@ export function createVideoCollector(options: {
       `${item.origin === 'schedule' ? '定时触发' : '手动触发'} · 每页 ${item.pageSize} 条`
     )
 
-    const maxPages =
-      Math.min(Math.max(Number(item.maxPages) || DEFAULT_MAX_PAGES[item.mode], 1), 10000) || 1
+    // 页数上限只是防站点分页异常导致无限翻页，必须按「本轮」算：
+    // 站点给了可靠总页数就翻到最后一页（全量任务本来就该翻完），否则按默认值兜底。
+    // 之前按绝对页数比较，全量站点翻到默认 500 页暂停后，续采第 501 页立刻又撞上限，
+    // 界面提示「已继续采集」但一页都没抓，任务永远停在 500 页。
+    const pageBudget = Math.min(
+      Math.max(Number(item.maxPages) || DEFAULT_MAX_PAGES[item.mode], 1),
+      MAX_PAGES_PER_RUN
+    )
+    const runTarget =
+      progress.pageCount > 0
+        ? Math.min(progress.pageCount, MAX_PAGES_PER_RUN)
+        : progress.page + pageBudget
     let completed = false
     let paused = false
+    let hitPageLimit = false
     let detailCached = 0
     let detailFailed = 0
     // 详情来源：本页响应直接落盘 / 仍需联网补抓（个别站点整页模式不给详情字段）
@@ -347,7 +360,8 @@ export function createVideoCollector(options: {
         break
       }
       const nextPage = progress.page + 1
-      if (nextPage > maxPages) {
+      if (nextPage > runTarget) {
+        hitPageLimit = true
         paused = true
         break
       }
@@ -479,7 +493,14 @@ export function createVideoCollector(options: {
       const pausedProgress =
         store.updateProgress(progress.id, { status: 'paused', error: '' }) ?? progress
       emit(pausedProgress)
-      log('warn', item, '采集已暂停', `停在第 ${pausedProgress.page} 页，下次继续 · ${phaseText}`)
+      log(
+        'warn',
+        item,
+        '采集已暂停',
+        `停在第 ${pausedProgress.page} 页，` +
+          (hitPageLimit ? `本轮已达 ${runTarget} 页上限，` : '') +
+          `下次继续 · ${phaseText}`
+      )
       return
     }
 
