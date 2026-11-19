@@ -3041,6 +3041,10 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-footer {
 body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   min-height: 0;
   overflow-y: auto;
+  /* 只写 overflow-y 时，另一轴会按规范变成 auto：antd 的 Row gutter 用
+     margin-inline: -6px 撑宽行，比 body 宽 12px，会在弹窗底部冒出横向滚动条
+     （站点表单是唯一用 Row gutter 的弹窗）。横向不滚，直接裁掉这 6px 空隙。 */
+  overflow-x: hidden;
 }
 
 /* 详情抽屉分两段：封面 / 标题 / 简介 / 「来源与播放线路」标题整块固定，
