@@ -240,7 +240,16 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
   const dragState = useRef<{ id: number; x: number; moved: boolean } | null>(null)
   /** 松手时浏览器还会补一个 click，用它挡住「拖完顺手翻两页」 */
   const dragMoved = useRef(false)
+  /** 松手后把 --drag 归零的计时器 */
+  const dragResetTimer = useRef(0)
   const [dragging, setDragging] = useState(false)
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(dragResetTimer.current)
+    },
+    []
+  )
 
   const onHeroPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
     if (event.button !== 0 || posters.length < 2) return
@@ -262,12 +271,11 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
         event.currentTarget.setPointerCapture(event.pointerId)
       }
     }
-    // 跟手位移：只有最前面那张跟着指针走，边走边淡出，后面的那张才是下一部
-    const shifted = Math.max(-180, Math.min(180, dx))
-    const fade = Math.min(0.55, Math.abs(shifted) / 300)
+    // 只有最前面那张跟着指针走：位移 1:1，松手靠 CSS 过渡回到该在的位置
     const deck = deckRef.current
+    const width = deck?.clientWidth || 900
+    const shifted = Math.max(-width, Math.min(width, dx))
     deck?.style.setProperty('--drag', `${shifted}px`)
-    deck?.style.setProperty('--drag-fade', String(fade))
   }
 
   const endHeroDrag = (event: React.PointerEvent<HTMLElement>, commit: boolean): void => {
@@ -275,13 +283,24 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
     if (!state || state.id !== event.pointerId) return
     const dx = event.clientX - state.x
     dragState.current = null
-    setDragging(false)
-    deckRef.current?.style.setProperty('--drag', '0px')
-    deckRef.current?.style.setProperty('--drag-fade', '0')
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    if (commit && state.moved && Math.abs(dx) >= HERO_DRAG) go(index + (dx < 0 ? 1 : -1))
+    // 松手：撤掉「跟手」这一帧的 transition:none，卡片自己滑回去 / 滑到最底层
+    setDragging(false)
+    window.clearTimeout(dragResetTimer.current)
+    // 等过渡跑起来再清掉位移，否则会直接跳回原位
+    dragResetTimer.current = window.setTimeout(() => {
+      deckRef.current?.style.setProperty('--drag', '0px')
+    }, 340)
+    if (!commit || !state.moved || Math.abs(dx) < HERO_DRAG) return
+    // 够远了：换一张。卡片按视频 id 做 key，所以「换页」只是各张挪到新槽位，
+    // 被拖的那张顺势滑到最底层，下一层顶上来的过程是连续的
+    const total = posters.length
+    if (total < 2) return
+    window.clearTimeout(swapTimer.current)
+    setSwapping(false)
+    setIndex((((index + (dx < 0 ? 1 : -1)) % total) + total) % total)
   }
 
   /** 拖完那一下的 click 不再翻页，纯点击照旧 */
@@ -410,8 +429,8 @@ function HomeView({ onOpenConsole }: { onOpenConsole: () => void }): React.JSX.E
                   const front = slot === 0
                   return (
                     <div
-                      // 槽位固定，换的是槽位里的人和位置
-                      key={`slot-${slot}`}
+                      // 按视频 id 做 key：换页时是同一张卡片挪到新槽位，过渡才连得上
+                      key={poster.videoId}
                       className="home-card"
                       data-slot={slot}
                       style={

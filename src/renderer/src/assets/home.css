@@ -95,15 +95,17 @@
   z-index: 1;
 }
 
-/* 只让最前面那张跟着手指走：像把这张卡抽走，后面的自然顶上来 */
-.home-deck .home-card[data-slot='0'] {
+/* 换页时每张卡按 id 挪到新槽位：left / transform 一起过渡，
+   被拖的那张顺势滑到最底层，下一层同时在往前顶 */
+.home-deck .home-card {
   transition:
-    transform 0.2s ease,
-    opacity 0.2s ease;
+    left 300ms cubic-bezier(0.22, 0.7, 0.2, 1),
+    transform 300ms cubic-bezier(0.22, 0.7, 0.2, 1),
+    box-shadow 300ms ease;
 }
 
+/* 拖动中：只有最前面那张 1:1 跟手，过渡关掉才跟得住 */
 .home-hero.is-dragging .home-deck .home-card[data-slot='0'] {
-  opacity: calc(1 - var(--drag-fade, 0));
   transform: translateX(var(--drag, 0px));
   transition: none;
 }
@@ -161,8 +163,8 @@
   opacity: calc(var(--dim) * 0.5);
 }
 
-/* 压在最前面那张的文字压暗层：底部压暗给文字让位，左上只留一点点 */
-.home-card[data-slot='0']::before {
+/* 压在最前面那张的文字压暗层：跟着槽位淡入淡出，换页时不会硬切 */
+.home-card::before {
   position: absolute;
   inset: 0;
   z-index: 3;
@@ -176,7 +178,13 @@
     ),
     linear-gradient(90deg, rgba(6, 10, 16, 0.5) 0%, rgba(6, 10, 16, 0) 50%);
   content: '';
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 300ms ease;
+}
+
+.home-card[data-slot='0']::before {
+  opacity: 1;
 }
 
 /* 图片：默认 object-fit cover；自定义图片按 crop 定位，由 HomePicture 写内联样式 */
