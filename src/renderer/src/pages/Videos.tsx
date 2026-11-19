@@ -12,7 +12,8 @@ import {
   Spin,
   Switch,
   Tag,
-  Tooltip
+  Tooltip,
+  TreeSelect
 } from 'antd'
 import {
   EyeInvisibleOutlined,
@@ -172,6 +173,8 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
   const [keyword, setKeyword] = useState('')
   const [query, setQuery] = useState('')
   const [visibility, setVisibility] = useState<Visibility>('all')
+  /** 按绑定的本地分类过滤：空串＝全部 */
+  const [categoryId, setCategoryId] = useState('')
   const [page, setPage] = useState(1)
   const [items, setItems] = useState<VideoListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -194,14 +197,69 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
   const [draftPic, setDraftPic] = useState('')
   const [draftHidden, setDraftHidden] = useState(false)
   const [saving, setSaving] = useState(false)
-  /** 首页一级分类：推荐时选目标 */
-  const [homeCategories, setHomeCategories] = useState<VideoCategory[]>([])
+  /** 本地分类全量（含子分类）：列表的分类筛选和「推荐」弹窗共用 */
+  const [categories, setCategories] = useState<VideoCategory[]>([])
+  /** 每个本地分类的绑定数量，用来只列出真能查到视频的分类 */
+  const [boundCounts, setBoundCounts] = useState<Record<string, number>>({})
   const [recommendTarget, setRecommendTarget] = useState<VideoListItem | null>(null)
   const [recommending, setRecommending] = useState<string>('')
   /** 快速翻页时只认最后一次请求的结果 */
   const requestId = useRef(0)
 
   const siteMap = useMemo(() => new Map(sites.map((site) => [site.id, site])), [sites])
+
+  /**
+   * 分类筛选下拉：只列出真正有绑定的分类（子分类有绑定就保留父级），
+   * 一个绑定都没有时不渲染这个下拉。
+   */
+  const categoryTree = useMemo(() => {
+    const bound = new Set(
+      Object.entries(boundCounts)
+        .filter(([, count]) => count > 0)
+        .map(([id]) => id)
+    )
+    const parentOf = new Map(categories.map((category) => [category.id, category.parentId]))
+    for (const id of [...bound]) {
+      let parent = parentOf.get(id) ?? null
+      while (parent && !bound.has(parent)) {
+        bound.add(parent)
+        parent = parentOf.get(parent) ?? null
+      }
+    }
+    if (bound.size === 0) return []
+    const children = new Map<string, VideoCategory[]>()
+    for (const category of categories) {
+      if (!bound.has(category.id)) continue
+      const key = category.parentId ?? ''
+      const list = children.get(key) ?? []
+      list.push(category)
+      children.set(key, list)
+    }
+    interface CategoryNode {
+      value: string
+      key: string
+      title: string
+      children?: CategoryNode[]
+    }
+    const build = (parentId: string): CategoryNode[] =>
+      (children.get(parentId) ?? []).map((category) => {
+        const kids = build(category.id)
+        return {
+          value: category.id,
+          key: category.id,
+          // 展示端隐藏的分类照样能查，只是标一下
+          title: category.visible ? category.name : `${category.name}（已隐藏）`,
+          children: kids.length > 0 ? kids : undefined
+        }
+      })
+    return build('')
+  }, [boundCounts, categories])
+
+  /** 首页一级分类：推荐时选目标 */
+  const homeCategories = useMemo(
+    () => categories.filter((category) => !category.parentId),
+    [categories]
+  )
 
   useEffect(() => {
     window.api.sites
@@ -212,9 +270,15 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
       })
     window.api.categories
       .list()
-      .then((categories) => setHomeCategories(categories.filter((item) => !item.parentId)))
+      .then(setCategories)
       .catch(() => {
         // 分类读不到时「推荐」弹窗提示去建分类，不影响列表
+      })
+    window.api.bindings
+      .counts()
+      .then(setBoundCounts)
+      .catch(() => {
+        // 读不到绑定数就退化成列出全部分类
       })
   }, [])
 
@@ -224,6 +288,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     try {
       const result = await window.api.videos.list({
         keyword: query,
+        categoryId: categoryId || undefined,
         page,
         pageSize: PAGE_SIZE,
         visibility
@@ -247,7 +312,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     } finally {
       if (ticket === requestId.current) setLoading(false)
     }
-  }, [message, page, query, visibility])
+  }, [categoryId, message, page, query, visibility])
 
   useEffect(() => {
     // setState 发生在 await 之后；规则按调用点误报，这里显式关闭
@@ -478,8 +543,23 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
           <span className="sites-count">共 {total} 个视频</span>
         </p>
         <div className="settings-panel-actions">
+          {categoryTree.length > 0 && (
+            <TreeSelect
+              className="video-category"
+              allowClear
+              treeDefaultExpandAll
+              placeholder="全部分类"
+              value={categoryId || undefined}
+              treeData={categoryTree}
+              onChange={(value) => {
+                setCategoryId(typeof value === 'string' ? value : '')
+                setPage(1)
+              }}
+            />
+          )}
           <Select
             className="video-visibility"
+            prefix={<span className="video-filter-prefix">状态</span>}
             value={visibility}
             onChange={(value) => {
               setVisibility(value)

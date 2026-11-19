@@ -462,9 +462,15 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
   let filters: { siteId: string; categoryId: string }[] | undefined
   if (query?.categoryId) {
-    filters = bindingStore
-      .forCategory(query.categoryId)
-      .map((binding) => ({ siteId: binding.siteId, categoryId: binding.sourceId }))
+    // 选中的是父分类时，把它下面各级子分类的绑定一起算进来
+    const seen = new Set<string>()
+    filters = []
+    for (const binding of bindingStore.forCategories(categoryStore.subtreeIds(query.categoryId))) {
+      const key = `${binding.siteId}\u0000${binding.sourceId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      filters.push({ siteId: binding.siteId, categoryId: binding.sourceId })
+    }
     if (filters.length === 0) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
   }
   const result = videoStore.listVideos(query ?? {}, filters)

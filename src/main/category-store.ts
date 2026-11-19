@@ -41,6 +41,8 @@ export interface CategoryResult {
 export interface CategoryStore {
   init: () => Promise<void>
   list: () => VideoCategory[]
+  /** 一个分类连同它下面各级子分类的 id，按分类筛选视频时用 */
+  subtreeIds: (id: string) => string[]
   create: (input: VideoCategoryInput) => CategoryResult
   update: (id: string, input: VideoCategoryInput) => CategoryResult
   /** 切换展示端的显示状态；关闭父分类会让整棵子树在展示端一起隐藏 */
@@ -180,6 +182,30 @@ export function createCategoryStore(file: string): CategoryStore {
     if (ids.length === 0) return
     const statement = connection.prepare(UPDATE_ORDER)
     ids.forEach((id, position) => statement.run(position, id))
+  }
+
+  /** 一个分类连同各级子分类的 id（广度优先，带环保护），父分类过滤时要连子分类一起查 */
+  function subtreeIds(id: string): string[] {
+    const root = typeof id === 'string' ? id.trim() : ''
+    if (!root) return []
+    const children = new Map<string, string[]>()
+    for (const row of queryAll()) {
+      if (!row.parentId) continue
+      const list = children.get(row.parentId) ?? []
+      list.push(row.id)
+      children.set(row.parentId, list)
+    }
+    const result: string[] = []
+    const seen = new Set<string>()
+    const queue = [root]
+    while (queue.length > 0) {
+      const current = queue.shift() as string
+      if (seen.has(current)) continue
+      seen.add(current)
+      result.push(current)
+      queue.push(...(children.get(current) ?? []))
+    }
+    return result
   }
 
   function create(input: VideoCategoryInput): CategoryResult {
@@ -337,6 +363,7 @@ export function createCategoryStore(file: string): CategoryStore {
       }
     },
     list: queryAll,
+    subtreeIds,
     create,
     update,
     setVisible,

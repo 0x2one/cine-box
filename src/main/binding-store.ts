@@ -54,6 +54,8 @@ export interface BindingStore {
   forSite: (siteId: string) => SiteCategoryBinding[]
   /** 某个本地分类已绑定的在线分类，按站点名、在线分类名排序 */
   forCategory: (categoryId: string) => CategoryBinding[]
+  /** 一批本地分类的绑定（父分类过滤时把子分类一起带上） */
+  forCategories: (categoryIds: string[]) => CategoryBinding[]
   /** 全部「站点 + 在线分类 → 本地分类路径」，列表页批量解析绑定后类型 */
   pathsForSourceCategories: () => SourceCategoryPath[]
   /** 每个本地分类的绑定数量，未绑定的分类不出现 */
@@ -85,13 +87,16 @@ WHERE b.site_id = ?
 ORDER BY sc.rowid
 `
 
-const SELECT_CATEGORY_BINDINGS = `
+const CATEGORY_BINDING_SELECT = `
 SELECT b.id AS id, b.site_id AS site_id, b.site_category_id AS site_category_id,
        b.created_at AS created_at, s.name AS site_name, s.display AS site_display,
        sc.source_id AS source_id, sc.name AS category_name
 FROM category_bindings AS b
 JOIN site_categories AS sc ON sc.id = b.site_category_id
 JOIN sites AS s ON s.id = b.site_id
+`
+
+const SELECT_CATEGORY_BINDINGS = `${CATEGORY_BINDING_SELECT}
 WHERE b.video_category_id = ?
 ORDER BY s.name, sc.name
 `
@@ -135,6 +140,20 @@ interface CategoryNameRow {
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value : ''
+}
+
+/** 一条绑定的行映射：forCategory / forCategories 共用 */
+function rowToCategoryBinding(row: unknown): CategoryBinding {
+  const raw = row as Record<string, unknown>
+  return {
+    id: text(raw.id),
+    siteId: text(raw.site_id),
+    siteName: text(raw.site_display) || text(raw.site_name),
+    siteCategoryId: text(raw.site_category_id),
+    sourceId: text(raw.source_id),
+    name: text(raw.category_name),
+    createdAt: text(raw.created_at)
+  }
 }
 
 /** 去重并剔掉不合法的定位，空数组表示调用方没给有效输入 */
@@ -222,20 +241,28 @@ export function createBindingStore(file: string): BindingStore {
     return database()
       .prepare(SELECT_CATEGORY_BINDINGS)
       .all(id)
-      .map((row) => {
-        const raw = row as Record<string, unknown>
-        const name = text(raw.site_name)
-        const display = text(raw.site_display)
-        return {
-          id: text(raw.id),
-          siteId: text(raw.site_id),
-          siteName: display || name,
-          siteCategoryId: text(raw.site_category_id),
-          sourceId: text(raw.source_id),
-          name: text(raw.category_name),
-          createdAt: text(raw.created_at)
-        }
-      })
+      .map(rowToCategoryBinding)
+      .filter((row) => row.id !== '')
+  }
+
+  /** 一批本地分类的绑定：按分类过滤视频时，父分类要连子分类一起查 */
+  function forCategories(categoryIds: string[]): CategoryBinding[] {
+    const ids = [
+      ...new Set(
+        categoryIds
+          .map((categoryId) => text(categoryId).trim())
+          .filter((categoryId) => categoryId !== '')
+      )
+    ]
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(', ')
+    return database()
+      .prepare(
+        `${CATEGORY_BINDING_SELECT}WHERE b.video_category_id IN (${placeholders})
+ORDER BY s.name, sc.name`
+      )
+      .all(...ids)
+      .map(rowToCategoryBinding)
       .filter((row) => row.id !== '')
   }
 
@@ -339,6 +366,7 @@ export function createBindingStore(file: string): BindingStore {
     },
     forSite,
     forCategory,
+    forCategories,
     pathsForSourceCategories,
     counts,
     bind,

@@ -2738,7 +2738,18 @@ body .collect-form .ant-form-item-extra {
 }
 
 .video-visibility {
-  width: 104px;
+  width: 128px;
+}
+
+/* 生成器里的前缀说明：让「全部」这个选项自己说清在筛什么 */
+.video-filter-prefix {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* 按绑定的本地分类过滤：层级用 TreeSelect 展开 */
+.video-category {
+  width: 168px;
 }
 
 /* antd List 竖排布局：右侧封面垂直居中 */
