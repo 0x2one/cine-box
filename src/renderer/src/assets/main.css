@@ -3346,6 +3346,15 @@ button.video-episode:focus-visible {
   padding-bottom: 8px;
 }
 
+/* 首页配置：tab 条跟着标题行一起吸顶（标题行本身是 sticky，tab 贴在它下沿） */
+.home-config-tabs .ant-tabs-nav {
+  position: sticky;
+  top: var(--head-h, 48px);
+  z-index: 4;
+  padding-top: 2px;
+  background: var(--bg);
+}
+
 /* 标题行右侧的说明：跟着 tab 切换，超长省略，悬停看全文 */
 .home-config-tip {
   display: inline-flex;
@@ -3433,6 +3442,15 @@ button.video-episode:focus-visible {
   overflow: hidden;
   border-radius: 6px;
   background: var(--surface-muted);
+  /* 点缩略图直接打开编辑弹窗 */
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+
+.home-thumb:hover,
+.home-thumb:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+  outline: none;
 }
 
 .home-thumb--wide {
@@ -3679,6 +3697,13 @@ button.video-episode:focus-visible {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  /* 整行空白处也能点，展开 / 收起；行里的控件各自覆盖成自己的光标 */
+  cursor: pointer;
+}
+
+.home-config-section-head input,
+.home-config-section-head textarea {
+  cursor: text;
 }
 
 .home-config-section-title {

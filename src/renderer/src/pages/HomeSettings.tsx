@@ -703,6 +703,16 @@ function HomeItemRow({
       <div
         className={`home-thumb${ratio > 1 ? ' home-thumb--wide' : ''}`}
         style={{ aspectRatio: String(ratio) }}
+        role="button"
+        tabIndex={0}
+        title="点一下编辑这条海报"
+        aria-label={`编辑：${item.title}`}
+        onClick={onEdit}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          onEdit()
+        }}
       >
         <HomePicture item={item} />
       </div>
@@ -937,6 +947,19 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   /** 展开的分组（默认全收起，展开状态记到 localStorage）；「已移除」列表只在本页 */
   const [expanded, setExpanded] = useState<string[]>(readExpanded)
   const [removedOpen, setRemovedOpen] = useState<string[]>([])
+  /** 标题行自己是 sticky 的，tab 条要贴在它下沿，所以量一下它的实际高度 */
+  const headRef = useRef<HTMLDivElement>(null)
+  const [headHeight, setHeadHeight] = useState(0)
+
+  useEffect(() => {
+    const head = headRef.current
+    if (!head) return
+    const sync = (): void => setHeadHeight(head.offsetHeight)
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(head)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     try {
@@ -1153,7 +1176,21 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
               className={`home-config-section${isCollapsed ? ' is-collapsed' : ''}`}
               key={section.categoryId}
             >
-              <div className="home-config-section-head">
+              <div
+                className="home-config-section-head"
+                // 整行空白处也能展开 / 收起，但输入框、按钮、规则和开关要照常操作
+                onClick={(event) => {
+                  const target = event.target as HTMLElement
+                  if (
+                    target.closest(
+                      'button, input, textarea, select, label, a, .ant-radio-group, .ant-switch, .ant-select'
+                    )
+                  ) {
+                    return
+                  }
+                  toggleKey(setExpanded, section.categoryId)
+                }}
+              >
                 <div className="home-config-section-title">
                   <button
                     type="button"
@@ -1364,7 +1401,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   return (
     <>
-      <div className="settings-panel-head has-actions">
+      <div className="settings-panel-head has-actions" ref={headRef}>
         <h2 className="settings-panel-title">{title}</h2>
         <span className="settings-panel-sep">·</span>
         <p className="settings-panel-desc">
@@ -1400,14 +1437,19 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           <Button onClick={() => void load()}>重新读取</Button>
         </Empty>
       ) : (
-        <Tabs
-          activeKey={tab}
-          onChange={(key) => setTab(key as 'poster' | 'section')}
-          items={[
-            { key: 'poster', label: '海报叠层', children: posterTab },
-            { key: 'section', label: '分类推荐', children: sectionTab }
-          ]}
-        />
+        <div
+          className="home-config-tabs"
+          style={{ '--head-h': `${headHeight}px` } as React.CSSProperties}
+        >
+          <Tabs
+            activeKey={tab}
+            onChange={(key) => setTab(key as 'poster' | 'section')}
+            items={[
+              { key: 'poster', label: '海报叠层', children: posterTab },
+              { key: 'section', label: '分类推荐', children: sectionTab }
+            ]}
+          />
+        </div>
       )}
 
       {editor && (
