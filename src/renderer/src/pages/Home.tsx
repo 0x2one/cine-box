@@ -17,7 +17,11 @@ const AUTOPLAY_MS = 7000
 /** 叠层拖动超过这个距离才算翻页，太短就当作没拖 */
 const HERO_DRAG = 64
 
-/** 一个分类轨道：头部两个箭头控制横向滚动，两端到头就置灰 */
+/**
+ * 一个分类轨道：头部两个箭头控制横向滚动。
+ * 内容比轨道宽时把列表复制一份，滚过接缝就换成内容完全一样的另一半，
+ * 所以左右两个方向都能一直划下去（不会停在第一个 / 最后一个）。
+ */
 function HomeRail({
   section,
   items,
@@ -32,6 +36,49 @@ function HomeRail({
   /** 指针横向拖动：按住往左拖就是往后看，和箭头按钮等价 */
   const dragRef = useRef<{ id: number; x: number; scroll: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  /** 列表是否复制了一份（只有内容溢出时才需要循环） */
+  const [looping, setLooping] = useState(false)
+  const loopRef = useRef(false)
+  /** 箭头翻页的平滑滚动期间不做接缝校正，等它滚完再归位 */
+  const settlingRef = useRef(false)
+  const settleTimer = useRef(0)
+
+  /** 一份（复制前）列表的像素宽度：用第二份第一张卡的偏移算，比 scrollWidth / 2 准 */
+  const copyWidthOf = useCallback(
+    (rail: HTMLDivElement): number => {
+      if (!loopRef.current) return rail.scrollWidth
+      const first = rail.children[0] as HTMLElement | undefined
+      const clone = rail.children[items.length] as HTMLElement | undefined
+      if (!first || !clone) return rail.scrollWidth / 2
+      return clone.offsetLeft - first.offsetLeft
+    },
+    [items.length]
+  )
+
+  /** 瞬移：轨道本身是 scroll-behavior: smooth，换接缝 / 回到起点时必须绕开它，否则会看见一段长滑动 */
+  const jump = (rail: HTMLDivElement, left: number): void => {
+    const previous = rail.style.scrollBehavior
+    rail.style.scrollBehavior = 'auto'
+    rail.scrollLeft = left
+    rail.style.scrollBehavior = previous
+  }
+
+  /** 滚过接缝就跳到等价的另一半：相差整整一份，画面一模一样，用户看不见跳变 */
+  const normalize = (): void => {
+    const rail = railRef.current
+    if (!rail || !loopRef.current) return
+    const half = copyWidthOf(rail)
+    if (half <= 1) return
+    const current = rail.scrollLeft
+    let next = current
+    if (current > half + 0.5) next = current - half
+    // 顶到最左边其实是另一份的开头，换过去之后往右还有得划
+    else if (current <= 0.5) next = current + half
+    if (Math.abs(next - current) <= 0.5) return
+    jump(rail, next)
+    // 拖动中途换位时，拖动基准也要跟着挪，否则下一次移动会跳回去
+    if (dragRef.current) dragRef.current.scroll = next
+  }
 
   const update = useCallback(() => {
     const rail = railRef.current
@@ -43,21 +90,64 @@ function HomeRail({
     })
   }, [])
 
+  /** 按「一份」的宽度判断要不要循环：复制过之后 scrollWidth 是两份 */
+  const measure = useCallback(() => {
+    const rail = railRef.current
+    if (!rail) return
+    const perCopy = copyWidthOf(rail)
+    const next = items.length > 1 && perCopy > rail.clientWidth + 2
+    if (next === loopRef.current) return
+    loopRef.current = next
+    setLooping(next)
+  }, [copyWidthOf, items.length])
+
   useEffect(() => {
+    measure()
     update()
     const rail = railRef.current
     if (!rail) return
-    const observer = new ResizeObserver(update)
+    const observer = new ResizeObserver(() => {
+      measure()
+      update()
+    })
     observer.observe(rail)
     return () => observer.disconnect()
-  }, [items.length, update])
+  }, [measure, update])
+
+  // 复制之后从第二份的开头开始：左边和右边都留着可以划的内容
+  useEffect(() => {
+    const rail = railRef.current
+    if (!rail) return
+    if (looping) jump(rail, copyWidthOf(rail))
+  }, [copyWidthOf, looping, items.length])
+
+  useEffect(() => () => window.clearTimeout(settleTimer.current), [])
 
   const step = (direction: number): void => {
     const rail = railRef.current
     if (!rail) return
     const first = rail.firstElementChild as HTMLElement | null
-    const width = (first?.offsetWidth ?? 146) + 16
-    rail.scrollBy({ left: direction * 3 * width })
+    // 卡片宽度 + 轨道 gap（home.css 里是 14px）
+    const width = (first?.offsetWidth ?? 146) + 14
+    const delta = direction * 3 * width
+    if (!loopRef.current) {
+      rail.scrollBy({ left: delta })
+      return
+    }
+    const half = copyWidthOf(rail)
+    // 先把起点换到「中间」的位置（整份宽度，画面一样），两边各留一步的空间
+    if (rail.scrollLeft < half / 2) jump(rail, rail.scrollLeft + half)
+    else if (rail.scrollLeft > half * 1.5) jump(rail, rail.scrollLeft - half)
+    if (rail.scrollLeft + delta > rail.scrollWidth - rail.clientWidth) {
+      jump(rail, rail.scrollLeft - half)
+    }
+    settlingRef.current = true
+    rail.scrollBy({ left: delta, behavior: 'smooth' })
+    window.clearTimeout(settleTimer.current)
+    settleTimer.current = window.setTimeout(() => {
+      settlingRef.current = false
+      normalize()
+    }, 420)
   }
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
@@ -74,6 +164,7 @@ function HomeRail({
     if (!state || !rail || state.id !== event.pointerId) return
     // 直接写 scrollLeft（不是 scrollBy），这样拖到一半停住不会继续滑
     rail.scrollLeft = state.scroll - (event.clientX - state.x)
+    normalize()
   }
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>): void => {
@@ -85,6 +176,8 @@ function HomeRail({
     if (rail?.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId)
   }
 
+  const track = looping ? [...items, ...items] : items
+
   return (
     <section className="home-section">
       <div className="home-section-head">
@@ -95,7 +188,7 @@ function HomeRail({
             type="button"
             className="home-rail-btn"
             aria-label="向前"
-            disabled={!edges.left}
+            disabled={!looping && !edges.left}
             onClick={() => step(-1)}
           >
             <LeftOutlined />
@@ -104,7 +197,7 @@ function HomeRail({
             type="button"
             className="home-rail-btn"
             aria-label="向后"
-            disabled={!edges.right}
+            disabled={!looping && !edges.right}
             onClick={() => step(1)}
           >
             <RightOutlined />
@@ -114,15 +207,24 @@ function HomeRail({
       <div
         className={`home-rail${dragging ? ' is-dragging' : ''}`}
         ref={railRef}
-        onScroll={update}
+        onScroll={() => {
+          if (!settlingRef.current) normalize()
+          update()
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onDragStart={(event) => event.preventDefault()}
       >
-        {items.map((item) => (
-          <article className="home-item" key={item.videoId} title={item.title}>
+        {track.map((item, index) => (
+          <article
+            className="home-item"
+            // 复制的第二份用下标区分 key，滚动时不会因为重复 id 报错
+            key={`${item.videoId}-${index}`}
+            title={item.title}
+            aria-hidden={looping && index >= items.length ? true : undefined}
+          >
             <div className="home-item-poster">
               <HomePicture item={item} />
               {/* 更新进度压在封面右下角，卡片下方只留片名和简介 */}
