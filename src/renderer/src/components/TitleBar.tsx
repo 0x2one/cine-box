@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   AppstoreOutlined,
   BorderOutlined,
@@ -25,6 +25,13 @@ interface TitleBarProps {
  */
 function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
   const [maximized, setMaximized] = useState(false)
+  /** 首帧量的位置不要过渡，避免导航胶囊从 0 宽度展开 */
+  const [pillLive, setPillLive] = useState(false)
+  const navRef = useRef<HTMLElement>(null)
+  const pillRef = useRef<HTMLSpanElement>(null)
+  const homeRef = useRef<HTMLButtonElement>(null)
+  const searchRef = useRef<HTMLButtonElement>(null)
+  const browseRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     let alive = true
@@ -36,6 +43,52 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
       alive = false
       off()
     }
+  }, [])
+
+  /**
+   * 导航胶囊：量当前 tab 的位置 / 宽度，直接写内联样式。
+   * 用 DOM 写入而不是 state，切换时只有胶囊自己重新布局，不带着整条导航栏重渲染。
+   */
+  const placePill = useCallback((): void => {
+    const nav = navRef.current
+    const pill = pillRef.current
+    if (!nav || !pill) return
+    const target =
+      view === 'home'
+        ? homeRef.current
+        : view === 'browse'
+          ? browseRef.current
+          : view === 'search'
+            ? searchRef.current
+            : null
+    if (!target) {
+      pill.style.opacity = '0'
+      return
+    }
+    pill.style.opacity = '1'
+    pill.style.width = `${target.offsetWidth}px`
+    pill.style.transform = `translate3d(${target.offsetLeft}px, 0, 0)`
+  }, [view])
+
+  useLayoutEffect(() => {
+    placePill()
+  }, [placePill])
+
+  useEffect(() => {
+    // 字体 / 缩放变化会改变按钮宽度，重新量一次
+    const nav = navRef.current
+    if (!nav) return
+    const observer = new ResizeObserver(() => placePill())
+    observer.observe(nav)
+    for (const element of [homeRef.current, searchRef.current, browseRef.current]) {
+      if (element) observer.observe(element)
+    }
+    return () => observer.disconnect()
+  }, [placePill])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setPillLive(true))
+    return () => window.cancelAnimationFrame(frame)
   }, [])
 
   const { minimize, maximize, close } = window.api.windowControls
@@ -56,8 +109,15 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
       <div className="titlebar-drag" />
 
       {/* 展示端导航：居中的两段式胶囊，找片看 = 视频列表页 */}
-      <nav className="titlebar-nav" aria-label="展示端导航">
+      <nav className="titlebar-nav" aria-label="展示端导航" ref={navRef}>
+        {/* 激活态的滑动胶囊：切换 tab 时在三个入口之间流动 */}
+        <span
+          className={`titlebar-nav-pill${pillLive ? ' is-live' : ''}`}
+          ref={pillRef}
+          aria-hidden="true"
+        />
         <button
+          ref={homeRef}
           type="button"
           className={`titlebar-nav-btn${view === 'home' ? ' is-active' : ''}`}
           aria-current={view === 'home' ? 'page' : undefined}
@@ -67,6 +127,7 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
         </button>
         {/* 长得像输入框的搜索按钮：点开搜索页，具体交互由搜索页承载 */}
         <button
+          ref={searchRef}
           type="button"
           className={`titlebar-search${view === 'search' ? ' is-active' : ''}`}
           aria-current={view === 'search' ? 'page' : undefined}
@@ -77,6 +138,7 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
           <SearchOutlined />
         </button>
         <button
+          ref={browseRef}
           type="button"
           className={`titlebar-nav-btn${view === 'browse' ? ' is-active' : ''}`}
           aria-current={view === 'browse' ? 'page' : undefined}

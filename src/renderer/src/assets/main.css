@@ -263,7 +263,7 @@
 }
 
 /* 展示端导航：绝对居中，不参与左右两区的宽度分配（品牌 / 窗口按钮多宽都不影响它）。
-   胶囊本身用 surface 底色，灰底的搜索框才不会和它糊成一块 */
+   导航底色用 surface，滑动胶囊和半透明的搜索框都画在它上面 */
 .titlebar-nav {
   position: absolute;
   top: 50%;
@@ -277,6 +277,30 @@
   transform: translate(-50%, -50%);
   /* 落在拖拽区里，必须自己退出拖拽，否则按钮点不到 */
   -webkit-app-region: no-drag;
+}
+
+/* 激活态胶囊：绝对定位在按钮下面，切换 tab 时在三个入口之间滑过去。
+   z-index -1 让它压在搜索框半透明底色之下、导航底色之上，穿过搜索框时能透出来 */
+.titlebar-nav-pill {
+  position: absolute;
+  z-index: -1;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  width: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 首帧量位置时不要过渡，否则胶囊会从 0 宽度展开 */
+.titlebar-nav-pill.is-live {
+  transition:
+    transform 380ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    width 380ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 200ms ease;
 }
 
 .titlebar-nav-btn {
@@ -295,23 +319,29 @@
   line-height: 1;
   cursor: default;
   transition:
-    background-color 120ms ease,
-    color 120ms ease,
-    box-shadow 120ms ease;
+    color 220ms ease,
+    transform 160ms ease;
 }
 
 .titlebar-nav-btn:hover {
   color: var(--text);
 }
 
+/* 按下时轻轻缩一下：和胶囊滑动配合，点击有实体感 */
+.titlebar-nav-btn:active {
+  transform: scale(0.97);
+}
+
+/* 文字等胶囊走近了再变色，避免起点已经灭了、终点还没亮 */
 .titlebar-nav-btn.is-active {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
   color: var(--accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+  transition:
+    color 220ms ease 80ms,
+    transform 160ms ease;
 }
 
 /* 标题栏里的搜索入口：做成输入框的样子——椭圆、无边框、灰底、淡色图标 + 占位提示，
-   点击后进搜索页（页面本身还没设计） */
+   点击后进搜索页（页面本身还没设计）。底色用半透明黑，滑动胶囊经过时能透出主色 */
 .titlebar-search {
   display: inline-flex;
   align-items: center;
@@ -321,7 +351,7 @@
   padding: 0 12px;
   border: 0;
   border-radius: 999px;
-  background: var(--surface-muted);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   color: var(--text-faint);
   font-family: inherit;
   font-size: 12.5px;
@@ -329,15 +359,15 @@
   text-align: left;
   cursor: default;
   transition:
-    background-color 120ms ease,
-    color 120ms ease;
+    background-color 220ms ease,
+    color 220ms ease;
 }
 
 .titlebar-search .anticon {
   flex: none;
   font-size: 12px;
   color: var(--text-faint);
-  transition: color 120ms ease;
+  transition: color 220ms ease;
 }
 
 .titlebar-search-text {
@@ -349,7 +379,7 @@
 }
 
 .titlebar-search:hover {
-  background: color-mix(in srgb, var(--text) 5%, var(--surface-muted));
+  background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text-muted);
 }
 
@@ -357,14 +387,17 @@
   color: var(--text-muted);
 }
 
-/* 已经在搜索页：和胶囊里其它 tab 的激活态保持一致 */
+/* 已经在搜索页：半透明底色保留（胶囊从下面透出来），只把文字 / 图标提成主色 */
 .titlebar-search.is-active {
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   color: var(--accent);
+  transition:
+    background-color 220ms ease,
+    color 220ms ease 80ms;
 }
 
 .titlebar-search.is-active .anticon {
   color: var(--accent);
+  transition-delay: 80ms;
 }
 
 .titlebar-actions {
