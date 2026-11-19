@@ -813,7 +813,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
           <div className="video-recommend">
             <p className="video-recommend-hint">
               选一个一级分类。推荐后可以在 控制台 › 首页
-              调整顺序、隐藏、换图或移除；「最新 TOP」规则的分类会把推荐的片排在最前面。
+              调整顺序、隐藏、换图或移除；「TOP」规则的分类会把推荐的片排在最前面。
             </p>
             {homeCategories.length === 0 ? (
               <Empty

@@ -3,7 +3,7 @@
 /** 首页分类推荐规则：manual 用视频列表里「推荐」进来的视频，latest 按更新时间取前 N 部 */
 export type HomeRule = 'manual' | 'latest'
 
-/** 默认的「最新 TOP N」条数 */
+/** 默认的「TOP N」条数 */
 export const HOME_DEFAULT_TOP_N = 12
 /** TOP N 的上下限：上限是缓存库单次查询能取到的条数 */
 export const HOME_MIN_TOP_N = 1
@@ -72,7 +72,7 @@ export interface HomeSectionConfig {
 
 export interface HomeConfig {
   posters: HomePosterItem[]
-  /** 只保存配置过的一级分类，没配置的按默认值（显示 / 最新 TOP 12）处理 */
+  /** 只保存配置过的一级分类，没配置的按默认值（显示 / TOP 12）处理 */
   sections: HomeSectionConfig[]
 }
 
@@ -90,7 +90,7 @@ export interface HomeItemView {
   /** 是否使用自定义图片（决定要不要按 crop 裁剪） */
   customPic: boolean
   hidden: boolean
-  /** 是否由配置指定（海报 / 手动推荐 / 手动排序过的条目）；false 表示 latest 自动带出来的 */
+  /** 是否由配置指定（海报 / 自定义推荐 / 手动排序过的条目）；false 表示 latest 自动带出来的 */
   pinned: boolean
   /** 视频在「视频」页被隐藏，展示端不出现（配置里仍在） */
   videoHidden: boolean

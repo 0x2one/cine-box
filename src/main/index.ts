@@ -488,7 +488,9 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   // 首页状态：已加进海报 / 已推荐到哪些分类，视频列表直接显示出来，不用再点开看
   const homeConfig = homeStore.get()
   const posterIds = new Set(homeConfig.posters.map((poster) => poster.videoId))
-  const categoryNames = new Map(categoryStore.list().map((category) => [category.id, category.name]))
+  const categoryNames = new Map(
+    categoryStore.list().map((category) => [category.id, category.name])
+  )
   const sectionsByVideo = new Map<number, { categoryId: string; title: string }[]>()
   for (const section of homeConfig.sections) {
     const title = section.title || categoryNames.get(section.categoryId) || ''
@@ -830,7 +832,9 @@ ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => bindingSto
 
 ipcMain.handle('home:get', () => readHomeFeed())
 
-ipcMain.handle('home:posters:add', (_event, videoId: number) => homeStore.addPoster(Number(videoId)))
+ipcMain.handle('home:posters:add', (_event, videoId: number) =>
+  homeStore.addPoster(Number(videoId))
+)
 
 ipcMain.handle('home:posters:update', (_event, videoId: number, patch: HomeItemPatch) =>
   homeStore.updatePoster(Number(videoId), patch ?? {})
@@ -868,6 +872,10 @@ ipcMain.handle('home:sections:restoreItem', (_event, categoryId: string, videoId
 
 ipcMain.handle('home:sections:reorder', (_event, categoryId: string, videoIds: number[]) =>
   homeStore.reorderSectionItems(String(categoryId), Array.isArray(videoIds) ? videoIds : [])
+)
+
+ipcMain.handle('home:sections:clear', (_event, categoryId: string) =>
+  homeStore.clearSectionItems(String(categoryId))
 )
 
 ipcMain.handle('home:image:pick', async () => {

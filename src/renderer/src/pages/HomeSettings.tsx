@@ -21,6 +21,7 @@ import {
   ArrowRightOutlined,
   ArrowUpOutlined,
   CheckOutlined,
+  ClearOutlined,
   DeleteOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
@@ -45,7 +46,7 @@ const CARD_RATIO = 2 / 3
 const POSTER_HINT =
   '顺序就是首页叠层的顺序，拖动行或点上 / 下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在首页，配置仍保留。'
 const SECTION_HINT =
-  '每个一级分类对应首页上的一条轨道。手动推荐用「视频」页的「推荐」按钮加片；最新 TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
+  '每个一级分类对应首页上的一条轨道。自定义用「视频」页的「推荐」按钮加片；TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
 
 const HOME_ERRORS: Record<string, string> = {
   NOT_FOUND: '条目已不存在，刷新后再试',
@@ -1037,7 +1038,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   }
 
   /**
-   * 最新 TOP 切到手动推荐时，先把当前自动带上来的这十几部落成人工列表，
+   * TOP 切到自定义时，先把当前自动带上来的这十几部落成人工列表，
    * 否则切过去会瞬间清空；反过来手动 → 最新，人工条目仍然排在前面。
    */
   const changeRule = async (section: HomeSectionView, rule: HomeRule): Promise<void> => {
@@ -1166,8 +1167,8 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                     optionType="button"
                     value={section.rule}
                     options={[
-                      { label: '手动推荐', value: 'manual' },
-                      { label: '最新 TOP', value: 'latest' }
+                      { label: '自定义', value: 'manual' },
+                      { label: 'TOP', value: 'latest' }
                     ]}
                     onChange={(event) => void changeRule(section, event.target.value as HomeRule)}
                   />
@@ -1191,10 +1192,11 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                     </label>
                   )}
                   <label className="home-config-field">
-                    <span>在首页显示</span>
+                    <span>显示</span>
                     <Switch
                       size="small"
                       checked={section.visible}
+                      title="在首页显示这条轨道"
                       onChange={(checked) =>
                         void act(
                           window.api.home.saveSection(section.categoryId, { visible: checked })
@@ -1202,6 +1204,24 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                       }
                     />
                   </label>
+                  {section.rule === 'manual' && section.items.length > 0 && (
+                    <Popconfirm
+                      title="清空全部推荐？"
+                      description={`「${section.name}」下的 ${section.items.length} 部推荐会被移除，之后可以重新推荐。`}
+                      okText="清空"
+                      cancelText="取消"
+                      onConfirm={() =>
+                        void act(
+                          window.api.home.clearSectionItems(section.categoryId),
+                          '已清空推荐'
+                        )
+                      }
+                    >
+                      <Button type="text" size="small" danger icon={<ClearOutlined />}>
+                        清空推荐
+                      </Button>
+                    </Popconfirm>
+                  )}
                 </div>
               </div>
 

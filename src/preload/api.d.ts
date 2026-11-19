@@ -874,6 +874,8 @@ interface HomeApi {
   removeSectionItem: (categoryId: string, videoId: number) => Promise<HomeActionResult>
   restoreSectionItem: (categoryId: string, videoId: number) => Promise<HomeActionResult>
   reorderSectionItems: (categoryId: string, videoIds: number[]) => Promise<HomeActionResult>
+  /** 清空「自定义」轨道的全部推荐 */
+  clearSectionItems: (categoryId: string) => Promise<HomeActionResult>
   pickImage: () => Promise<HomeImageResult>
 }
 

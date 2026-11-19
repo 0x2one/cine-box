@@ -98,6 +98,8 @@ const api = {
       ipcRenderer.invoke('home:sections:restoreItem', categoryId, videoId),
     reorderSectionItems: (categoryId: string, videoIds: number[]): Promise<HomeActionResult> =>
       ipcRenderer.invoke('home:sections:reorder', categoryId, videoIds),
+    clearSectionItems: (categoryId: string): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:clear', categoryId),
     /** 弹系统文件选择框，把选中的图片复制进配置目录，返回 cine-img:// 地址 */
     pickImage: (): Promise<HomeImageResult> => ipcRenderer.invoke('home:image:pick')
   },

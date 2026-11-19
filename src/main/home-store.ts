@@ -43,6 +43,8 @@ export interface HomeStore {
   removeSectionItem: (categoryId: string, videoId: number) => HomeActionResult
   restoreSectionItem: (categoryId: string, videoId: number) => HomeActionResult
   reorderSectionItems: (categoryId: string, videoIds: number[]) => HomeActionResult
+  /** 清空「自定义」轨道的全部推荐；TOP 规则下没有这个动作 */
+  clearSectionItems: (categoryId: string) => HomeActionResult
   /**
    * 把用户选中的本地图片复制进配置目录，返回 cine-img:// 地址。
    * 只接受主进程自己弹窗拿到的路径，渲染层不接触文件系统。
@@ -380,6 +382,18 @@ export function createHomeStore(directory: string): HomeStore {
       const item = section.items.find((entry) => entry.videoId === vid)
       if (!item) return { ok: false, error: 'NOT_FOUND' }
       item.removed = false
+      persist()
+      return { ok: true }
+    },
+
+    clearSectionItems: (categoryId) => {
+      const id = typeof categoryId === 'string' ? categoryId.trim() : ''
+      if (!id) return { ok: false, error: 'INVALID_INPUT' }
+      // 「自定义」是一份人工列表，清空就是把这条轨道清空；TOP 规则的列表是算出来的，没有这个动作
+      const section = findSection(id)
+      if (!section) return { ok: true }
+      if (section.rule !== 'manual') return { ok: false, error: 'INVALID_INPUT' }
+      section.items = []
       persist()
       return { ok: true }
     },
