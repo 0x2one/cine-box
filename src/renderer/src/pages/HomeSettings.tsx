@@ -956,6 +956,13 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   /** 展开的分组（默认全收起，展开状态记到 localStorage）；「已移除」列表只在本页 */
   const [expanded, setExpanded] = useState<string[]>(readExpanded)
   const [removedOpen, setRemovedOpen] = useState<string[]>([])
+  /**
+   * TOP 轨道的「共 N 部」：每条轨道要跑一次几十到一百多毫秒的统计，所以不跟 feed 一起等，
+   * 页面出来以后再单独补。key 是分类 id，`search` 是搜索页推荐位那一行（整库展示中的数量）。
+   */
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  /** 已经数过的分类：本页内不再重复统计（条数不会因为改配置而变） */
+  const counted = useRef(new Set<string>())
 
   useEffect(() => {
     try {
@@ -965,10 +972,42 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
     }
   }, [expanded])
 
+  /**
+   * 页面渲染完再补「共 N 部」。一个分类只数一次，所以点开关 / 改 TOP N 触发的静默刷新
+   * 不会又把这几条统计跑一遍；查询失败时把标记撤掉，下次刷新会重试。
+   */
+  const loadCounts = useCallback((next: HomeFeed): void => {
+    const pending = next.sections.filter(
+      (section) => section.rule === 'latest' && !counted.current.has(section.categoryId)
+    )
+    const wantSearch = next.search?.rule === 'latest' && !counted.current.has('search')
+    if (pending.length === 0 && !wantSearch) return
+
+    const fill = async (key: string, query: VideoListQuery): Promise<void> => {
+      counted.current.add(key)
+      try {
+        const result = await window.api.videos.count(query)
+        if (!result.ok) {
+          counted.current.delete(key)
+          return
+        }
+        setCounts((previous) => ({ ...previous, [key]: result.total }))
+      } catch {
+        counted.current.delete(key)
+      }
+    }
+
+    for (const section of pending) {
+      void fill(section.categoryId, { categoryId: section.categoryId, visibility: 'shown' })
+    }
+    // 搜索页推荐位那一行：整库里「展示中」的数量
+    if (wantSearch) void fill('search', { visibility: 'shown' })
+  }, [])
+
   const load = useCallback(async (silent = false): Promise<void> => {
     if (!silent) setLoading(true)
     try {
-      // 控制台要完整数据：每条轨道的总数、隐藏轨道、搜索推荐位
+      // 控制台要完整数据：隐藏轨道、搜索推荐位（总数改为页面出来后单独补，见 loadCounts）
       const result = await window.api.home.get({ view: 'console' })
       if (!result.ok || !result.feed) {
         setFailed(true)
@@ -982,6 +1021,11 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
       if (!silent) setLoading(false)
     }
   }, [])
+
+  // 数字等页面出来以后再补：feed 换过一次就检查还缺哪些（不挡住首屏）
+  useEffect(() => {
+    if (feed) loadCounts(feed)
+  }, [feed, loadCounts])
 
   useEffect(() => {
     // 首次读取发生在 effect 里；setState 在 await 之后，规则按调用点误报
@@ -1245,7 +1289,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                   <span className="home-config-section-count">
                     {section.rule === 'manual'
                       ? `${section.total} 部推荐`
-                      : `共 ${section.total} 部`}
+                      : `共 ${counts[section.categoryId] ?? '…'} 部`}
                   </span>
                   {!section.categoryVisible && <Tag color="warning">分类已隐藏</Tag>}
                   {!section.visible && <Tag color="default">不在推荐页显示</Tag>}
@@ -1428,7 +1472,9 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           <div className="home-config-section-title">
             <span className="home-config-section-name">搜索页推荐</span>
             <span className="home-config-section-count">
-              {search.rule === 'manual' ? `${search.total} 部推荐` : `共 ${search.total} 部视频`}
+              {search.rule === 'manual'
+                ? `${search.total} 部推荐`
+                : `共 ${counts.search ?? '…'} 部视频`}
             </span>
           </div>
           <div className="home-config-section-actions">

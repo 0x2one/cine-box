@@ -142,8 +142,9 @@ export interface HomeSectionView {
   /** 「自定义」列表是否被编辑过：编辑过之后切回自定义不再用 TOP 覆盖 */
   customized: boolean
   /**
-   * latest：该分类（含子分类）里展示中的视频总数；manual：推荐条数。
-   * display 口径不统计（省掉一条全表 COUNT），恒为 0，只有控制台会用到它。
+   * manual：推荐条数（就是这份列表，白给的）。
+   * latest：恒为 0 = 未知——「该分类共 N 部」要为每条轨道跑一次几十到一百多毫秒的统计，
+   * 拼 feed 时不算，控制台等页面出来以后单独走 `videos:count` 补上。
    */
   total: number
   items: HomeItemView[]
@@ -156,7 +157,7 @@ export interface HomeSearchView {
   rule: HomeRule
   topN: number
   customized: boolean
-  /** latest：片库里展示中的视频总数；manual：推荐条数 */
+  /** manual：推荐条数；latest：0 = 未知（同上，控制台用 `videos:count` 补） */
   total: number
   items: HomeItemView[]
   /** latest 规则下被移除的视频，可以恢复 */

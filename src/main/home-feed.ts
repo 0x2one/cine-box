@@ -138,13 +138,10 @@ export function buildSearchSection(deps: HomeSearchFeedDeps): HomeSearchView {
   const removedIds = new Set(removed.map((item) => item.videoId))
 
   let rows: VideoListItem[] = []
-  let total = 0
   if (deps.cacheReady) {
-    const result = deps.listVideos({ pageSize: 100, visibility: 'shown' }, [])
-    if (result.ok) {
-      rows = result.items
-      total = result.total
-    }
+    // 不要总数：分类里的视频数要单独查（`videos:count`），见 HomeSectionView.total 的说明
+    const result = deps.listVideos({ pageSize: 100, visibility: 'shown', withTotal: false }, [])
+    if (result.ok) rows = result.items
   }
   const auto = rows
     .filter((video) => !pinnedIds.has(video.id) && !removedIds.has(video.id))
@@ -155,7 +152,7 @@ export function buildSearchSection(deps: HomeSearchFeedDeps): HomeSearchView {
     rule: config.rule,
     topN: config.topN,
     customized: config.customized === true,
-    total,
+    total: 0,
     items: [
       ...pinned.map((item) => toView(item, videos.get(item.videoId))),
       // 人工指定的全部保留，自动条目只补到 topN
@@ -213,7 +210,8 @@ export function buildHomeFeed(deps: HomeFeedDeps, view: HomeFeedView = 'console'
         rule,
         topN,
         customized: stored?.customized === true,
-        total: display ? 0 : views.length,
+        // 自定义轨道的就是这份列表，条数是白给的；TOP 轨道见下面的说明
+        total: views.length,
         items: views,
         removedItems: []
       })
@@ -239,17 +237,14 @@ export function buildHomeFeed(deps: HomeFeedDeps, view: HomeFeedView = 'console'
     }
 
     let rows: VideoListItem[] = []
-    let total = 0
     if (deps.cacheReady && filters.length > 0) {
-      // 推荐页不显示「共 N 部」，这条轨道的 COUNT 就不跑了
+      // 不统计这条轨道的总数：一次 COUNT 在十几万条的视频库上要几十到一百多毫秒，
+      // 需要这个数字的地方（控制台分组头部）在页面出来以后单独走 `videos:count`
       const result = deps.listVideos(
-        { pageSize: 100, visibility: 'shown', withTotal: !display },
+        { pageSize: 100, visibility: 'shown', withTotal: false },
         filters
       )
-      if (result.ok) {
-        rows = result.items
-        total = result.total
-      }
+      if (result.ok) rows = result.items
     }
     const auto = rows
       .filter((video) => !pinnedIds.has(video.id) && !removedIds.has(video.id))
@@ -271,7 +266,8 @@ export function buildHomeFeed(deps: HomeFeedDeps, view: HomeFeedView = 'console'
       rule,
       topN,
       customized: stored?.customized === true,
-      total,
+      // TOP 轨道的条数要单独数（控制台用 videos:count 补），这里给 0 = 未知
+      total: 0,
       items: views,
       // 「已移除」只有控制台那条可展开的胶囊在用，推荐页不渲染
       removedItems: display ? [] : removed.map((item) => toView(item, videos.get(item.videoId)))
