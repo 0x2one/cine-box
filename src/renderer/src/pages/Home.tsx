@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
-import { ArrowUpOutlined, CaretRightOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, CaretRightFilled, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import HomePicture from '../components/HomePicture'
 import VideoCard from '../components/VideoCard'
 import { formatCount } from '../utils/format'
@@ -921,7 +921,9 @@ function HomeView({
                       })
                     }
                   >
-                    <CaretRightOutlined />
+                    <span className="home-hero-play-badge">
+                      <CaretRightFilled />
+                    </span>
                     播放
                   </button>
                   <div className="home-pager">
@@ -935,7 +937,7 @@ function HomeView({
                       aria-label="上一部"
                       onClick={() => clickGo(index - 1)}
                     >
-                      <LeftOutlined style={{ fontSize: 11 }} />
+                      <LeftOutlined />
                     </button>
                     <button
                       type="button"
@@ -943,7 +945,7 @@ function HomeView({
                       aria-label="下一部"
                       onClick={() => clickGo(index + 1)}
                     >
-                      <RightOutlined style={{ fontSize: 11 }} />
+                      <RightOutlined />
                     </button>
                   </div>
                 </div>

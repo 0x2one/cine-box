@@ -228,39 +228,73 @@
 
 .home-hero-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  margin-top: 26px;
+  margin-top: 30px;
 }
 
-/* 海报上的主操作：白色胶囊，点开独立播放窗口 */
-.home-hero-play {
+/* 海报上的按钮共用同一套玻璃质感（半透明底 + 细描边 + 背景模糊），
+   播放是主操作，靠尺寸和里面的白色圆形图标底拉开层次，改材质只改这一处 */
+.home-hero-play,
+.home-pager-btn {
   display: inline-flex;
-  height: 34px;
   align-items: center;
-  gap: 7px;
-  padding: 0 16px;
-  border: 0;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
-  color: #0b0d10;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
   font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   cursor: pointer;
   pointer-events: auto;
+  backdrop-filter: blur(12px) saturate(140%);
   transition:
     background 0.15s ease,
-    transform 0.15s ease;
+    border-color 0.15s ease;
 }
 
-.home-hero-play:hover {
+.home-hero-play:hover,
+.home-pager-btn:hover {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.home-hero-play:active,
+.home-pager-btn:active {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* 播放：左边一颗白色圆形图标底（和右侧翻页圆钮呼应），右边是片名下方的「播放」字样 */
+.home-hero-play {
+  height: 50px;
+  gap: 12px;
+  padding: 0 24px 0 7px;
+  font-size: 15px;
+  box-shadow: 0 12px 30px rgba(4, 8, 14, 0.26);
+}
+
+.home-hero-play-badge {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
   background: #fff;
+  color: #0b0d10;
+  box-shadow: 0 2px 8px rgba(4, 8, 14, 0.28);
+  transition: transform 0.15s ease;
 }
 
-.home-hero-play:active {
-  transform: scale(0.98);
+.home-hero-play:hover .home-hero-play-badge {
+  transform: scale(1.05);
+}
+
+.home-hero-play-badge .anticon {
+  font-size: 13px;
 }
 
 .home-pager {
@@ -284,29 +318,13 @@
 }
 
 .home-pager-btn {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.92);
-  cursor: pointer;
-  backdrop-filter: blur(6px);
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease;
+  width: 32px;
+  height: 32px;
+  flex: none;
 }
 
-.home-pager-btn:hover {
-  border-color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.home-pager-btn:active {
-  background: rgba(255, 255, 255, 0.3);
+.home-pager-btn .anticon {
+  font-size: 12px;
 }
 
 /* 分类区块 */
