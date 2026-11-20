@@ -3,6 +3,7 @@ import {
   HOME_DEFAULT_TOP_N,
   type HomeConfig,
   type HomeFeed,
+  type HomeFeedView,
   type HomeItemFields,
   type HomeItemView,
   type HomeSearchConfig,
@@ -167,9 +168,11 @@ export function buildSearchSection(deps: HomeSearchFeedDeps): HomeSearchView {
 /**
  * 把首页配置、分类绑定与视频缓存库拼成首页要用的数据。
  * 控制台读同一份结果，所以「已移除 / 已隐藏 / 视频已丢失」在两边看到的完全一致。
+ * view = 'display' 时只构建推荐页真正会渲染的那部分（见 HomeFeedView 的说明）。
  */
-export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
+export function buildHomeFeed(deps: HomeFeedDeps, view: HomeFeedView = 'console'): HomeFeed {
   const { config, categories } = deps
+  const display = view === 'display'
 
   const allVideoIds = new Set<number>()
   for (const poster of config.posters) allVideoIds.add(poster.videoId)
@@ -194,6 +197,8 @@ export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
     const rule = stored?.rule ?? 'latest'
     const topN = stored?.topN ?? HOME_DEFAULT_TOP_N
     const items = stored?.items ?? []
+    // 推荐页只算真正会显示的轨道：控制台要列出隐藏的那几条，好在设置里重新打开
+    if (display && (!visible || !category.visible)) continue
 
     if (rule === 'manual') {
       const views = items
@@ -208,7 +213,7 @@ export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
         rule,
         topN,
         customized: stored?.customized === true,
-        total: views.length,
+        total: display ? 0 : views.length,
         items: views,
         removedItems: []
       })
@@ -236,7 +241,11 @@ export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
     let rows: VideoListItem[] = []
     let total = 0
     if (deps.cacheReady && filters.length > 0) {
-      const result = deps.listVideos({ pageSize: 100, visibility: 'shown' }, filters)
+      // 推荐页不显示「共 N 部」，这条轨道的 COUNT 就不跑了
+      const result = deps.listVideos(
+        { pageSize: 100, visibility: 'shown', withTotal: !display },
+        filters
+      )
       if (result.ok) {
         rows = result.items
         total = result.total
@@ -264,19 +273,21 @@ export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
       customized: stored?.customized === true,
       total,
       items: views,
-      removedItems: removed.map((item) => toView(item, videos.get(item.videoId)))
+      // 「已移除」只有控制台那条可展开的胶囊在用，推荐页不渲染
+      removedItems: display ? [] : removed.map((item) => toView(item, videos.get(item.videoId)))
     })
   }
 
   // 配置里有、分类已被删掉的段落不再展示；配置本身留在文件里，重建同名分类时不受影响
-  return {
-    posters,
-    sections,
-    search: buildSearchSection({
+  const feed: HomeFeed = { posters, sections }
+  // 搜索推荐位只有搜索页 / 控制台用，推荐页不显示它，也就不为它再查一次全库
+  if (!display) {
+    feed.search = buildSearchSection({
       config: config.search,
       videosByIds: deps.videosByIds,
       listVideos: deps.listVideos,
       cacheReady: deps.cacheReady
     })
   }
+  return feed
 }

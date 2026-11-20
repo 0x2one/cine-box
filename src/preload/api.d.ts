@@ -901,7 +901,7 @@ interface HomeSectionView {
   topN: number
   /** 「自定义」列表是否被编辑过：编辑过之后切回自定义不再用 TOP 覆盖 */
   customized: boolean
-  /** latest：分类里的视频总数；manual：推荐条数 */
+  /** latest：分类里的视频总数；manual：推荐条数；display 口径不统计，恒为 0 */
   total: number
   items: HomeItemView[]
   /** latest 规则下被移除的视频，可以恢复 */
@@ -920,10 +920,17 @@ interface HomeSearchView {
   removedItems: HomeItemView[]
 }
 
+/**
+ * feed 口径：display = 推荐页只要渲染需要的东西（不算每条轨道的总数、不含隐藏轨道、
+ * 不带搜索推荐位）；console = 控制台「推荐」页，总数与隐藏轨道都要。
+ */
+type HomeFeedView = 'display' | 'console'
+
 interface HomeFeed {
   posters: HomeItemView[]
   sections: HomeSectionView[]
-  search: HomeSearchView
+  /** 搜索页底部推荐位：只有 console 口径会带，推荐页不显示 */
+  search?: HomeSearchView
 }
 
 interface HomeFeedResult {
@@ -953,7 +960,8 @@ interface HomeImageResult {
 }
 
 interface HomeApi {
-  get: () => Promise<HomeFeedResult>
+  /** 推荐页传 { view: 'display' }（默认），控制台不传 */
+  get: (options?: { view?: HomeFeedView }) => Promise<HomeFeedResult>
   addPoster: (videoId: number) => Promise<HomeActionResult>
   updatePoster: (videoId: number, patch: HomeItemPatch) => Promise<HomeActionResult>
   removePoster: (videoId: number) => Promise<HomeActionResult>

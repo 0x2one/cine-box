@@ -157,6 +157,11 @@ export interface VideoListQuery {
   pageSize?: number
   /** 按隐藏状态过滤；默认 all（控制台里隐藏的也要能看到并改回来） */
   visibility?: 'all' | 'shown' | 'hidden'
+  /**
+   * 是否需要总数。默认 true；传 false 时跳过那条 `COUNT(*)`（十几万条的视频库上
+   * 它要扫一整张表），返回的 total 为 0，调用方不要展示它。
+   */
+  withTotal?: boolean
 }
 
 export interface VideoListItem {

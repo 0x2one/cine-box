@@ -108,7 +108,9 @@ const api = {
       ipcRenderer.invoke('backup:restore', source)
   },
   home: {
-    get: (): Promise<HomeFeedResult> => ipcRenderer.invoke('home:get'),
+    /** 推荐页传 { view: 'display' }（默认），控制台「推荐」页不传，要完整数据 */
+    get: (options?: { view?: HomeFeedView }): Promise<HomeFeedResult> =>
+      ipcRenderer.invoke('home:get', options),
     addPoster: (videoId: number): Promise<HomeActionResult> =>
       ipcRenderer.invoke('home:posters:add', videoId),
     updatePoster: (videoId: number, patch: HomeItemPatch): Promise<HomeActionResult> =>

@@ -847,9 +847,15 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
         string,
         unknown
       >[]
-      const counted = connection.prepare(`SELECT COUNT(*) AS n ${from}`).get(...params) as
-        Record<string, unknown> | undefined
-      total = num(counted?.n)
+      // 不看总数的调用方（首页轨道）跳过这条 COUNT：它要扫一整张 videos 表，
+      // 十几万条时比取数本身贵两个数量级
+      if (query.withTotal === false) {
+        total = 0
+      } else {
+        const counted = connection.prepare(`SELECT COUNT(*) AS n ${from}`).get(...params) as
+          Record<string, unknown> | undefined
+        total = num(counted?.n)
+      }
     } catch {
       // FTS 语法错误 / 索引异常时返回空，而不是把异常抛给渲染层
       return { ok: false, items: [], total: 0, page, pageSize, error: 'DB' }

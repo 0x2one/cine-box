@@ -141,10 +141,13 @@ export interface HomeSectionView {
   topN: number
   /** 「自定义」列表是否被编辑过：编辑过之后切回自定义不再用 TOP 覆盖 */
   customized: boolean
-  /** latest：该分类（含子分类）里展示中的视频总数；manual：推荐条数 */
+  /**
+   * latest：该分类（含子分类）里展示中的视频总数；manual：推荐条数。
+   * display 口径不统计（省掉一条全表 COUNT），恒为 0，只有控制台会用到它。
+   */
   total: number
   items: HomeItemView[]
-  /** latest 规则下被移除的视频 */
+  /** latest 规则下被移除的视频（只有 console 口径会带，推荐页不渲染它） */
   removedItems: HomeItemView[]
 }
 
@@ -160,10 +163,19 @@ export interface HomeSearchView {
   removedItems: HomeItemView[]
 }
 
+/**
+ * feed 的两种口径。推荐页只要「能画出来」的东西，控制台要完整数据：
+ * - display：不算每个分类的总数（那是每条轨道一次整表 COUNT，十几万条的视频库上
+ *   一条就要 200ms 左右）、不构建隐藏 / 分类已隐藏的轨道、不带搜索页推荐位；
+ * - console：控制台「推荐」页用，总数、隐藏轨道和搜索推荐 tab 都要。
+ */
+export type HomeFeedView = 'display' | 'console'
+
 export interface HomeFeed {
   posters: HomeItemView[]
   sections: HomeSectionView[]
-  search: HomeSearchView
+  /** 搜索页底部推荐位：只有 console 口径会构建它，推荐页不显示 */
+  search?: HomeSearchView
 }
 
 export interface HomeSearchResult {

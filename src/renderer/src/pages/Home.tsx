@@ -35,6 +35,13 @@ const LATEST_BACK_TOP_AT = 600
 const FULL_CROP: HomeCrop = { x: 0, y: 0, w: 1, h: 1 }
 
 /**
+ * 上一次拿到的 feed：切回推荐页时先用它铺满，新数据到了再原地替换。
+ * 主进程那边也缓存了同一份（推荐 ⇄ 找片看来回切时几乎不查库），
+ * 这里再留一层是为了连「等 IPC 的那一帧」都不闪转圈。
+ */
+let lastFeed: HomeFeed | null = null
+
+/**
  * 一个分类轨道：头部两个箭头控制横向滚动。
  * 内容比轨道宽时把列表复制一份，滚过接缝就换成内容完全一样的另一半，
  * 所以左右两个方向都能一直划下去（不会停在第一个 / 最后一个）。
@@ -42,12 +49,10 @@ const FULL_CROP: HomeCrop = { x: 0, y: 0, w: 1, h: 1 }
 function HomeRail({
   section,
   items,
-  count,
   onOpenBrowse
 }: {
   section: HomeSectionView
   items: HomeItemView[]
-  count: number
   onOpenBrowse: (categoryId: string) => void
 }): React.JSX.Element {
   const railRef = useRef<HTMLDivElement>(null)
@@ -225,7 +230,6 @@ function HomeRail({
             {section.title}
           </button>
         </h2>
-        <span className="home-section-count">共 {count} 部</span>
         <div className="home-section-tools">
           <button
             type="button"
@@ -658,8 +662,8 @@ function HomeView({
   onOpenConsole: () => void
   onOpenBrowse: (categoryId: string | null) => void
 }): React.JSX.Element {
-  const [feed, setFeed] = useState<HomeFeed | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [feed, setFeed] = useState<HomeFeed | null>(lastFeed)
+  const [loading, setLoading] = useState(lastFeed === null)
   const [failed, setFailed] = useState(false)
   const [index, setIndex] = useState(0)
   const [swapping, setSwapping] = useState(false)
@@ -667,17 +671,20 @@ function HomeView({
   const swapTimer = useRef(0)
 
   const load = useCallback(async (): Promise<void> => {
-    setLoading(true)
+    // 有上一次的 feed 时不打断当前画面：请求回来直接替换，只有第一次才转圈
+    if (lastFeed === null) setLoading(true)
     try {
-      const result = await window.api.home.get()
+      const result = await window.api.home.get({ view: 'display' })
       if (!result.ok || !result.feed) {
-        setFailed(true)
+        // 已经有一份能看的 feed 时不要把它换成错误页，下次进来再重试
+        if (lastFeed === null) setFailed(true)
         return
       }
       setFailed(false)
+      lastFeed = result.feed
       setFeed(result.feed)
     } catch {
-      setFailed(true)
+      if (lastFeed === null) setFailed(true)
     } finally {
       setLoading(false)
     }
@@ -978,7 +985,6 @@ function HomeView({
               key={section.categoryId}
               section={section}
               items={items}
-              count={section.total}
               onOpenBrowse={onOpenBrowse}
             />
           ))}

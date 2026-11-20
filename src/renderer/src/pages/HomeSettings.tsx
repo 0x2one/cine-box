@@ -968,7 +968,8 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   const load = useCallback(async (silent = false): Promise<void> => {
     if (!silent) setLoading(true)
     try {
-      const result = await window.api.home.get()
+      // 控制台要完整数据：每条轨道的总数、隐藏轨道、搜索推荐位
+      const result = await window.api.home.get({ view: 'console' })
       if (!result.ok || !result.feed) {
         setFailed(true)
         return

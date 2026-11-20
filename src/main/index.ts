@@ -33,7 +33,9 @@ import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
 import { createPlayerWindowManager } from './player-window'
 import type {
+  HomeFeed,
   HomeFeedResult,
+  HomeFeedView,
   HomeItemPatch,
   HomeSearchPatch,
   HomeSearchResult,
@@ -106,7 +108,11 @@ const collector = createVideoCollector({
   details: detailCache,
   logs: collectLogs,
   listSites: () => siteStore.list(),
-  emitProgress: (progress) => sendToRenderer('videos:collect:progress', progress)
+  emitProgress: (progress) => {
+    // 采集每落一页都会推一次进度：新片进来推荐页的轨道就该变，缓存作废
+    invalidateHomeFeed()
+    sendToRenderer('videos:collect:progress', progress)
+  }
 })
 const scheduler = createCollectScheduler({
   schedules: scheduleStore,
@@ -154,17 +160,40 @@ function cacheUnavailable(): { ok: false; error: string } {
   return { ok: false, error: 'CACHE_UNAVAILABLE' }
 }
 
-/** 首页数据：配置 + 分类绑定 + 视频库解析成一份可以直接渲染的 feed */
-function readHomeFeed(): HomeFeedResult {
+/**
+ * 推荐页 feed 的缓存：只缓存展示端口径那一份。
+ * 展示端每次切回「推荐」都会重新挂载并要一份 feed，而视频库、分类、绑定基本不变，
+ * 所以缓存后重复进入是 0 次查询。所有写操作都会 invalidateHomeFeed()，
+ * TTL 只是「漏掉某个写入口」时的兜底，不是刷新策略。
+ */
+const DISPLAY_FEED_TTL = 60 * 1000
+let displayFeed: { at: number; feed: HomeFeed } | null = null
+
+function invalidateHomeFeed(): void {
+  displayFeed = null
+}
+
+/**
+ * 首页数据：配置 + 分类绑定 + 视频库解析成一份可以直接渲染的 feed。
+ * 展示端取 'display'（不算总数、不含隐藏轨道、不带搜索推荐位），控制台取 'console'。
+ */
+function readHomeFeed(view: HomeFeedView): HomeFeedResult {
+  if (view === 'display' && displayFeed && Date.now() - displayFeed.at < DISPLAY_FEED_TTL) {
+    return { ok: true, feed: displayFeed.feed }
+  }
   try {
-    const feed = buildHomeFeed({
-      config: homeStore.get(),
-      categories: categoryStore.list(),
-      bindingsFor: (categoryId) => bindingStore.forCategory(categoryId),
-      videosByIds: (videoIds) => videoStore.listVideosByIds(videoIds),
-      listVideos: (query, filters) => videoStore.listVideos(query, filters),
-      cacheReady: videoCacheReady
-    })
+    const feed = buildHomeFeed(
+      {
+        config: homeStore.get(),
+        categories: categoryStore.list(),
+        bindingsFor: (categoryId) => bindingStore.forCategory(categoryId),
+        videosByIds: (videoIds) => videoStore.listVideosByIds(videoIds),
+        listVideos: (query, filters) => videoStore.listVideos(query, filters),
+        cacheReady: videoCacheReady
+      },
+      view
+    )
+    if (view === 'display') displayFeed = { at: Date.now(), feed }
     return { ok: true, feed }
   } catch (error) {
     console.error('读取首页数据失败', error)
@@ -220,6 +249,8 @@ function syncHomeRecommendations(): void {
     move: (fromCategoryId, toCategoryId, videoId) =>
       homeStore.moveSectionItem(fromCategoryId, toCategoryId, videoId)
   })
+  // 推荐条目可能被挪到别的大类里，展示端的缓存跟着作废
+  invalidateHomeFeed()
 }
 
 /* ── 主窗口显示 / 隐藏 ── */
@@ -629,7 +660,10 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
 
 ipcMain.handle('videos:update', (_event, videoId: number, patch: VideoUpdateInput) => {
   if (!videoCacheReady) return { ok: false, error: 'DB' }
-  return videoStore.updateVideo(Number(videoId), patch ?? {})
+  const result = videoStore.updateVideo(Number(videoId), patch ?? {})
+  // 隐藏 / 换封面 / 改文案都会改变推荐页上的卡片，展示端缓存作废
+  invalidateHomeFeed()
+  return result
 })
 
 ipcMain.handle(
@@ -811,6 +845,8 @@ ipcMain.handle('videos:clear', async () => {
   collectLogs.clear()
   collector.resume()
   scheduler.start()
+  // 缓存库整体重建，推荐页的卡片全部作废
+  invalidateHomeFeed()
   return { ok: true, freedBytes: before.dbBytes + before.detailBytes }
 })
 
@@ -837,6 +873,8 @@ ipcMain.handle('sites:update', async (_event, id: string, input: SiteInput) => {
       videoStore.removeSite(siteId)
       await detailCache.removeSite(siteId)
     }
+    // 这个站点的视频没了，推荐页要重算
+    invalidateHomeFeed()
   }
   return result
 })
@@ -855,6 +893,7 @@ ipcMain.handle('sites:remove', async (_event, id: string) => {
     scheduleStore.remove(siteId)
     // 站点的绑定被级联删掉了，推荐要按剩下的绑定重算
     syncHomeRecommendations()
+    invalidateHomeFeed()
   }
   return result
 })
@@ -903,20 +942,27 @@ ipcMain.handle('sites:categories:apply', (_event, id: string, mode: CategoryUpda
 
 ipcMain.handle('categories:list', () => categoryStore.list())
 
-ipcMain.handle('categories:create', (_event, input: VideoCategoryInput) =>
-  categoryStore.create(input)
-)
+ipcMain.handle('categories:create', (_event, input: VideoCategoryInput) => {
+  const result = categoryStore.create(input)
+  // 新分类不代表就有轨道，但「推荐在哪几条轨道上」可能变，缓存一并作废
+  invalidateHomeFeed()
+  return result
+})
 
 ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInput) => {
   const result = categoryStore.update(String(id), input)
   // 改了上级分类，视频所属的大类可能跟着变
   if (result.ok && input?.parentId !== undefined) syncHomeRecommendations()
+  invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) =>
-  categoryStore.setVisible(String(id), Boolean(visible))
-)
+ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) => {
+  const result = categoryStore.setVisible(String(id), Boolean(visible))
+  // 分类的显示开关决定推荐页有没有这条轨道
+  invalidateHomeFeed()
+  return result
+})
 
 ipcMain.handle(
   'categories:move',
@@ -928,6 +974,7 @@ ipcMain.handle(
     )
     // 拖到别的大类下面（before / after 也可能换了上级），推荐跟着换分类
     if (result.ok) syncHomeRecommendations()
+    invalidateHomeFeed()
     return result
   }
 )
@@ -936,6 +983,7 @@ ipcMain.handle('categories:remove', (_event, id: string) => {
   const result = categoryStore.remove(String(id))
   // 分类删了，绑在它（或子树）上的视频就没有归属了，推荐一并清掉
   if (result.ok) syncHomeRecommendations()
+  invalidateHomeFeed()
   return result
 })
 
@@ -953,6 +1001,7 @@ ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: str
   const result = bindingStore.bind(items, String(categoryId))
   // 绑定关系变了：已推荐到这个在线分类的视频要跟着换大类
   if (result.ok) syncHomeRecommendations()
+  invalidateHomeFeed()
   return result
 })
 
@@ -960,32 +1009,46 @@ ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => {
   const result = bindingStore.unbind(items)
   // 解绑后视频不再属于原来的大类，推荐会被挪到别处或直接删掉
   if (result.ok) syncHomeRecommendations()
+  invalidateHomeFeed()
   return result
 })
 
 /* ── IPC：首页配置（海报叠层 + 分类推荐） ── */
 
-ipcMain.handle('home:get', () => readHomeFeed())
-
-ipcMain.handle('home:posters:add', (_event, videoId: number) =>
-  homeStore.addPoster(Number(videoId))
+// 默认给展示端那一份：推荐页是主要入口，控制台显式传 view: 'console'
+ipcMain.handle('home:get', (_event, options?: { view?: HomeFeedView }) =>
+  readHomeFeed(options?.view === 'console' ? 'console' : 'display')
 )
 
-ipcMain.handle('home:posters:update', (_event, videoId: number, patch: HomeItemPatch) =>
-  homeStore.updatePoster(Number(videoId), patch ?? {})
-)
+ipcMain.handle('home:posters:add', (_event, videoId: number) => {
+  const result = homeStore.addPoster(Number(videoId))
+  invalidateHomeFeed()
+  return result
+})
 
-ipcMain.handle('home:posters:remove', (_event, videoId: number) =>
-  homeStore.removePoster(Number(videoId))
-)
+ipcMain.handle('home:posters:update', (_event, videoId: number, patch: HomeItemPatch) => {
+  const result = homeStore.updatePoster(Number(videoId), patch ?? {})
+  invalidateHomeFeed()
+  return result
+})
 
-ipcMain.handle('home:posters:reorder', (_event, videoIds: number[]) =>
-  homeStore.reorderPosters(Array.isArray(videoIds) ? videoIds : [])
-)
+ipcMain.handle('home:posters:remove', (_event, videoId: number) => {
+  const result = homeStore.removePoster(Number(videoId))
+  invalidateHomeFeed()
+  return result
+})
 
-ipcMain.handle('home:sections:save', (_event, categoryId: string, patch: HomeSectionPatch) =>
-  homeStore.saveSection(String(categoryId), patch ?? {})
-)
+ipcMain.handle('home:posters:reorder', (_event, videoIds: number[]) => {
+  const result = homeStore.reorderPosters(Array.isArray(videoIds) ? videoIds : [])
+  invalidateHomeFeed()
+  return result
+})
+
+ipcMain.handle('home:sections:save', (_event, categoryId: string, patch: HomeSectionPatch) => {
+  const result = homeStore.saveSection(String(categoryId), patch ?? {})
+  invalidateHomeFeed()
+  return result
+})
 
 ipcMain.handle('home:sections:addItem', (_event, categoryId: string, videoId: number) => {
   const target = String(categoryId)
@@ -996,30 +1059,45 @@ ipcMain.handle('home:sections:addItem', (_event, categoryId: string, videoId: nu
   const result = homeStore.addSectionItem(target, vid)
   // 顺手把以前落在非绑定分类里的旧推荐拉回来（同一分类里会合并成一条）
   if (result.ok) syncHomeRecommendations()
+  invalidateHomeFeed()
   return result
 })
 
 ipcMain.handle(
   'home:sections:updateItem',
-  (_event, categoryId: string, videoId: number, patch: HomeItemPatch) =>
-    homeStore.updateSectionItem(String(categoryId), Number(videoId), patch ?? {})
+  (_event, categoryId: string, videoId: number, patch: HomeItemPatch) => {
+    const result = homeStore.updateSectionItem(String(categoryId), Number(videoId), patch ?? {})
+    invalidateHomeFeed()
+    return result
+  }
 )
 
-ipcMain.handle('home:sections:removeItem', (_event, categoryId: string, videoId: number) =>
-  homeStore.removeSectionItem(String(categoryId), Number(videoId))
-)
+ipcMain.handle('home:sections:removeItem', (_event, categoryId: string, videoId: number) => {
+  const result = homeStore.removeSectionItem(String(categoryId), Number(videoId))
+  invalidateHomeFeed()
+  return result
+})
 
-ipcMain.handle('home:sections:restoreItem', (_event, categoryId: string, videoId: number) =>
-  homeStore.restoreSectionItem(String(categoryId), Number(videoId))
-)
+ipcMain.handle('home:sections:restoreItem', (_event, categoryId: string, videoId: number) => {
+  const result = homeStore.restoreSectionItem(String(categoryId), Number(videoId))
+  invalidateHomeFeed()
+  return result
+})
 
-ipcMain.handle('home:sections:reorder', (_event, categoryId: string, videoIds: number[]) =>
-  homeStore.reorderSectionItems(String(categoryId), Array.isArray(videoIds) ? videoIds : [])
-)
+ipcMain.handle('home:sections:reorder', (_event, categoryId: string, videoIds: number[]) => {
+  const result = homeStore.reorderSectionItems(
+    String(categoryId),
+    Array.isArray(videoIds) ? videoIds : []
+  )
+  invalidateHomeFeed()
+  return result
+})
 
-ipcMain.handle('home:sections:clear', (_event, categoryId: string) =>
-  homeStore.clearSectionItems(String(categoryId))
-)
+ipcMain.handle('home:sections:clear', (_event, categoryId: string) => {
+  const result = homeStore.clearSectionItems(String(categoryId))
+  invalidateHomeFeed()
+  return result
+})
 
 /* ── IPC：搜索页底部推荐（没有分类归属） ── */
 
@@ -1122,6 +1200,8 @@ ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
     pendingCategoryRefresh.clear()
     if (videoCacheReady) await collector.cancelAll()
     await reconcileVideoCache()
+    // 分类 / 绑定被整体替换，推荐页那份缓存不再可信
+    invalidateHomeFeed()
   }
   return result
 })
