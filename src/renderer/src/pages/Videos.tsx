@@ -3,7 +3,6 @@ import {
   App,
   Button,
   Drawer,
-  Empty,
   Form,
   Input,
   List,
@@ -519,6 +518,26 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     }
   }
 
+  /** 搜索页底部的推荐位不限分类，展示端初始状态底部会露出这几部 */
+  const recommendToSearch = async (): Promise<void> => {
+    if (!recommendTarget) return
+    setRecommending('search')
+    try {
+      const result = await window.api.home.addSearchItem(recommendTarget.id)
+      if (!result.ok) {
+        message.error(result.error === 'CACHE_UNAVAILABLE' ? '视频缓存库不可用' : '推荐失败')
+        return
+      }
+      message.success('已推荐到搜索页')
+      setRecommendTarget(null)
+      await loadPage()
+    } catch {
+      message.error('推荐失败')
+    } finally {
+      setRecommending('')
+    }
+  }
+
   /** 可选的封面：来自该视频的所有来源，同一张图只留一个；同名站点带上来源短号区分 */
   const coverOptions = useMemo(() => {
     const seen = new Set<string>()
@@ -744,6 +763,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                         : item.homeSections[0].title}
                     </Tag>
                   )}
+                  {item.inSearch && <Tag color="purple">搜索推荐</Tag>}
                   {item.hidden && <Tag color="default">已隐藏</Tag>}
                   {item.edited && <Tag color="processing">已编辑</Tag>}
                 </div>
@@ -900,48 +920,62 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
         {recommendTarget && (
           <div className="video-recommend">
             <p className="video-recommend-hint">
-              只能推荐到视频已绑定的一级分类。之后在线分类改绑或解绑，推荐会自动跟着换分类，
-              彻底没有绑定就从推荐里移除。
+              搜索页推荐不限分类，会出现在搜索页初始状态底部；分类推荐只能进视频已绑定的一级分类，
+              之后在线分类改绑或解绑，分类推荐会自动跟着换。
             </p>
-            {recommendCategories.length === 0 ? (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="这个视频的在线分类还没绑定本地分类，先去 控制台 › 分类 绑定"
-              />
-            ) : (
-              <div className="video-recommend-list">
-                {recommendCategories.map((category) => {
-                  const already = recommendTarget.homeSections?.some(
-                    (section) => section.categoryId === category.id
-                  )
-                  // 这个大类是靠哪些绑定来的，显示出来省得猜
-                  const boundPaths = (recommendTarget.localCategoryPaths ?? []).filter(
-                    (path) => path === category.name || path.startsWith(`${category.name} / `)
-                  )
-                  return (
-                    <div className="video-recommend-row" key={category.id}>
-                      <div className="video-recommend-name">
-                        <span>{category.name}</span>
-                        {!category.visible && <Tag color="default">分类已隐藏</Tag>}
-                        {boundPaths.length > 0 && (
-                          <span className="video-recommend-sub" title={boundPaths.join('、')}>
-                            {boundPaths.join('、')}
-                          </span>
-                        )}
-                      </div>
-                      <Button
-                        size="small"
-                        type={already ? 'default' : 'primary'}
-                        disabled={already}
-                        loading={recommending === category.id}
-                        onClick={() => void recommendTo(category.id, category.name)}
-                      >
-                        {already ? '已推荐' : '推荐'}
-                      </Button>
-                    </div>
-                  )
-                })}
+            <div className="video-recommend-list">
+              <div className="video-recommend-row">
+                <div className="video-recommend-name">
+                  <span>搜索页推荐</span>
+                  <span className="video-recommend-sub">展示在搜索页初始状态底部</span>
+                </div>
+                <Button
+                  size="small"
+                  type={recommendTarget.inSearch ? 'default' : 'primary'}
+                  disabled={recommendTarget.inSearch}
+                  loading={recommending === 'search'}
+                  onClick={() => void recommendToSearch()}
+                >
+                  {recommendTarget.inSearch ? '已推荐' : '推荐'}
+                </Button>
               </div>
+              {recommendCategories.map((category) => {
+                const already = recommendTarget.homeSections?.some(
+                  (section) => section.categoryId === category.id
+                )
+                // 这个大类是靠哪些绑定来的，显示出来省得猜
+                const boundPaths = (recommendTarget.localCategoryPaths ?? []).filter(
+                  (path) => path === category.name || path.startsWith(`${category.name} / `)
+                )
+                return (
+                  <div className="video-recommend-row" key={category.id}>
+                    <div className="video-recommend-name">
+                      <span>{category.name}</span>
+                      {!category.visible && <Tag color="default">分类已隐藏</Tag>}
+                      {boundPaths.length > 0 && (
+                        <span className="video-recommend-sub" title={boundPaths.join('、')}>
+                          {boundPaths.join('、')}
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      size="small"
+                      type={already ? 'default' : 'primary'}
+                      disabled={already}
+                      loading={recommending === category.id}
+                      onClick={() => void recommendTo(category.id, category.name)}
+                    >
+                      {already ? '已推荐' : '推荐'}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+            {recommendCategories.length === 0 && (
+              <p className="video-recommend-empty">
+                这个视频的在线分类还没绑定本地分类，分类推荐不可用；可以先去 控制台 › 分类
+                绑定，搜索页推荐不受影响。
+              </p>
             )}
           </div>
         )}

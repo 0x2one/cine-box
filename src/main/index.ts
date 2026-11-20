@@ -28,10 +28,16 @@ import {
 import { createCollectLogStore } from './collect-log-store'
 import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
-import { buildHomeFeed } from './home-feed'
+import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
-import type { HomeFeedResult, HomeItemPatch, HomeSectionPatch } from './home-types'
+import type {
+  HomeFeedResult,
+  HomeItemPatch,
+  HomeSearchPatch,
+  HomeSearchResult,
+  HomeSectionPatch
+} from './home-types'
 import { fetchSiteCategories } from './site-categories'
 import { clampPageSize, probePageSize } from './video-collect-probe'
 import {
@@ -156,6 +162,22 @@ function readHomeFeed(): HomeFeedResult {
     return { ok: true, feed }
   } catch (error) {
     console.error('读取首页数据失败', error)
+    return { ok: false, error: 'DB' }
+  }
+}
+
+/** 搜索页底部的推荐位：单独读，控制台和搜索页看到的是同一份结果 */
+function readHomeSearch(): HomeSearchResult {
+  try {
+    const search = buildSearchSection({
+      config: homeStore.get().search,
+      videosByIds: (videoIds) => videoStore.listVideosByIds(videoIds),
+      listVideos: (query, filters) => videoStore.listVideos(query, filters),
+      cacheReady: videoCacheReady
+    })
+    return { ok: true, search }
+  } catch (error) {
+    console.error('读取搜索推荐失败', error)
     return { ok: false, error: 'DB' }
   }
 }
@@ -549,6 +571,12 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   // 推荐只能进视频绑定的大类，弹窗按这个列表给可选目标
   const boundTops = boundTopCategoriesByVideo(result.items.map((item) => item.id))
   const posterIds = new Set(homeConfig.posters.map((poster) => poster.videoId))
+  // 搜索页底部的推荐位没有分类，人工加进来的单独标一下
+  const searchRecommendIds = new Set(
+    homeConfig.search.items
+      .filter((item) => item.pinned && !item.removed)
+      .map((item) => item.videoId)
+  )
   const categoryNames = new Map(
     categoryStore.list().map((category) => [category.id, category.name])
   )
@@ -575,7 +603,8 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
       ),
       boundCategoryIds: boundTops.get(item.id) ?? [],
       inPoster: posterIds.has(item.id),
-      homeSections: sectionsByVideo.get(item.id) ?? []
+      homeSections: sectionsByVideo.get(item.id) ?? [],
+      inSearch: searchRecommendIds.has(item.id)
     }))
   }
 })
@@ -973,6 +1002,42 @@ ipcMain.handle('home:sections:reorder', (_event, categoryId: string, videoIds: n
 ipcMain.handle('home:sections:clear', (_event, categoryId: string) =>
   homeStore.clearSectionItems(String(categoryId))
 )
+
+/* ── IPC：搜索页底部推荐（没有分类归属） ── */
+
+ipcMain.handle('home:search:get', () => readHomeSearch())
+
+ipcMain.handle('home:search:save', (_event, patch: HomeSearchPatch) =>
+  homeStore.saveSearch(patch ?? {})
+)
+
+ipcMain.handle('home:search:addItem', (_event, videoId: number) => {
+  if (!videoCacheReady) return cacheUnavailable()
+  const vid = Number(videoId)
+  // 只接受缓存库里还在的视频；列表页的「推荐」入口本来就来自它
+  if (!Number.isInteger(vid) || videoStore.listVideosByIds([vid]).length === 0) {
+    return { ok: false, error: 'NOT_FOUND' }
+  }
+  return homeStore.addSearchItem(vid)
+})
+
+ipcMain.handle('home:search:updateItem', (_event, videoId: number, patch: HomeItemPatch) =>
+  homeStore.updateSearchItem(Number(videoId), patch ?? {})
+)
+
+ipcMain.handle('home:search:removeItem', (_event, videoId: number) =>
+  homeStore.removeSearchItem(Number(videoId))
+)
+
+ipcMain.handle('home:search:restoreItem', (_event, videoId: number) =>
+  homeStore.restoreSearchItem(Number(videoId))
+)
+
+ipcMain.handle('home:search:reorder', (_event, videoIds: number[]) =>
+  homeStore.reorderSearchItems(Array.isArray(videoIds) ? videoIds : [])
+)
+
+ipcMain.handle('home:search:clear', () => homeStore.clearSearchItems())
 
 ipcMain.handle('home:image:pick', async () => {
   const options: Electron.OpenDialogOptions = {

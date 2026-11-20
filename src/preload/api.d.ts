@@ -605,6 +605,8 @@ interface VideoListItem {
   inPoster?: boolean
   /** 已在哪些首页分类里推荐 */
   homeSections?: { categoryId: string; title: string }[]
+  /** 已加入搜索页底部推荐 */
+  inSearch?: boolean
   /** 视频所属的本地一级分类 id（按绑定关系推导，推荐只能进这些分类） */
   boundCategoryIds?: string[]
 }
@@ -793,6 +795,12 @@ interface HomeSectionPatch {
   topN?: number
 }
 
+/** 搜索页底部推荐只有规则和条数可改 */
+interface HomeSearchPatch {
+  rule?: HomeRule
+  topN?: number
+}
+
 /** 首页条目 + 视频库解析结果 */
 interface HomeItemView {
   videoId: number
@@ -839,15 +847,34 @@ interface HomeSectionView {
   removedItems: HomeItemView[]
 }
 
+/** 搜索页初始状态底部的推荐：结构跟分类推荐一样，只是没有分类字段 */
+interface HomeSearchView {
+  rule: HomeRule
+  topN: number
+  customized: boolean
+  /** latest：片库里展示中的视频总数；manual：推荐条数 */
+  total: number
+  items: HomeItemView[]
+  /** latest 规则下被移除的视频，可以恢复 */
+  removedItems: HomeItemView[]
+}
+
 interface HomeFeed {
   posters: HomeItemView[]
   sections: HomeSectionView[]
+  search: HomeSearchView
 }
 
 interface HomeFeedResult {
   ok: boolean
   error?: string
   feed?: HomeFeed
+}
+
+interface HomeSearchResult {
+  ok: boolean
+  error?: string
+  search?: HomeSearchView
 }
 
 interface HomeActionResult {
@@ -882,6 +909,16 @@ interface HomeApi {
   reorderSectionItems: (categoryId: string, videoIds: number[]) => Promise<HomeActionResult>
   /** 清空「自定义」轨道的全部推荐 */
   clearSectionItems: (categoryId: string) => Promise<HomeActionResult>
+  /** 搜索页底部推荐 */
+  getSearch: () => Promise<HomeSearchResult>
+  saveSearch: (patch: HomeSearchPatch) => Promise<HomeActionResult>
+  addSearchItem: (videoId: number) => Promise<HomeActionResult>
+  updateSearchItem: (videoId: number, patch: HomeItemPatch) => Promise<HomeActionResult>
+  removeSearchItem: (videoId: number) => Promise<HomeActionResult>
+  restoreSearchItem: (videoId: number) => Promise<HomeActionResult>
+  reorderSearchItems: (videoIds: number[]) => Promise<HomeActionResult>
+  /** 清空「自定义」的搜索推荐 */
+  clearSearchItems: () => Promise<HomeActionResult>
   pickImage: () => Promise<HomeImageResult>
 }
 

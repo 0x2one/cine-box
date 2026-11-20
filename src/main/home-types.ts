@@ -8,6 +8,10 @@ export const HOME_DEFAULT_TOP_N = 18
 /** TOP N 的上下限：上限是缓存库单次查询能取到的条数 */
 export const HOME_MIN_TOP_N = 1
 export const HOME_MAX_TOP_N = 50
+/** 搜索页底部推荐默认取 8 部；一格 8 张，再多就会换行 */
+export const HOME_SEARCH_DEFAULT_TOP_N = 8
+export const HOME_SEARCH_MIN_TOP_N = 1
+export const HOME_SEARCH_MAX_TOP_N = 24
 /** 海报叠层最多放几张，超出没有展示位也没有意义 */
 export const HOME_MAX_POSTERS = 24
 
@@ -75,10 +79,23 @@ export interface HomeSectionConfig {
   items: HomeSectionItem[]
 }
 
+/**
+ * 搜索页初始状态底部的推荐位：没有分类归属，独立一条轨道。
+ * 规则与分类推荐一致：latest 按更新时间取前 N 部，manual 只显示人工加进来的。
+ */
+export interface HomeSearchConfig {
+  rule: HomeRule
+  topN: number
+  /** 「自定义」列表是否被编辑过，语义同分类推荐 */
+  customized?: boolean
+  items: HomeSectionItem[]
+}
+
 export interface HomeConfig {
   posters: HomePosterItem[]
   /** 只保存配置过的一级分类，没配置的按默认值（显示 / TOP 12）处理 */
   sections: HomeSectionConfig[]
+  search: HomeSearchConfig
 }
 
 /** 条目 + 视频库解析结果：首页与控制台共用 */
@@ -131,9 +148,28 @@ export interface HomeSectionView {
   removedItems: HomeItemView[]
 }
 
+/** 搜索页底部推荐：结构跟分类推荐一样，只是没有分类字段 */
+export interface HomeSearchView {
+  rule: HomeRule
+  topN: number
+  customized: boolean
+  /** latest：片库里展示中的视频总数；manual：推荐条数 */
+  total: number
+  items: HomeItemView[]
+  /** latest 规则下被移除的视频，可以恢复 */
+  removedItems: HomeItemView[]
+}
+
 export interface HomeFeed {
   posters: HomeItemView[]
   sections: HomeSectionView[]
+  search: HomeSearchView
+}
+
+export interface HomeSearchResult {
+  ok: boolean
+  error?: string
+  search?: HomeSearchView
 }
 
 export interface HomeFeedResult {
@@ -154,6 +190,12 @@ export interface HomeActionResult {
 export interface HomeSectionPatch {
   visible?: boolean
   title?: string
+  rule?: HomeRule
+  topN?: number
+}
+
+/** 搜索页推荐位只有规则和条数可改 */
+export interface HomeSearchPatch {
   rule?: HomeRule
   topN?: number
 }

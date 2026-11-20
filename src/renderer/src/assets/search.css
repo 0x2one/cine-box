@@ -375,52 +375,83 @@
   color: color-mix(in srgb, var(--accent) 78%, var(--text));
 }
 
-/* ── 初始态底部的装饰封面带 ── */
+/* ── 初始态底部的推荐位 ──
+   内容来自控制台「推荐 › 搜索推荐」：TOP 按更新时间取前 N 部，自定义只显示人工加进来的。
+   视觉上沿用原来的封面带：海报从页面底色里淡出来、单双张交错半格，悬停才亮起；
+   点一张等于用它的片名发起一次搜索，不跳播放 / 详情。 */
 
-.search-intro-shelf {
+.search-recommend {
   position: relative;
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 12px;
   justify-content: center;
   width: 100%;
-  padding-top: 32px;
+  /* 底部留出交错那半格，免得偶数张被 overflow 裁掉一截 */
+  padding: 32px 0 12px;
   overflow: hidden;
-  pointer-events: none;
   user-select: none;
 }
 
-/* 顶部用页面底色盖一层渐变，封面从背景里淡出来；比 mask 更稳，也自动跟随主题 */
-.search-intro-shelf::before {
+/* 顶部用页面底色盖一层渐变，海报从背景里淡出来；比 mask 更稳，也自动跟随主题 */
+.search-recommend::before {
   position: absolute;
   inset: 0 0 auto;
-  z-index: 1;
+  z-index: 2;
   height: 76px;
   background: linear-gradient(to bottom, var(--bg), transparent);
   content: '';
   pointer-events: none;
 }
 
-.search-shelf-item {
-  flex: 0 0 92px;
-  width: 92px;
-  height: 124px;
+/* 一张海报：96 × 144 的 2:3 竖版，默认半透明，悬停 / 键盘聚焦时恢复 */
+.search-recommend-card {
+  flex: 0 0 auto;
+  width: 96px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  opacity: 0.56;
+  transition: opacity 0.18s ease;
+}
+
+.search-recommend-card:nth-child(even) {
+  transform: translateY(12px);
+}
+
+.search-recommend-card:hover,
+.search-recommend-card:focus-visible {
+  opacity: 1;
+}
+
+.search-recommend-card:focus-visible {
+  outline: none;
+}
+
+.search-recommend-poster {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
   overflow: hidden;
   border-radius: 10px;
   background: var(--surface-muted);
   box-shadow: 0 12px 26px rgb(8 12 18 / 12%);
-  opacity: 0.56;
+  transition: box-shadow 0.18s ease;
 }
 
-.search-shelf-item:nth-child(even) {
-  transform: translateY(12px);
+.search-recommend-card:hover .search-recommend-poster,
+.search-recommend-card:focus-visible .search-recommend-poster {
+  box-shadow: 0 16px 32px rgb(8 12 18 / 18%);
 }
 
-.search-shelf-item img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+/* 占位首字比首页卡片小一档：卡片只有 96px 宽 */
+.search-recommend-poster .home-picture-letter {
+  color: var(--text-faint);
+  font-size: 20px;
+  font-weight: 600;
 }
 
 /* ── 结果列表 ── */
@@ -732,6 +763,14 @@
     max-width: 170px;
   }
 
+  .search-recommend {
+    gap: 10px;
+  }
+
+  .search-recommend-card {
+    width: 84px;
+  }
+
   .search-form.is-hero .search-form-submit.ant-btn {
     min-width: 72px;
   }
@@ -747,7 +786,9 @@
   .search-backtop,
   .search-cat,
   .search-history-item,
-  .search-history-clear {
+  .search-history-clear,
+  .search-recommend-card,
+  .search-recommend-poster {
     transition: none;
   }
 }

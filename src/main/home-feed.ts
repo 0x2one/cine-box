@@ -5,6 +5,8 @@ import {
   type HomeFeed,
   type HomeItemFields,
   type HomeItemView,
+  type HomeSearchConfig,
+  type HomeSearchView,
   type HomeSectionItem,
   type HomeSectionView
 } from './home-types'
@@ -89,6 +91,77 @@ function subtreeIds(categories: VideoCategory[], rootId: string): string[] {
     queue.push(...(children.get(id) ?? []))
   }
   return result
+}
+
+/** 搜索页底部推荐的构建依赖：没有分类，直接按整库取片 */
+export interface HomeSearchFeedDeps {
+  config: HomeSearchConfig
+  videosByIds: (videoIds: number[]) => VideoListItem[]
+  listVideos: (
+    query: VideoListQuery,
+    filters: { siteId: string; categoryId: string }[]
+  ) => VideoListResult
+  cacheReady: boolean
+}
+
+/**
+ * 搜索页初始状态底部的推荐位：规则与分类推荐一致。
+ * latest 先放人工指定的，再按更新时间补满 topN；manual 只显示人工列表。
+ */
+export function buildSearchSection(deps: HomeSearchFeedDeps): HomeSearchView {
+  const { config } = deps
+  const allVideoIds = new Set(config.items.map((item) => item.videoId))
+  const videos = new Map<number, VideoListItem>()
+  if (deps.cacheReady && allVideoIds.size > 0) {
+    for (const video of deps.videosByIds([...allVideoIds])) videos.set(video.id, video)
+  }
+
+  if (config.rule === 'manual') {
+    const views = config.items
+      .filter((item) => !item.removed)
+      .map((item) => toView(item, videos.get(item.videoId)))
+    return {
+      rule: config.rule,
+      topN: config.topN,
+      customized: config.customized === true,
+      total: views.length,
+      items: views,
+      removedItems: []
+    }
+  }
+
+  const pinned = config.items.filter((item) => !item.removed && item.pinned)
+  const removed = config.items.filter((item) => item.removed)
+  const overrides = new Map(config.items.map((item) => [item.videoId, item]))
+  const pinnedIds = new Set(pinned.map((item) => item.videoId))
+  const removedIds = new Set(removed.map((item) => item.videoId))
+
+  let rows: VideoListItem[] = []
+  let total = 0
+  if (deps.cacheReady) {
+    const result = deps.listVideos({ pageSize: 100, visibility: 'shown' }, [])
+    if (result.ok) {
+      rows = result.items
+      total = result.total
+    }
+  }
+  const auto = rows
+    .filter((video) => !pinnedIds.has(video.id) && !removedIds.has(video.id))
+    // 自动条目也可能被改过隐藏 / 图片 / 文案，覆盖照常生效，但不会因此插到前面
+    .map((video) => toView(overrides.get(video.id) ?? emptyItem(video.id), video, false))
+
+  return {
+    rule: config.rule,
+    topN: config.topN,
+    customized: config.customized === true,
+    total,
+    items: [
+      ...pinned.map((item) => toView(item, videos.get(item.videoId))),
+      // 人工指定的全部保留，自动条目只补到 topN
+      ...auto.slice(0, Math.max(0, config.topN - pinned.length))
+    ],
+    removedItems: removed.map((item) => toView(item, videos.get(item.videoId)))
+  }
 }
 
 /**
@@ -196,5 +269,14 @@ export function buildHomeFeed(deps: HomeFeedDeps): HomeFeed {
   }
 
   // 配置里有、分类已被删掉的段落不再展示；配置本身留在文件里，重建同名分类时不受影响
-  return { posters, sections }
+  return {
+    posters,
+    sections,
+    search: buildSearchSection({
+      config: config.search,
+      videosByIds: deps.videosByIds,
+      listVideos: deps.listVideos,
+      cacheReady: deps.cacheReady
+    })
+  }
 }

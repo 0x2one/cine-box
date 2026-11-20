@@ -47,6 +47,8 @@ const POSTER_HINT =
   '顺序就是推荐页叠层的顺序，拖动行或点上 / 下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在推荐页，配置仍保留。'
 const SECTION_HINT =
   '每个一级分类对应推荐页上的一条轨道。自定义用「视频」页的「推荐」按钮加片；TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
+const SEARCH_HINT =
+  '搜索页初始状态底部的一排海报，默认按更新时间取前 8 部。自定义同样用「视频」页的「推荐」按钮加片；两种规则都能排序、移除、隐藏、改图。'
 
 const HOME_ERRORS: Record<string, string> = {
   NOT_FOUND: '条目已不存在，刷新后再试',
@@ -346,7 +348,7 @@ function HomeItemEditor({
 }: {
   item: HomeItemView
   ratio: number
-  kind: 'poster' | 'section'
+  kind: 'poster' | 'section' | 'search'
   saving: boolean
   onCancel: () => void
   onSave: (patch: HomeItemPatch) => void
@@ -443,7 +445,7 @@ function HomeItemEditor({
       <div className="home-editor">
         <div className="home-editor-fields">
           <p className="home-editor-hint">
-            留空表示沿用视频库里的值；这里改的只影响推荐页，不会动采集到的数据。
+            留空表示沿用视频库里的值；这里改的只影响展示端，不会动采集到的数据。
           </p>
           <label className="home-editor-field">
             <span className="home-editor-label">
@@ -488,7 +490,9 @@ function HomeItemEditor({
           <div className="home-editor-switch">
             <Switch checked={hidden} onChange={setHidden} />
             <div>
-              <span className="home-editor-label">在推荐页隐藏</span>
+              <span className="home-editor-label">
+                {kind === 'search' ? '在搜索页隐藏' : '在推荐页隐藏'}
+              </span>
               <span className="home-editor-hint">隐藏后配置仍保留，随时可以恢复</span>
             </div>
           </div>
@@ -792,6 +796,7 @@ function HomeItemCard({
   index,
   total,
   removeTitle,
+  hideLabel = '推荐页',
   onMove,
   onEdit,
   onToggleHidden,
@@ -803,6 +808,8 @@ function HomeItemCard({
   index: number
   total: number
   removeTitle: string
+  /** 隐藏开关的文案落在哪个展示页 */
+  hideLabel?: string
   onMove: (delta: number) => void
   onEdit: () => void
   onToggleHidden: () => void
@@ -894,8 +901,8 @@ function HomeItemCard({
           <button
             type="button"
             className="home-shelf-action"
-            title={item.hidden ? '恢复显示' : '在推荐页隐藏'}
-            aria-label={item.hidden ? '恢复显示' : '在推荐页隐藏'}
+            title={item.hidden ? '恢复显示' : `在${hideLabel}隐藏`}
+            aria-label={item.hidden ? '恢复显示' : `在${hideLabel}隐藏`}
             onClick={onToggleHidden}
           >
             {item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
@@ -933,10 +940,10 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   const [feed, setFeed] = useState<HomeFeed | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
-  const [tab, setTab] = useState<'poster' | 'section'>('poster')
+  const [tab, setTab] = useState<'poster' | 'section' | 'search'>('poster')
   const [saving, setSaving] = useState(false)
   const [editor, setEditor] = useState<{
-    kind: 'poster' | 'section'
+    kind: 'poster' | 'section' | 'search'
     categoryId: string
     ratio: number
     item: HomeItemView
@@ -1013,12 +1020,13 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   const posters = feed?.posters ?? []
   const sections = feed?.sections ?? []
+  const search = feed?.search ?? null
   const posterIds = posters.map((item) => item.videoId)
   const visibleSections = sections.filter(
     (section) => section.visible && section.categoryVisible
   ).length
   /** 标题行右侧的说明跟着当前 tab 走 */
-  const hint = tab === 'poster' ? POSTER_HINT : SECTION_HINT
+  const hint = tab === 'poster' ? POSTER_HINT : tab === 'section' ? SECTION_HINT : SEARCH_HINT
 
   const clearDrag = (): void => {
     setDragId(null)
@@ -1108,18 +1116,42 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
     await act(window.api.home.saveSection(section.categoryId, { rule }), '已切换规则')
   }
 
+  /** 搜索推荐的规则切换：语义跟分类推荐一致，只是没有分类 */
+  const changeSearchRule = async (target: HomeSearchView, rule: HomeRule): Promise<void> => {
+    if (rule === target.rule) return
+    if (rule === 'manual' && !target.customized && target.items.length > 0) {
+      const ok = await act(
+        window.api.home.reorderSearchItems(target.items.map((item) => item.videoId))
+      )
+      if (!ok) return
+    }
+    await act(window.api.home.saveSearch({ rule }), '已切换规则')
+  }
+
   const saveItem = async (patch: HomeItemPatch): Promise<void> => {
     if (!editor) return
     setSaving(true)
     const ok =
       editor.kind === 'poster'
         ? await act(window.api.home.updatePoster(editor.item.videoId, patch), '已保存')
-        : await act(
-            window.api.home.updateSectionItem(editor.categoryId, editor.item.videoId, patch),
-            '已保存'
-          )
+        : editor.kind === 'search'
+          ? await act(window.api.home.updateSearchItem(editor.item.videoId, patch), '已保存')
+          : await act(
+              window.api.home.updateSectionItem(editor.categoryId, editor.item.videoId, patch),
+              '已保存'
+            )
     setSaving(false)
     if (ok) setEditor(null)
+  }
+
+  const moveSearchItem = (videoId: number, delta: number): void => {
+    if (!search) return
+    const ids = search.items.map((item) => item.videoId)
+    const from = ids.indexOf(videoId)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= ids.length) return
+    ;[ids[from], ids[to]] = [ids[to], ids[from]]
+    void act(window.api.home.reorderSearchItems(ids))
   }
 
   const posterTab = (
@@ -1399,6 +1431,142 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
     </div>
   )
 
+  const searchTab = search ? (
+    <div className="home-config">
+      <section className="home-config-section">
+        <div className="home-config-section-head is-static">
+          <div className="home-config-section-title">
+            <span className="home-config-section-name">搜索页推荐</span>
+            <span className="home-config-section-count">
+              {search.rule === 'manual' ? `${search.total} 部推荐` : `共 ${search.total} 部视频`}
+            </span>
+          </div>
+          <div className="home-config-section-actions">
+            <Radio.Group
+              size="small"
+              optionType="button"
+              value={search.rule}
+              options={[
+                { label: '自定义', value: 'manual' },
+                { label: 'TOP', value: 'latest' }
+              ]}
+              onChange={(event) => void changeSearchRule(search, event.target.value as HomeRule)}
+            />
+            {search.rule === 'latest' && (
+              <label className="home-config-field">
+                <span>取前</span>
+                <InputNumber
+                  size="small"
+                  min={1}
+                  max={24}
+                  value={search.topN}
+                  className="home-config-topn"
+                  onChange={(value) => {
+                    if (typeof value === 'number') {
+                      void act(window.api.home.saveSearch({ topN: value }))
+                    }
+                  }}
+                />
+              </label>
+            )}
+            {search.rule === 'manual' && search.items.length > 0 && (
+              <Popconfirm
+                title="清空全部推荐？"
+                description={`搜索页底部的 ${search.items.length} 部推荐会被移除，之后可以重新推荐。`}
+                okText="清空"
+                cancelText="取消"
+                onConfirm={() => void act(window.api.home.clearSearchItems(), '已清空推荐')}
+              >
+                <Button type="text" size="small" danger icon={<ClearOutlined />}>
+                  清空推荐
+                </Button>
+              </Popconfirm>
+            )}
+          </div>
+        </div>
+
+        {search.items.length === 0 ? (
+          <p className="home-config-empty">
+            {search.rule === 'manual'
+              ? '还没有推荐视频，去「视频」页点「推荐」加进来'
+              : '片库里还没有展示中的视频，采集之后这里会自动出现'}
+          </p>
+        ) : (
+          <div className="home-config-shelf">
+            {search.items.map((item, index) => (
+              <HomeItemCard
+                key={item.videoId}
+                item={item}
+                ratio={CARD_RATIO}
+                index={index}
+                total={search.items.length}
+                removeTitle={
+                  search.rule === 'manual'
+                    ? '从推荐里移除？'
+                    : '从搜索页推荐里移除？之后可以在下方恢复'
+                }
+                hideLabel="搜索页"
+                onMove={(delta) => moveSearchItem(item.videoId, delta)}
+                onEdit={() =>
+                  setEditor({ kind: 'search', categoryId: '', ratio: CARD_RATIO, item })
+                }
+                onToggleHidden={() =>
+                  void act(
+                    window.api.home.updateSearchItem(item.videoId, { hidden: !item.hidden }),
+                    item.hidden ? '已恢复显示' : '已在搜索页隐藏'
+                  )
+                }
+                onRemove={() =>
+                  void act(window.api.home.removeSearchItem(item.videoId), '已从搜索页移除')
+                }
+                drag={rowDrag(
+                  search.items.map((entry) => entry.videoId),
+                  item.videoId,
+                  (next) => void act(window.api.home.reorderSearchItems(next))
+                )}
+              />
+            ))}
+          </div>
+        )}
+
+        {search.rule === 'latest' && search.removedItems.length > 0 && (
+          <div className="home-config-removed">
+            <button
+              type="button"
+              className="home-config-removed-toggle"
+              aria-expanded={removedOpen.includes('search')}
+              onClick={() => toggleKey(setRemovedOpen, 'search')}
+            >
+              <RightOutlined className={removedOpen.includes('search') ? 'is-open' : undefined} />
+              已移除 {search.removedItems.length} 部
+            </button>
+            {removedOpen.includes('search') && (
+              <div className="home-config-removed-list">
+                {search.removedItems.map((item) => (
+                  <button
+                    key={item.videoId}
+                    type="button"
+                    className="home-config-removed-chip"
+                    title={`${item.title} · 点击恢复到搜索页`}
+                    onClick={() =>
+                      void act(window.api.home.restoreSearchItem(item.videoId), '已恢复到搜索页')
+                    }
+                  >
+                    <span className="home-config-removed-thumb">
+                      <HomePicture item={item} />
+                    </span>
+                    <span className="home-config-removed-name">{item.title}</span>
+                    <UndoOutlined className="home-config-removed-icon" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  ) : null
+
   return (
     <>
       <div className="settings-panel-head has-actions" ref={headRef}>
@@ -1407,7 +1575,8 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
         <p className="settings-panel-desc">
           {desc}
           <span className="sites-count">
-            海报 {posters.length} 张 · 分类 {visibleSections}/{sections.length} 个
+            海报 {posters.length} 张 · 分类 {visibleSections}/{sections.length} 个 · 搜索推荐{' '}
+            {search?.items.length ?? 0} 部
           </span>
           <Tooltip title={<div style={{ maxWidth: 360 }}>{hint}</div>} placement="bottomLeft">
             <span className="home-config-tip" tabIndex={0}>
@@ -1443,10 +1612,11 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
         >
           <Tabs
             activeKey={tab}
-            onChange={(key) => setTab(key as 'poster' | 'section')}
+            onChange={(key) => setTab(key as 'poster' | 'section' | 'search')}
             items={[
               { key: 'poster', label: '海报叠层', children: posterTab },
-              { key: 'section', label: '分类推荐', children: sectionTab }
+              { key: 'section', label: '分类推荐', children: sectionTab },
+              { key: 'search', label: '搜索推荐', children: searchTab }
             ]}
           />
         </div>

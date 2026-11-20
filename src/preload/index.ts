@@ -100,6 +100,20 @@ const api = {
       ipcRenderer.invoke('home:sections:reorder', categoryId, videoIds),
     clearSectionItems: (categoryId: string): Promise<HomeActionResult> =>
       ipcRenderer.invoke('home:sections:clear', categoryId),
+    getSearch: (): Promise<HomeSearchResult> => ipcRenderer.invoke('home:search:get'),
+    saveSearch: (patch: HomeSearchPatch): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:search:save', patch),
+    addSearchItem: (videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:search:addItem', videoId),
+    updateSearchItem: (videoId: number, patch: HomeItemPatch): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:search:updateItem', videoId, patch),
+    removeSearchItem: (videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:search:removeItem', videoId),
+    restoreSearchItem: (videoId: number): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:search:restoreItem', videoId),
+    reorderSearchItems: (videoIds: number[]): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:search:reorder', videoIds),
+    clearSearchItems: (): Promise<HomeActionResult> => ipcRenderer.invoke('home:search:clear'),
     /** 弹系统文件选择框，把选中的图片复制进配置目录，返回 cine-img:// 地址 */
     pickImage: (): Promise<HomeImageResult> => ipcRenderer.invoke('home:image:pick')
   },

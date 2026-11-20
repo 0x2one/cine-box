@@ -6,6 +6,9 @@ import {
   HOME_MAX_POSTERS,
   HOME_MAX_TOP_N,
   HOME_MIN_TOP_N,
+  HOME_SEARCH_DEFAULT_TOP_N,
+  HOME_SEARCH_MAX_TOP_N,
+  HOME_SEARCH_MIN_TOP_N,
   type HomeActionResult,
   type HomeConfig,
   type HomeCrop,
@@ -13,6 +16,8 @@ import {
   type HomeItemPatch,
   type HomePosterItem,
   type HomeRule,
+  type HomeSearchConfig,
+  type HomeSearchPatch,
   type HomeSectionConfig,
   type HomeSectionItem,
   type HomeSectionPatch
@@ -29,6 +34,8 @@ interface StoreFile {
   topDefault?: number
   posters?: unknown
   sections?: unknown
+  /** 搜索页底部推荐，老文件没有这一段，读成默认的 TOP 8 */
+  search?: unknown
 }
 
 /** 早先的默认条数：老配置里没记 topDefault，按这个值判断要不要迁移 */
@@ -59,6 +66,15 @@ export interface HomeStore {
     toCategoryId: string | null,
     videoId: number
   ) => HomeActionResult
+  /** 搜索页底部推荐：规则与条数 */
+  saveSearch: (patch: HomeSearchPatch) => HomeActionResult
+  addSearchItem: (videoId: number) => HomeActionResult
+  updateSearchItem: (videoId: number, patch: HomeItemPatch) => HomeActionResult
+  removeSearchItem: (videoId: number) => HomeActionResult
+  restoreSearchItem: (videoId: number) => HomeActionResult
+  reorderSearchItems: (videoIds: number[]) => HomeActionResult
+  /** 清空「自定义」的搜索推荐；TOP 规则下没有这个动作 */
+  clearSearchItems: () => HomeActionResult
   /**
    * 把用户选中的本地图片复制进配置目录，返回 cine-img:// 地址。
    * 只接受主进程自己弹窗拿到的路径，渲染层不接触文件系统。
@@ -151,6 +167,57 @@ function clampTopN(value: unknown): number {
   return Math.round(clamp(n, HOME_MIN_TOP_N, HOME_MAX_TOP_N))
 }
 
+function clampSearchTopN(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return HOME_SEARCH_DEFAULT_TOP_N
+  return Math.round(clamp(n, HOME_SEARCH_MIN_TOP_N, HOME_SEARCH_MAX_TOP_N))
+}
+
+function defaultSearch(): HomeSearchConfig {
+  return {
+    rule: 'latest',
+    topN: HOME_SEARCH_DEFAULT_TOP_N,
+    customized: false,
+    items: []
+  }
+}
+
+/** 解析条目数组：分类推荐与搜索推荐共用，顺序就是展示顺序 */
+function parseItems(raw: unknown): HomeSectionItem[] {
+  const items: HomeSectionItem[] = []
+  const seen = new Set<number>()
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const videoId = videoIdOf(record.videoId)
+    if (videoId === null || seen.has(videoId)) continue
+    seen.add(videoId)
+    items.push({
+      videoId,
+      removed: record.removed === true,
+      pinned: record.pinned === true,
+      ...fieldsFromObject(record)
+    })
+  }
+  return items
+}
+
+function parseSearch(raw: unknown): HomeSearchConfig {
+  const record =
+    raw && typeof raw === 'object'
+      ? (raw as Record<string, unknown>)
+      : ({} as Record<string, unknown>)
+  const items = parseItems(record.items)
+  const rule: HomeRule = isRule(record.rule) ? record.rule : 'latest'
+  return {
+    rule,
+    topN: clampSearchTopN(record.topN),
+    // 语义同分类推荐：自定义列表有内容才算编辑过，空列表切回来仍可用 TOP 自动填充
+    customized: items.length > 0 && (record.customized === true || rule === 'manual'),
+    items
+  }
+}
+
 /**
  * 首页配置：单独一个 JSON 文件（userData/Data/Home/home.json），
  * 与业务库、视频缓存库都分开，清空缓存不会连带删掉配置（只是条目变成「视频已丢失」）。
@@ -159,14 +226,15 @@ function clampTopN(value: unknown): number {
 export function createHomeStore(directory: string): HomeStore {
   const file = join(directory, 'home.json')
   const imagesDir = join(directory, 'images')
-  let config: HomeConfig = { posters: [], sections: [] }
+  let config: HomeConfig = { posters: [], sections: [], search: defaultSearch() }
 
   function persist(): void {
     const payload: StoreFile = {
       version: 1,
       topDefault: HOME_DEFAULT_TOP_N,
       posters: config.posters,
-      sections: config.sections
+      sections: config.sections,
+      search: config.search
     }
     try {
       mkdirSync(directory, { recursive: true })
@@ -202,21 +270,7 @@ export function createHomeStore(directory: string): HomeStore {
       const categoryId = typeof record.categoryId === 'string' ? record.categoryId.trim() : ''
       if (!categoryId || seenSections.has(categoryId)) continue
       seenSections.add(categoryId)
-      const items: HomeSectionItem[] = []
-      const seenItems = new Set<number>()
-      for (const item of Array.isArray(record.items) ? record.items : []) {
-        if (!item || typeof item !== 'object') continue
-        const itemRecord = item as Record<string, unknown>
-        const videoId = videoIdOf(itemRecord.videoId)
-        if (videoId === null || seenItems.has(videoId)) continue
-        seenItems.add(videoId)
-        items.push({
-          videoId,
-          removed: itemRecord.removed === true,
-          pinned: itemRecord.pinned === true,
-          ...fieldsFromObject(itemRecord)
-        })
-      }
+      const items = parseItems(record.items)
       const rule: HomeRule = isRule(record.rule) ? record.rule : 'latest'
       sections.push({
         categoryId,
@@ -234,7 +288,7 @@ export function createHomeStore(directory: string): HomeStore {
         items
       })
     }
-    return { posters, sections }
+    return { posters, sections, search: parseSearch(data?.search) }
   }
 
   function findSection(categoryId: string): HomeSectionConfig | null {
@@ -269,8 +323,50 @@ export function createHomeStore(directory: string): HomeStore {
   }
 
   /** 自定义列表有了内容才算「编辑过」：空列表切回来还应该能用 TOP 自动填充 */
-  function markCustomized(section: HomeSectionConfig): void {
+  function markCustomized(section: {
+    rule: HomeRule
+    customized?: boolean
+    items: HomeSectionItem[]
+  }): void {
     if (section.rule === 'manual') section.customized = section.items.length > 0
+  }
+
+  /** 往一条轨道里加片：已经存在的条目当成恢复，并按人工推荐放到前面 */
+  function addItemTo(section: { items: HomeSectionItem[] }, videoId: number): void {
+    const existing = section.items.find((item) => item.videoId === videoId)
+    if (existing) {
+      existing.removed = false
+      existing.pinned = true
+    } else {
+      section.items.push({ videoId, removed: false, pinned: true, ...defaultFields() })
+    }
+  }
+
+  /** 按给定顺序排序：不在顺序里的条目留在末尾，恢复后还能看到；没有可排的条目返回 false */
+  function orderItems(section: { items: HomeSectionItem[] }, videoIds: number[]): boolean {
+    const given = videoIds
+      .map((raw) => videoIdOf(raw))
+      .filter((value): value is number => value !== null)
+    if (given.length === 0) return false
+    const items = new Map(section.items.map((item) => [item.videoId, item]))
+    const ordered: HomeSectionItem[] = []
+    for (const vid of given) {
+      // latest 规则里自动带上来的条目没有配置行，排序时就顺手补一行
+      const item = items.get(vid) ?? {
+        videoId: vid,
+        removed: false,
+        pinned: false,
+        ...defaultFields()
+      }
+      item.pinned = true
+      ordered.push(item)
+      items.delete(vid)
+    }
+    for (const rest of section.items) {
+      if (items.has(rest.videoId)) ordered.push(rest)
+    }
+    section.items = ordered
+    return true
   }
 
   return {
@@ -283,7 +379,7 @@ export function createHomeStore(directory: string): HomeStore {
       try {
         config = parseConfig(readFileSync(file, 'utf-8'))
       } catch {
-        config = { posters: [], sections: [] }
+        config = { posters: [], sections: [], search: defaultSearch() }
       }
     },
 
@@ -367,14 +463,8 @@ export function createHomeStore(directory: string): HomeStore {
       const vid = videoIdOf(videoId)
       if (!id || vid === null) return { ok: false, error: 'INVALID_INPUT' }
       const section = ensureSection(id)
-      const existing = section.items.find((item) => item.videoId === vid)
-      if (existing) {
-        // 之前被移除过的，再推荐一次就当恢复，并且按推荐放到前面
-        existing.removed = false
-        existing.pinned = true
-      } else {
-        section.items.push({ videoId: vid, removed: false, pinned: true, ...defaultFields() })
-      }
+      // 之前被移除过的，再推荐一次就当恢复，并且按推荐放到前面
+      addItemTo(section, vid)
       markCustomized(section)
       persist()
       return { ok: true }
@@ -503,6 +593,101 @@ export function createHomeStore(directory: string): HomeStore {
       section.items = ordered
       // 自定义规则下的排序才算编辑过；TOP 里的置顶排序不算（切过来时仍按 TOP 整份播种）
       if (section.rule === 'manual') section.customized = ordered.length > 0
+      persist()
+      return { ok: true }
+    },
+
+    saveSearch: (patch) => {
+      if (patch?.rule !== undefined && !isRule(patch.rule)) {
+        return { ok: false, error: 'INVALID_INPUT' }
+      }
+      const search = config.search
+      if (patch?.rule !== undefined && patch.rule !== search.rule) {
+        search.rule = patch.rule
+        if (patch.rule === 'latest') {
+          // 切回 TOP：人工排序不再往前面插，列表本身留着，切回自定义时原样恢复
+          for (const item of search.items) item.pinned = false
+        } else {
+          // 切到自定义：渲染层刚把当前 TOP 落成列表，有内容就记成「编辑过」
+          search.customized = search.items.length > 0
+        }
+      }
+      if (patch?.topN !== undefined) search.topN = clampSearchTopN(patch.topN)
+      persist()
+      return { ok: true }
+    },
+
+    addSearchItem: (videoId) => {
+      const vid = videoIdOf(videoId)
+      if (vid === null) return { ok: false, error: 'INVALID_INPUT' }
+      addItemTo(config.search, vid)
+      markCustomized(config.search)
+      persist()
+      return { ok: true }
+    },
+
+    updateSearchItem: (videoId, patch) => {
+      const vid = videoIdOf(videoId)
+      if (vid === null) return { ok: false, error: 'INVALID_INPUT' }
+      const search = config.search
+      let item = search.items.find((entry) => entry.videoId === vid)
+      if (!item) {
+        // latest 规则里自动出现的视频没有配置行，改它就顺手补一行
+        item = { videoId: vid, removed: false, pinned: false, ...defaultFields() }
+        search.items.push(item)
+      }
+      Object.assign(item, applyPatch(item, patch))
+      markCustomized(search)
+      persist()
+      return { ok: true }
+    },
+
+    removeSearchItem: (videoId) => {
+      const vid = videoIdOf(videoId)
+      if (vid === null) return { ok: false, error: 'INVALID_INPUT' }
+      const search = config.search
+      if (search.rule === 'manual') {
+        const before = search.items.length
+        search.items = search.items.filter((item) => item.videoId !== vid)
+        if (search.items.length === before) return { ok: false, error: 'NOT_FOUND' }
+        search.customized = search.items.length > 0
+      } else {
+        let item = search.items.find((entry) => entry.videoId === vid)
+        if (!item) {
+          item = { videoId: vid, removed: true, pinned: false, ...defaultFields() }
+          search.items.push(item)
+        }
+        item.removed = true
+      }
+      persist()
+      return { ok: true }
+    },
+
+    restoreSearchItem: (videoId) => {
+      const vid = videoIdOf(videoId)
+      if (vid === null) return { ok: false, error: 'INVALID_INPUT' }
+      const item = config.search.items.find((entry) => entry.videoId === vid)
+      if (!item) return { ok: false, error: 'NOT_FOUND' }
+      item.removed = false
+      persist()
+      return { ok: true }
+    },
+
+    reorderSearchItems: (videoIds) => {
+      const search = config.search
+      const applied = orderItems(search, Array.isArray(videoIds) ? videoIds : [])
+      if (!applied) return { ok: true }
+      // 自定义规则下的排序才算编辑过；TOP 里的置顶排序不算（切过来时仍按 TOP 整份播种）
+      if (search.rule === 'manual') search.customized = search.items.length > 0
+      persist()
+      return { ok: true }
+    },
+
+    clearSearchItems: () => {
+      // 「自定义」是一份人工列表；TOP 规则的列表是算出来的，没有这个动作
+      if (config.search.rule !== 'manual') return { ok: false, error: 'INVALID_INPUT' }
+      config.search.items = []
+      config.search.customized = false
       persist()
       return { ok: true }
     },

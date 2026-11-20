@@ -3851,6 +3851,17 @@ button.video-episode:focus-visible {
   cursor: text;
 }
 
+/* 搜索推荐只有一段固定内容，头部不承担展开 / 收起，光标保持默认 */
+.home-config-section-head.is-static {
+  cursor: default;
+}
+
+.home-config-section-name {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .home-config-section-title {
   display: flex;
   min-width: 0;
@@ -4303,6 +4314,14 @@ button.video-episode:focus-visible {
   min-width: 0;
   color: var(--text);
   font-size: 13px;
+}
+
+/* 没有任何绑定时只在列表下面补一句说明，不占一整块空状态 */
+.video-recommend-empty {
+  margin: 12px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 /* 这个大类是靠哪些绑定来的（如「电影 / 动作片」），一行省略，完整内容在 title 里 */

@@ -39,7 +39,7 @@ const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOut
 
 const SECTION_META: Record<ConsoleSection, { title: string; desc: string }> = {
   overview: { title: '概览', desc: '运行状态与统计' },
-  home: { title: '推荐', desc: '海报叠层与分类推荐' },
+  home: { title: '推荐', desc: '海报叠层、分类推荐与搜索推荐' },
   sites: { title: '站点', desc: '管理采集站点' },
   categories: { title: '视频分类', desc: '层级管理本地分类' },
   collect: { title: '采集', desc: '手动采集与定时计划' },

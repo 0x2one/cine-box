@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Spin } from 'antd'
 import { ArrowUpOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons'
+import HomePicture from '../components/HomePicture'
 import { visibleCategoryIds } from '../lib/category-tree'
 import { formatCount } from '../utils/format'
 import '../assets/search.css'
@@ -222,8 +223,8 @@ function SearchView({
   /** 初始态的分类快捷入口与片库规模：只读本地库，不阻塞搜索 */
   const [categories, setCategories] = useState<VideoCategory[]>([])
   const [stats, setStats] = useState<VideoStats | null>(null)
-  /** 初始态底部那条淡出的封面带：纯装饰，不参与交互 */
-  const [posterPics, setPosterPics] = useState<string[]>([])
+  /** 初始态底部的推荐位：控制台「推荐 › 搜索推荐」配置，TOP 或人工列表 */
+  const [recommend, setRecommend] = useState<HomeSearchView | null>(null)
   /** 吸顶头部滚过一点后加描边，内容从下面穿过去时有个边界 */
   const [elevated, setElevated] = useState(false)
   const [showBackTop, setShowBackTop] = useState(false)
@@ -395,7 +396,7 @@ function SearchView({
     }
   }, [maybeLoadMore])
 
-  // 初始态只需要分类名、片库规模和一条装饰封面带：读失败就少显示一块，不影响搜索
+  // 初始态需要分类名、片库规模和底部推荐：任何一块读失败都只是少显示一块，不影响搜索
   useEffect(() => {
     let cancelled = false
     window.api.categories
@@ -414,23 +415,14 @@ function SearchView({
       .catch(() => {
         // 统计失败时不显示「片库共 N 部视频」
       })
-    // 底部装饰用的封面：取最近一批视频的图，等距抽几张，避免整排都是同一天的采集
-    window.api.videos
-      .list({ page: 1, pageSize: 30, visibility: 'shown' })
+    // 底部推荐位：控制台「搜索推荐」里的配置，和搜索词无关
+    window.api.home
+      .getSearch()
       .then((result) => {
-        if (cancelled || !result.ok) return
-        const seen = new Set<string>()
-        const pics: string[] = []
-        for (const item of result.items) {
-          if (!item.pic || seen.has(item.pic)) continue
-          seen.add(item.pic)
-          pics.push(item.pic)
-        }
-        const step = Math.max(1, Math.ceil(pics.length / 9))
-        setPosterPics(pics.filter((_, index) => index % step === 0).slice(0, 9))
+        if (!cancelled && result.ok && result.search) setRecommend(result.search)
       })
       .catch(() => {
-        // 封面拉不到就不显示装饰带
+        // 推荐读不到就不显示这一块
       })
     return () => {
       cancelled = true
@@ -444,6 +436,16 @@ function SearchView({
       .filter((row) => row.parentId === null && visible.has(row.id))
       .sort((left, right) => left.sortOrder - right.sortOrder)
   }, [categories])
+
+  /**
+   * 底部推荐位只显示能展示的条目：配置里隐藏的、视频被隐藏的、已经不在缓存库里的都不算。
+   * 和控制台看到的是同一份配置，只是那边保留这些状态方便恢复。
+   */
+  const recommendItems = useMemo(
+    () =>
+      (recommend?.items ?? []).filter((item) => !item.hidden && !item.missing && !item.videoHidden),
+    [recommend]
+  )
 
   const retry = (): void => {
     const state = guard.current
@@ -595,23 +597,30 @@ function SearchView({
               )}
             </div>
 
-            {/* 底部封面带只是氛围：不可点、不参与 Tab，读屏也忽略 */}
-            {posterPics.length >= 3 && (
-              <div className="search-intro-shelf" aria-hidden="true">
-                {posterPics.map((pic) => (
-                  <span className="search-shelf-item" key={pic}>
-                    <img
-                      src={pic}
-                      alt=""
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      onError={(event) => {
-                        event.currentTarget.style.visibility = 'hidden'
-                      }}
-                    />
-                  </span>
+            {/* 底部推荐位只是氛围：海报从背景里淡出来，悬停才亮起；点一张直接搜片名 */}
+            {recommendItems.length > 0 && (
+              <section className="search-recommend" aria-label="推荐视频">
+                {recommendItems.map((item) => (
+                  <button
+                    key={item.videoId}
+                    type="button"
+                    className="search-recommend-card"
+                    title={`${item.title} · 搜索这部片`}
+                    aria-label={`搜索：${item.title}`}
+                    onClick={() => {
+                      const term = (item.videoName || item.title).trim()
+                      if (!term) return
+                      setDraft(term)
+                      runSearch(term)
+                    }}
+                  >
+                    <div className="search-recommend-poster">
+                      {/* 与控制台预览共用一套裁剪坐标：自定义图片按取景框显示 */}
+                      <HomePicture item={item} />
+                    </div>
+                  </button>
                 ))}
-              </div>
+              </section>
             )}
           </div>
         ) : failed && items.length === 0 ? (
