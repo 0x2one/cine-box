@@ -1,25 +1,10 @@
 /*
- * 播放页样式：固定暗色，不读 data-theme / 应用主题变量。
- * 取色是「夜间放映室」：近黑的幕布 + 钨丝灯一样的琥珀色强调，
- * 只有正在播放的集数、线路选中态和焦点框用琥珀色，其余保持安静。
+ * 播放页样式：跟随主窗口的 data-theme / CSS 变量（由 theme/appearance.ts 写入），
+ * 强调色统一用 --accent。首帧前 applyAppearance() 已经跑过，窗口底色由主进程
+ * 按当前主题设置，所以这里不再写死任何一套配色。
  */
 
 :root {
-  color-scheme: dark;
-
-  --ink: #08090c;
-  --ink-1: #0d0f14;
-  --ink-2: #12151b;
-  --ink-3: #191d25;
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.14);
-  --paper: #f2f4f8;
-  --muted: #98a2b3;
-  --faint: #636c7b;
-  --amber: #f0b45e;
-  --amber-soft: rgba(240, 180, 94, 0.14);
-  --amber-line: rgba(240, 180, 94, 0.38);
-
   --font-sans:
     'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', 'Hiragino Sans GB',
     system-ui, sans-serif;
@@ -41,8 +26,8 @@ body,
 body {
   margin: 0;
   overflow: hidden;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--bg);
+  color: var(--text);
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.5;
@@ -51,17 +36,39 @@ body {
   cursor: default;
 }
 
-/* 幕布上的两团微光：左上暖、右上冷，底部再压一层暗角 */
+/* 幕布上的两团微光：用强调色，明暗主题都成立；暗色再压一层底部暗角 */
 body::before {
   position: fixed;
   z-index: 0;
   inset: 0;
   background:
-    radial-gradient(80% 55% at 16% -12%, rgba(240, 180, 94, 0.08), transparent 62%),
-    radial-gradient(70% 50% at 102% -6%, rgba(94, 142, 255, 0.05), transparent 66%),
-    radial-gradient(120% 80% at 50% 112%, rgba(0, 0, 0, 0.5), transparent 58%);
+    radial-gradient(
+      80% 55% at 16% -12%,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      70% 50% at 102% -6%,
+      color-mix(in srgb, var(--accent) 4%, transparent),
+      transparent 66%
+    );
   content: '';
   pointer-events: none;
+}
+
+[data-theme='dark'] body::before {
+  background:
+    radial-gradient(
+      80% 55% at 16% -12%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      70% 50% at 102% -6%,
+      color-mix(in srgb, var(--accent) 5%, transparent),
+      transparent 66%
+    ),
+    radial-gradient(120% 80% at 50% 112%, rgba(0, 0, 0, 0.45), transparent 58%);
 }
 
 button {
@@ -70,7 +77,7 @@ button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -86,12 +93,12 @@ button {
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.13);
+  background: var(--border-strong);
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--text-faint);
   background-clip: content-box;
 }
 
@@ -122,8 +129,8 @@ button {
   align-items: center;
   gap: 10px;
   padding-left: 16px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(10, 11, 15, 0.84);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--titlebar) 88%, transparent);
   backdrop-filter: blur(18px) saturate(120%);
   -webkit-app-region: drag;
 }
@@ -137,7 +144,6 @@ button {
   width: 16px;
   height: 16px;
   flex: none;
-  opacity: 0.8;
 }
 
 .player-heading {
@@ -151,7 +157,7 @@ button {
   overflow: hidden;
   max-width: min(44vw, 560px);
   margin: 0;
-  color: var(--paper);
+  color: var(--text);
   font-size: 13.5px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -162,10 +168,10 @@ button {
 .player-episode {
   flex: none;
   padding: 2px 8px;
-  border: 1px solid var(--amber-line);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
   border-radius: 4px;
-  background: var(--amber-soft);
-  color: var(--amber);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
@@ -174,7 +180,7 @@ button {
 
 .player-total {
   flex: none;
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 11px;
 }
 
@@ -197,10 +203,10 @@ button {
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
   transition:
     border-color 140ms ease,
@@ -209,23 +215,23 @@ button {
 }
 
 .player-text-btn:hover {
-  border-color: var(--line-strong);
-  color: var(--paper);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 .player-text-btn.is-active {
-  border-color: var(--amber-line);
-  background: var(--amber-soft);
-  color: var(--amber);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 
 .player-layout-switch {
   display: flex;
   gap: 2px;
   padding: 3px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
 }
 
 .player-layout-btn {
@@ -237,7 +243,7 @@ button {
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 13px;
   transition:
     background-color 140ms ease,
@@ -245,21 +251,21 @@ button {
 }
 
 .player-layout-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--paper);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
 }
 
 .player-layout-btn.is-active {
-  background: var(--amber-soft);
-  box-shadow: inset 0 0 0 1px var(--amber-line);
-  color: var(--amber);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--accent);
 }
 
 .player-titlebar-divider {
   width: 1px;
   height: 16px;
   margin: 0 6px;
-  background: var(--line);
+  background: var(--border);
 }
 
 .player-win-btn {
@@ -270,7 +276,7 @@ button {
   justify-content: center;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
   transition:
     background-color 100ms ease,
@@ -278,8 +284,8 @@ button {
 }
 
 .player-win-btn:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--paper);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
 }
 
 .player-win-btn.is-close:hover {
@@ -356,11 +362,11 @@ button {
 .player-stage {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 10px;
   aspect-ratio: 16 / 9;
   background: #000;
-  box-shadow: 0 30px 70px -40px rgba(0, 0, 0, 0.95);
+  box-shadow: 0 30px 70px -40px rgba(0, 0, 0, 0.55);
 }
 
 .player-stage-art {
@@ -388,23 +394,28 @@ button {
   gap: 12px;
   padding: 24px;
   background:
-    radial-gradient(60% 60% at 50% 38%, rgba(240, 180, 94, 0.06), transparent 72%), var(--ink);
+    radial-gradient(
+      60% 60% at 50% 38%,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 72%
+    ),
+    var(--bg);
   text-align: center;
 }
 
 .player-state.is-overlay {
-  background: rgba(6, 7, 9, 0.74);
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
   backdrop-filter: blur(8px);
 }
 
 .player-state-icon {
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 30px;
 }
 
 .player-state-title {
   margin: 0;
-  color: var(--paper);
+  color: var(--text);
   font-size: 14px;
   font-weight: 500;
 }
@@ -412,7 +423,7 @@ button {
 .player-state-hint {
   max-width: 420px;
   margin: 0;
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 12px;
   line-height: 1.7;
 }
@@ -425,8 +436,8 @@ button {
 .player-spinner {
   width: 26px;
   height: 26px;
-  border: 2px solid rgba(255, 255, 255, 0.14);
-  border-top-color: var(--amber);
+  border: 2px solid color-mix(in srgb, var(--text) 14%, transparent);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: player-spin 900ms linear infinite;
 }
@@ -443,10 +454,10 @@ button {
   align-items: center;
   gap: 6px;
   padding: 0 14px;
-  border: 1px solid var(--amber-line);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
   border-radius: 6px;
-  background: var(--amber-soft);
-  color: var(--amber);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
   font-size: 12.5px;
   transition:
     background-color 140ms ease,
@@ -455,18 +466,18 @@ button {
 }
 
 .player-btn:hover {
-  background: rgba(240, 180, 94, 0.22);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .player-btn.is-ghost {
-  border-color: var(--line-strong);
+  border-color: var(--border-strong);
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .player-btn.is-ghost:hover {
-  border-color: var(--faint);
-  color: var(--paper);
+  border-color: var(--text-faint);
+  color: var(--text);
 }
 
 /* ── 播放器下方的视频信息 ── */
@@ -476,10 +487,15 @@ button {
   grid-template-columns: 96px minmax(0, 1fr);
   gap: 20px;
   padding: 20px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 12px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)), var(--ink-1);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text) 3%, transparent),
+      color-mix(in srgb, var(--text) 1%, transparent)
+    ),
+    var(--surface);
 }
 
 .player-poster {
@@ -490,13 +506,13 @@ button {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: linear-gradient(155deg, #1a1f27, #0d0f14 72%);
+  background: linear-gradient(155deg, var(--surface-muted), var(--surface) 72%);
 }
 
 .player-poster-letter {
-  color: rgba(255, 255, 255, 0.2);
+  color: color-mix(in srgb, var(--text) 20%, transparent);
   font-size: 30px;
   font-weight: 600;
 }
@@ -518,7 +534,7 @@ button {
 
 .player-info-title {
   margin: 0;
-  color: var(--paper);
+  color: var(--text);
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -530,14 +546,14 @@ button {
   flex-wrap: wrap;
   align-items: center;
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12px;
 }
 
 /* 元信息用中点分隔：每个 span 自己带分隔符，换行时不会留下孤零零的「·」 */
 .player-info-meta span + span::before {
   margin: 0 8px;
-  color: var(--faint);
+  color: var(--text-faint);
   content: '·';
 }
 
@@ -545,14 +561,14 @@ button {
   display: flex;
   gap: 8px;
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12.5px;
   line-height: 1.7;
 }
 
 .player-info-label {
   flex: none;
-  color: var(--faint);
+  color: var(--text-faint);
 }
 
 .player-info-intro {
@@ -563,7 +579,7 @@ button {
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 12.5px;
   line-height: 1.85;
   white-space: pre-wrap;
@@ -583,7 +599,7 @@ button {
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--amber);
+  color: var(--accent);
   font-size: 12px;
 }
 
@@ -593,7 +609,7 @@ button {
 
 .player-info-empty {
   margin: 0;
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 12.5px;
 }
 
@@ -605,9 +621,11 @@ button {
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 46%), var(--ink-1);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--text) 3%, transparent), transparent 46%),
+    var(--surface);
 }
 
 .player-side .episode-panel {
@@ -618,7 +636,7 @@ button {
   height: 100%;
   border: 0;
   border-radius: 0;
-  background: var(--ink-1);
+  background: var(--surface);
 }
 
 .episode-head {
@@ -635,14 +653,14 @@ button {
 }
 
 .episode-eyebrow {
-  color: var(--paper);
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.18em;
 }
 
 .episode-count {
-  color: var(--faint);
+  color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 11px;
 }
@@ -657,10 +675,10 @@ button {
   max-width: 100%;
   overflow: hidden;
   padding: 3px 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 999px;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -671,20 +689,20 @@ button {
 }
 
 .episode-line:hover {
-  border-color: var(--line-strong);
-  color: var(--paper);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 .episode-line.is-active {
-  border-color: var(--amber-line);
-  background: var(--amber-soft);
-  color: var(--amber);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 
 .episode-single-line {
   overflow: hidden;
   margin: 0;
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -726,10 +744,10 @@ button {
   justify-content: center;
   gap: 1px;
   padding: 0 4px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 7px;
-  background: var(--ink-2);
-  color: var(--paper);
+  background: var(--surface-muted);
+  color: var(--text);
   transition:
     border-color 140ms ease,
     background-color 140ms ease,
@@ -738,19 +756,32 @@ button {
 }
 
 .episode-cell:hover {
-  border-color: var(--line-strong);
-  background: var(--ink-3);
+  border-color: var(--border-strong);
+  background: var(--elevated);
 }
 
 .episode-cell:active {
   transform: scale(0.97);
 }
 
+/* 正在播放：暗色主题直接填强调色（强调色在深色里都偏亮，配深色文字），
+   浅色主题改成强调色浅底 + 强调色文字，避免白字压在亮色上看不清 */
 .episode-cell.is-active {
-  border-color: var(--amber);
-  background: var(--amber);
-  box-shadow: 0 8px 20px -10px rgba(240, 180, 94, 0.6);
-  color: #1d1305;
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 8px 20px -10px color-mix(in srgb, var(--accent) 55%, transparent);
+  color: #0b0d10;
+}
+
+[data-theme='light'] .episode-cell.is-active {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  /* 浅色主题的强调色偏深，和文字再混一点保证小字号也够清楚 */
+  color: color-mix(in srgb, var(--accent) 74%, var(--text));
+}
+
+[data-theme='light'] .player-episode {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
 }
 
 .episode-num {
@@ -764,7 +795,7 @@ button {
 .episode-caption {
   max-width: 100%;
   overflow: hidden;
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 9.5px;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -772,7 +803,7 @@ button {
 }
 
 .episode-cell.is-active .episode-caption {
-  color: rgba(29, 19, 5, 0.66);
+  opacity: 0.66;
 }
 
 /* 正在播放的格子右上角：三根跳动的电平条 */
@@ -818,11 +849,11 @@ button {
   align-items: center;
   justify-content: space-between;
   padding-top: 10px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border);
 }
 
 .episode-foot-label {
-  color: var(--faint);
+  color: var(--text-faint);
   font-size: 11.5px;
 }
 
@@ -831,17 +862,17 @@ button {
   width: 32px;
   height: 18px;
   padding: 0;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: var(--ink-3);
+  background: var(--surface-muted);
   transition:
     background-color 160ms ease,
     border-color 160ms ease;
 }
 
 .episode-switch.is-on {
-  border-color: var(--amber-line);
-  background: var(--amber-soft);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .episode-switch-knob {
@@ -851,7 +882,7 @@ button {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--faint);
+  background: var(--text-faint);
   transform: translateY(-50%);
   transition:
     left 160ms ease,
@@ -860,7 +891,7 @@ button {
 
 .episode-switch.is-on .episode-switch-knob {
   left: 16px;
-  background: var(--amber);
+  background: var(--accent);
 }
 
 .episode-strip-actions {
@@ -874,10 +905,10 @@ button {
   height: 26px;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: 11px;
   transition:
     border-color 140ms ease,
@@ -885,8 +916,8 @@ button {
 }
 
 .episode-arrow:hover:not(:disabled) {
-  border-color: var(--line-strong);
-  color: var(--paper);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 .episode-arrow:disabled {
@@ -906,7 +937,7 @@ button {
 .player-drawer-scrim {
   position: absolute;
   inset: 0;
-  background: rgba(4, 5, 7, 0.56);
+  background: rgba(4, 5, 7, 0.5);
   opacity: 0;
   transition: opacity 220ms ease;
 }
@@ -918,9 +949,9 @@ button {
   bottom: 0;
   width: 340px;
   max-width: 86vw;
-  border-left: 1px solid var(--line);
-  background: var(--ink-1);
-  box-shadow: -30px 0 60px -30px rgba(0, 0, 0, 0.85);
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: -30px 0 60px -30px rgba(0, 0, 0, 0.5);
   transform: translateX(100%);
   transition: transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }

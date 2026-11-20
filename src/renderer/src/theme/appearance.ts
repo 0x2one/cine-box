@@ -127,3 +127,17 @@ export function applyAppearance(resolved: ResolvedTheme, accent: AccentOption): 
 export function applyStoredAppearance(): void {
   applyAppearance(resolveMode(readStoredMode()), readStoredAccent())
 }
+
+/** 当前外观的完整快照：播放窗按它初始化，之后由主进程推变化 */
+export interface ResolvedAppearance {
+  theme: ResolvedTheme
+  accent: string
+  /** 页面底色：播放窗创建时用它做 BrowserWindow 的 backgroundColor，避免闪白 */
+  bg: string
+}
+
+export function readStoredAppearance(): ResolvedAppearance {
+  const theme = resolveMode(readStoredMode())
+  const accent = readStoredAccent()
+  return { theme, accent: accent.key, bg: SURFACES[theme].bg }
+}

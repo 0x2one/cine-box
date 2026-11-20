@@ -27,6 +27,18 @@ const api = {
       }
     }
   },
+  appearance: {
+    get: (): Promise<PlayerAppearance | null> => ipcRenderer.invoke('appearance:get'),
+    set: (value: PlayerAppearance): Promise<void> => ipcRenderer.invoke('appearance:set', value),
+    onChange: (callback: (value: PlayerAppearance) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, value: PlayerAppearance): void =>
+        callback(value)
+      ipcRenderer.on('appearance:change', handler)
+      return () => {
+        ipcRenderer.removeListener('appearance:change', handler)
+      }
+    }
+  },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
     setOpenAtLogin: (value: boolean): Promise<AppSettings> =>

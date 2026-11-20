@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReloadOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { applyAppearance, findAccent } from '../theme/appearance'
 import EpisodePanel from './EpisodePanel'
 import PlayerInfo from './PlayerInfo'
 import PlayerTitleBar from './PlayerTitleBar'
@@ -30,13 +31,20 @@ interface PlayerSessionProps {
   payload: PlayerPayload
   layout: PlayerLayout
   onLayout: (layout: PlayerLayout) => void
+  /** 当前主题的强调色，ArtPlayer 的进度条 / 控件跟着它走 */
+  accent: string
 }
 
 /**
  * 一部视频的播放会话：按 videoId 取详情、摊平线路、维护当前集数。
  * 外层按 payload.token 给它换 key，换片时整块重挂载，播放器不会残留上一部的状态。
  */
-function PlayerSession({ payload, layout, onLayout }: PlayerSessionProps): React.JSX.Element {
+function PlayerSession({
+  payload,
+  layout,
+  onLayout,
+  accent
+}: PlayerSessionProps): React.JSX.Element {
   const [detail, setDetail] = useState<VideoDetail | null>(null)
   const [lines, setLines] = useState<PlayerLine[]>([])
   const [lineKey, setLineKey] = useState('')
@@ -125,6 +133,7 @@ function PlayerSession({ payload, layout, onLayout }: PlayerSessionProps): React
     // 重试 / 重新加载时旧剧集还在，先别把播放器拆掉，等新数据到了再切
     url: episode?.url,
     poster: detail?.pic,
+    accent,
     onEnded: goNext,
     onError: (message) => setPlayError(message)
   })
@@ -279,12 +288,17 @@ function PlayerSession({ payload, layout, onLayout }: PlayerSessionProps): React
 
 /**
  * 独立播放窗口的页面：先取主进程给的播放载荷，再交给按 token 挂载的会话组件。
- * 背景固定暗色，不读应用主题；窗口由主进程创建（见 main/player-window.ts）。
+ * 主题与强调色跟随主窗口：主窗口每次切换都会推一份外观过来，这里直接换色，不用重开窗口。
  */
-function PlayerApp(): React.JSX.Element {
+function PlayerApp({
+  initialAppearance
+}: {
+  initialAppearance: PlayerAppearance
+}): React.JSX.Element {
   const [payload, setPayload] = useState<PlayerPayload | null>(null)
   const [missing, setMissing] = useState(false)
   const [layout, setLayout] = useState<PlayerLayout>(readLayout)
+  const [appearance, setAppearance] = useState<PlayerAppearance>(initialAppearance)
 
   useEffect(() => {
     let alive = true
@@ -303,10 +317,20 @@ function PlayerApp(): React.JSX.Element {
     }
   }, [])
 
+  // 主窗口切换主题 / 强调色：写 CSS 变量，再更新 ArtPlayer 的主题色
+  useEffect(() => {
+    return window.api.appearance.onChange((value) => {
+      applyAppearance(value.theme, findAccent(value.accent))
+      setAppearance(value)
+    })
+  }, [])
+
   const changeLayout = useCallback((next: PlayerLayout) => {
     setLayout(next)
     localStorage.setItem(LAYOUT_KEY, next)
   }, [])
+
+  const accent = findAccent(appearance.accent)[appearance.theme]
 
   if (!payload) {
     return (
@@ -340,7 +364,13 @@ function PlayerApp(): React.JSX.Element {
   }
 
   return (
-    <PlayerSession key={payload.token} payload={payload} layout={layout} onLayout={changeLayout} />
+    <PlayerSession
+      key={payload.token}
+      payload={payload}
+      layout={layout}
+      onLayout={changeLayout}
+      accent={accent}
+    />
   )
 }
 

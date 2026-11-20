@@ -61,6 +61,23 @@ interface PlayerApi {
   onLoad: (callback: (payload: PlayerPayload) => void) => () => void
 }
 
+/** 主窗口当前的外观：播放窗按它初始化，并在主窗口切换主题 / 强调色时实时跟随 */
+interface PlayerAppearance {
+  theme: 'light' | 'dark'
+  /** 强调色 key（见 theme/appearance.ts 的 ACCENTS） */
+  accent: string
+  /** 页面底色，主进程用它做播放窗的 backgroundColor */
+  bg: string
+}
+
+interface AppearanceApi {
+  /** 播放窗挂载时取当前外观；主窗口还没上报过时为 null */
+  get: () => Promise<PlayerAppearance | null>
+  /** 主窗口每次应用主题后上报，主进程中转给已打开的播放窗 */
+  set: (value: PlayerAppearance) => Promise<void>
+  onChange: (callback: (value: PlayerAppearance) => void) => () => void
+}
+
 interface AppSettings {
   openAtLogin: boolean
   closeToTray: boolean
@@ -995,6 +1012,7 @@ interface UpdaterApi {
 interface Api {
   app: AppApi
   player: PlayerApi
+  appearance: AppearanceApi
   settings: SettingsApi
   sites: SitesApi
   categories: CategoriesApi

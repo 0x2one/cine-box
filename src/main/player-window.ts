@@ -39,6 +39,8 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
   let playerWindow: BrowserWindow | null = null
   let payload: PlayerPayload | null = null
   let token = 0
+  /** 主窗口当前外观：播放窗创建时用它定底色，之后主窗口每次切换都转发过去 */
+  let appearance: PlayerAppearance | null = null
 
   function rendererUrl(): string | null {
     const url = process.env['ELECTRON_RENDERER_URL']
@@ -65,8 +67,8 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
       // 任务栏 / 窗口图标：Windows、Linux 生效
       icon: options.icon,
       title: '映盒剧场 · 播放',
-      // 首帧之前也是暗色，不会先闪一下白底
-      backgroundColor: '#08090c',
+      // 首帧之前就是当前主题的底色，不会先闪一下另一种颜色
+      backgroundColor: appearance?.bg || '#0c0f13',
       webPreferences: {
         preload: options.preload,
         sandbox: false,
@@ -170,6 +172,27 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
   ipcMain.handle('player:open', (_event, input: PlayerOpenInput) => open(input))
   // 播放页挂载时取当前载荷：窗口是复用的，可能已经被推到第 N 集
   ipcMain.handle('player:payload', () => payload)
+
+  // 外观中转：主窗口应用主题后推过来，播放窗挂载时再取一次
+  ipcMain.handle('appearance:get', () => appearance)
+  ipcMain.handle('appearance:set', (_event, value: PlayerAppearance) => {
+    if (!value || (value.theme !== 'light' && value.theme !== 'dark')) return
+    appearance = {
+      theme: value.theme,
+      accent: typeof value.accent === 'string' && value.accent ? value.accent : 'cine',
+      bg:
+        typeof value.bg === 'string' && value.bg
+          ? value.bg
+          : value.theme === 'light'
+            ? '#f5f7fa'
+            : '#0c0f13'
+    }
+    if (playerWindow && !playerWindow.isDestroyed()) {
+      // 已打开的播放窗直接换色，不需要重新打开
+      playerWindow.setBackgroundColor(appearance.bg)
+      playerWindow.webContents.send('appearance:change', appearance)
+    }
+  })
 
   return { open }
 }

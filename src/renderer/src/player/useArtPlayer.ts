@@ -5,9 +5,6 @@ import Hls from 'hls.js'
 const VOLUME_KEY = 'player-volume'
 const MUTED_KEY = 'player-muted'
 
-/** 播放器强调色：跟播放页的琥珀色一致，不用应用主题色 */
-const PLAYER_THEME = '#f0b45e'
-
 function readVolume(): number {
   const stored = Number(localStorage.getItem(VOLUME_KEY))
   return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.8
@@ -23,6 +20,8 @@ export interface UseArtPlayerOptions {
   /** 当前集的 m3u8 地址；切换时复用同一个播放器实例 */
   url?: string
   poster?: string
+  /** 当前主题的强调色：进度条 / 控件 / 选中态跟主窗口一致 */
+  accent: string
   onEnded?: () => void
   onError?: (message: string) => void
 }
@@ -41,12 +40,14 @@ export function useArtPlayer({
   containerRef,
   url,
   poster,
+  accent,
   onEnded,
   onError
 }: UseArtPlayerOptions): ArtPlayerHandle {
   const artRef = useRef<Artplayer | null>(null)
   const urlRef = useRef(url)
   const posterRef = useRef(poster)
+  const accentRef = useRef(accent)
   const endedRef = useRef(onEnded)
   const errorRef = useRef(onError)
   /**
@@ -62,6 +63,7 @@ export function useArtPlayer({
   useEffect(() => {
     urlRef.current = url
     posterRef.current = poster
+    accentRef.current = accent
     endedRef.current = onEnded
     errorRef.current = onError
   })
@@ -77,7 +79,7 @@ export function useArtPlayer({
       poster: posterRef.current,
       type: 'm3u8',
       lang: 'zh-cn',
-      theme: PLAYER_THEME,
+      theme: accentRef.current,
       autoplay: true,
       muted: readMuted(),
       volume: readVolume(),
@@ -99,7 +101,6 @@ export function useArtPlayer({
       autoPlayback: true,
       moreVideoAttr: { preload: 'auto' },
       cssVar: {
-        '--art-theme': PLAYER_THEME,
         '--art-control-height': '42px',
         '--art-control-icon-size': '24px',
         '--art-progress-height': '4px',
@@ -188,6 +189,12 @@ export function useArtPlayer({
       alive = false
     }
   }, [url])
+
+  // 主窗口切换强调色：播放器已经创建时直接换主题色，不重建实例
+  useEffect(() => {
+    const instance = artRef.current
+    if (instance) instance.theme = accent
+  }, [accent])
 
   const retry = useCallback(() => {
     setGeneration((value) => value + 1)
