@@ -3266,6 +3266,14 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   font-size: 11.5px;
 }
 
+/* 「来源与播放线路」后面的操作提示：弱化到不抢标题 */
+.video-detail-label-hint {
+  margin-left: 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+  opacity: 0.75;
+}
+
 /* 简介最多五行：超出部分用 line-clamp 自带的省略号截掉，固定区高度也就定了 */
 .video-detail-text {
   display: -webkit-box;
@@ -3386,35 +3394,75 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
 }
 
 .video-episode {
+  display: inline-flex;
   min-width: 44px;
-  padding: 1px 6px;
+  align-items: stretch;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--text-muted);
   font-size: 11px;
-  text-align: center;
   white-space: nowrap;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
-/* 集数是按钮：点一下把播放地址复制到剪贴板 */
-button.video-episode {
+/* 集数主体：点一下在独立播放窗口打开这一集 */
+.video-episode-play {
+  min-width: 0;
+  padding: 1px 6px;
+  border: 0;
   background: none;
+  color: inherit;
   font-family: inherit;
+  font-size: inherit;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-button.video-episode:hover {
+/* 复制地址是次要动作：平时收起来，悬停 / 键盘聚焦时才露出来，不抢点击面积 */
+.video-episode-copy {
+  display: inline-flex;
+  width: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: none;
+  color: var(--text-faint);
+  font-size: 9.5px;
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease;
+}
+
+.video-episode:hover,
+.video-episode:focus-within {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-button.video-episode:focus-visible {
+.video-episode:hover .video-episode-copy,
+.video-episode:focus-within .video-episode-copy {
+  opacity: 1;
+}
+
+.video-episode-copy:hover {
+  color: var(--accent);
+}
+
+.video-episode-play:focus-visible,
+.video-episode-copy:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
 .video-episode.is-more {
   min-width: 0;
+  padding: 1px 6px;
   border-style: dashed;
   color: var(--text-faint);
 }

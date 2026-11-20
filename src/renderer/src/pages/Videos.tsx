@@ -16,6 +16,7 @@ import {
 } from 'antd'
 import {
   AppstoreAddOutlined,
+  CopyOutlined,
   EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -25,6 +26,7 @@ import {
   RightOutlined
 } from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
+import { isM3u8 } from '../player/player-data'
 
 const PAGE_SIZE = 10
 /** 单条线路最多铺开的集数，避免几百集的剧把抽屉撑爆 */
@@ -80,8 +82,16 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** 单个资源站的播放源：默认收起，点标题那一行展开 / 收起线路；点集数复制播放地址 */
-function SourceCard({ source }: { source: VideoDetailSource }): React.JSX.Element {
+/** 单个资源站的播放源：默认收起，点标题那一行展开 / 收起线路；点集数在独立播放窗打开 */
+function SourceCard({
+  source,
+  videoId,
+  videoName
+}: {
+  source: VideoDetailSource
+  videoId: number
+  videoName: string
+}): React.JSX.Element {
   const { message } = App.useApp()
   const [open, setOpen] = useState(false)
   const lines = source.detail?.playLines ?? []
@@ -98,6 +108,35 @@ function SourceCard({ source }: { source: VideoDetailSource }): React.JSX.Elemen
     } else {
       message.error('复制失败，请重试')
     }
+  }
+
+  /** 播放页只吃 m3u8：其它格式在入口就拦下来，不把播放窗口打开成空白 */
+  const playEpisode = (
+    lineIndex: number,
+    episodeIndex: number,
+    episode: VideoPlayEpisode
+  ): void => {
+    const url = episode.url.trim()
+    if (!url) {
+      message.warning('这一集没有播放地址')
+      return
+    }
+    if (!isM3u8(url)) {
+      message.warning('播放页只支持 m3u8 线路')
+      return
+    }
+    void window.api.player
+      .open({
+        videoId,
+        sourceId: source.id,
+        lineIndex,
+        episodeIndex,
+        title: videoName,
+        episodeName: episode.name
+      })
+      .then((result) => {
+        if (!result.ok) message.error('打开播放窗口失败')
+      })
   }
 
   return (
@@ -129,22 +168,32 @@ function SourceCard({ source }: { source: VideoDetailSource }): React.JSX.Elemen
           lines.length === 0 ? (
             <span className="video-source-hint">详情里没有播放地址</span>
           ) : (
-            lines.map((line) => (
-              <div className="video-line" key={`${source.id}-${line.flag}`}>
+            lines.map((line, lineIndex) => (
+              <div className="video-line" key={`${source.id}-${lineIndex}`}>
                 <span className="video-line-flag" title={line.flag || '默认线路'}>
                   {line.flag || '默认线路'}
                 </span>
                 <div className="video-episodes">
                   {line.episodes.slice(0, EPISODE_LIMIT).map((episode, index) => (
-                    <button
-                      type="button"
-                      className="video-episode"
-                      key={`${source.id}-${line.flag}-${index}`}
-                      title={`点击复制播放地址\n${episode.url}`}
-                      onClick={() => void copyEpisode(episode)}
-                    >
-                      {episode.name}
-                    </button>
+                    <div className="video-episode" key={`${source.id}-${lineIndex}-${index}`}>
+                      <button
+                        type="button"
+                        className="video-episode-play"
+                        title={`在播放窗口打开「${episode.name}」`}
+                        onClick={() => playEpisode(lineIndex, index, episode)}
+                      >
+                        {episode.name}
+                      </button>
+                      <button
+                        type="button"
+                        className="video-episode-copy"
+                        title="复制播放地址"
+                        aria-label="复制播放地址"
+                        onClick={() => void copyEpisode(episode)}
+                      >
+                        <CopyOutlined />
+                      </button>
+                    </div>
                   ))}
                   {line.episodes.length > EPISODE_LIMIT && (
                     <span className="video-episode is-more">
@@ -1049,12 +1098,20 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                 </p>
               </section>
 
-              <span className="video-detail-label">来源与播放线路</span>
+              <span className="video-detail-label">
+                来源与播放线路
+                <span className="video-detail-label-hint">点击集数在独立窗口播放，仅支持 m3u8</span>
+              </span>
             </div>
 
             <div className="video-detail-scroll">
               {detail.sources.map((source) => (
-                <SourceCard key={source.id} source={source} />
+                <SourceCard
+                  key={source.id}
+                  source={source}
+                  videoId={detail.id}
+                  videoName={detail.name}
+                />
               ))}
             </div>
           </div>

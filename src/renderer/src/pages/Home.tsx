@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
-import { ArrowUpOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, CaretRightOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import HomePicture from '../components/HomePicture'
 import VideoCard from '../components/VideoCard'
 import { formatCount } from '../utils/format'
@@ -258,6 +258,7 @@ function HomeRail({
           <VideoCard
             // 复制的第二份用下标区分 key，滚动时不会因为重复 id 报错
             key={`${item.videoId}-${index}`}
+            videoId={item.videoId}
             title={item.title}
             pic={item.pic}
             crop={item.crop}
@@ -583,6 +584,7 @@ function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.E
             {rest.map((item) => (
               <VideoCard
                 key={item.id}
+                videoId={item.id}
                 title={item.name}
                 pic={item.pic}
                 note={item.note}
@@ -909,6 +911,19 @@ function HomeView({
                 )}
                 {current.intro && <p className="home-hero-intro">{current.intro}</p>}
                 <div className="home-hero-actions">
+                  <button
+                    type="button"
+                    className="home-hero-play"
+                    onClick={() =>
+                      void window.api.player.open({
+                        videoId: current.videoId,
+                        title: current.title
+                      })
+                    }
+                  >
+                    <CaretRightOutlined />
+                    播放
+                  </button>
                   <div className="home-pager">
                     <span className="home-pager-count">
                       <b>{String((index % posters.length) + 1).padStart(2, '0')}</b> /{' '}

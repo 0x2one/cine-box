@@ -30,6 +30,37 @@ interface AppApi {
   startView: () => AppStartView
 }
 
+/** 渲染层点某一集时传给播放窗的信息：详情由播放页自己按 videoId 取 */
+interface PlayerOpenInput {
+  videoId: number
+  /** 优先起播的来源（VideoDetailSource.id） */
+  sourceId?: number
+  /** 来源里的线路下标（playLines 原始下标） */
+  lineIndex?: number
+  /** 线路里的集数下标（episodes 原始下标） */
+  episodeIndex?: number
+  /** 详情加载前先显示的片名 / 集数 */
+  title?: string
+  episodeName?: string
+}
+
+interface PlayerPayload extends PlayerOpenInput {
+  /** 每次打开都递增：播放页靠它重新取详情、重新起播 */
+  token: number
+}
+
+interface PlayerOpenResult {
+  ok: boolean
+  /** INVALID_INPUT：videoId 不合法 */
+  error?: string
+}
+
+interface PlayerApi {
+  open: (input: PlayerOpenInput) => Promise<PlayerOpenResult>
+  payload: () => Promise<PlayerPayload | null>
+  onLoad: (callback: (payload: PlayerPayload) => void) => () => void
+}
+
 interface AppSettings {
   openAtLogin: boolean
   closeToTray: boolean
@@ -963,6 +994,7 @@ interface UpdaterApi {
 
 interface Api {
   app: AppApi
+  player: PlayerApi
   settings: SettingsApi
   sites: SitesApi
   categories: CategoriesApi

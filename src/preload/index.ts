@@ -12,6 +12,21 @@ const api = {
     info: (): Promise<AppInfo> => ipcRenderer.invoke('app:info'),
     startView: (): AppStartView => readStartView()
   },
+  player: {
+    /** 打开独立播放窗：已打开时把新的一集推过去，不另开窗口 */
+    open: (input: PlayerOpenInput): Promise<PlayerOpenResult> =>
+      ipcRenderer.invoke('player:open', input),
+    /** 播放页挂载时取当前载荷（窗口是复用的，可能已经切到别的集） */
+    payload: (): Promise<PlayerPayload | null> => ipcRenderer.invoke('player:payload'),
+    onLoad: (callback: (payload: PlayerPayload) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: PlayerPayload): void =>
+        callback(payload)
+      ipcRenderer.on('player:load', handler)
+      return () => {
+        ipcRenderer.removeListener('player:load', handler)
+      }
+    }
+  },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
     setOpenAtLogin: (value: boolean): Promise<AppSettings> =>

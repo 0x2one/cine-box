@@ -34,8 +34,10 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "antd": "^6.7.0",
+    "artplayer": "^5.4.0",
     "dayjs": "^1.11.23",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "hls.js": "^1.7.4"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.1",

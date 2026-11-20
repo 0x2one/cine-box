@@ -1,0 +1,954 @@
+/*
+ * 播放页样式：固定暗色，不读 data-theme / 应用主题变量。
+ * 取色是「夜间放映室」：近黑的幕布 + 钨丝灯一样的琥珀色强调，
+ * 只有正在播放的集数、线路选中态和焦点框用琥珀色，其余保持安静。
+ */
+
+:root {
+  color-scheme: dark;
+
+  --ink: #08090c;
+  --ink-1: #0d0f14;
+  --ink-2: #12151b;
+  --ink-3: #191d25;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --paper: #f2f4f8;
+  --muted: #98a2b3;
+  --faint: #636c7b;
+  --amber: #f0b45e;
+  --amber-soft: rgba(240, 180, 94, 0.14);
+  --amber-line: rgba(240, 180, 94, 0.38);
+
+  --font-sans:
+    'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', 'Hiragino Sans GB',
+    system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, ui-monospace, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#player-root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+/* 幕布上的两团微光：左上暖、右上冷，底部再压一层暗角 */
+body::before {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  background:
+    radial-gradient(80% 55% at 16% -12%, rgba(240, 180, 94, 0.08), transparent 62%),
+    radial-gradient(70% 50% at 102% -6%, rgba(94, 142, 255, 0.05), transparent 66%),
+    radial-gradient(120% 80% at 50% 112%, rgba(0, 0, 0, 0.5), transparent 58%);
+  content: '';
+  pointer-events: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.13);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: content-box;
+}
+
+.player-app {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.player-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* ── 标题栏 ── */
+
+.player-titlebar {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  flex: 0 0 46px;
+  height: 46px;
+  align-items: center;
+  gap: 10px;
+  padding-left: 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(10, 11, 15, 0.84);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-app-region: drag;
+}
+
+/* macOS 保留原生红绿灯，给它们让出位置 */
+.player-titlebar.is-mac {
+  padding-left: 88px;
+}
+
+.player-brand-logo {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0.8;
+}
+
+.player-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.player-title {
+  overflow: hidden;
+  max-width: min(44vw, 560px);
+  margin: 0;
+  color: var(--paper);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-episode {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--amber-line);
+  border-radius: 4px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+
+.player-total {
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.player-titlebar-drag {
+  flex: 1;
+  align-self: stretch;
+}
+
+.player-titlebar-actions {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.player-text-btn {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.player-text-btn:hover {
+  border-color: var(--line-strong);
+  color: var(--paper);
+}
+
+.player-text-btn.is-active {
+  border-color: var(--amber-line);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.player-layout-switch {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.player-layout-btn {
+  display: inline-flex;
+  width: 28px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 13px;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.player-layout-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--paper);
+}
+
+.player-layout-btn.is-active {
+  background: var(--amber-soft);
+  box-shadow: inset 0 0 0 1px var(--amber-line);
+  color: var(--amber);
+}
+
+.player-titlebar-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: var(--line);
+}
+
+.player-win-btn {
+  display: inline-flex;
+  width: 46px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.player-win-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--paper);
+}
+
+.player-win-btn.is-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+
+/* ── 布局骨架 ── */
+
+.player-body {
+  padding: 18px 22px 30px;
+}
+
+.player-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* 标准：播放器 + 右侧剧集栏 */
+.player-app.is-standard .player-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: 18px;
+}
+
+.player-side {
+  position: sticky;
+  top: 12px;
+  min-width: 0;
+}
+
+/* 详情读失败 / 没有 m3u8 时右侧没有剧集栏，播放器直接铺满整行 */
+.player-app.is-standard .player-body.is-solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 影院：播放器铺满整屏，剧集变成右侧浮层 */
+.player-app.is-cinema .player-body {
+  padding: 0 0 30px;
+}
+
+.player-app.is-cinema .player-main {
+  gap: 0;
+}
+
+.player-app.is-cinema .player-stage {
+  height: calc(100vh - 46px);
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+  aspect-ratio: auto;
+}
+
+.player-app.is-cinema .player-info {
+  width: min(1120px, calc(100% - 56px));
+  margin: 22px auto 0;
+}
+
+/* 剧集条：播放器居中，剧集在信息下方横向铺开 */
+.player-app.is-below .player-body {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.player-app.is-below .episode-panel.is-strip {
+  padding: 14px 16px 10px;
+}
+
+/* ── 播放器 ── */
+
+.player-stage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  box-shadow: 0 30px 70px -40px rgba(0, 0, 0, 0.95);
+}
+
+.player-stage-art {
+  position: absolute;
+  inset: 0;
+}
+
+.player-stage .art-video {
+  object-fit: contain;
+}
+
+.player-stage .art-video-player {
+  background: #000;
+}
+
+/* 加载 / 失败 / 播放出错：盖在播放器上的状态层 */
+.player-state {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background:
+    radial-gradient(60% 60% at 50% 38%, rgba(240, 180, 94, 0.06), transparent 72%), var(--ink);
+  text-align: center;
+}
+
+.player-state.is-overlay {
+  background: rgba(6, 7, 9, 0.74);
+  backdrop-filter: blur(8px);
+}
+
+.player-state-icon {
+  color: var(--faint);
+  font-size: 30px;
+}
+
+.player-state-title {
+  margin: 0;
+  color: var(--paper);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.player-state-hint {
+  max-width: 420px;
+  margin: 0;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.player-state-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.player-spinner {
+  width: 26px;
+  height: 26px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: player-spin 900ms linear infinite;
+}
+
+@keyframes player-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.player-btn {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 1px solid var(--amber-line);
+  border-radius: 6px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12.5px;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.player-btn:hover {
+  background: rgba(240, 180, 94, 0.22);
+}
+
+.player-btn.is-ghost {
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--muted);
+}
+
+.player-btn.is-ghost:hover {
+  border-color: var(--faint);
+  color: var(--paper);
+}
+
+/* ── 播放器下方的视频信息 ── */
+
+.player-info {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)), var(--ink-1);
+}
+
+.player-poster {
+  position: relative;
+  display: flex;
+  width: 96px;
+  height: 144px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(155deg, #1a1f27, #0d0f14 72%);
+}
+
+.player-poster-letter {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 30px;
+  font-weight: 600;
+}
+
+.player-poster img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-info-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.player-info-title {
+  margin: 0;
+  color: var(--paper);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.player-info-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 元信息用中点分隔：每个 span 自己带分隔符，换行时不会留下孤零零的「·」 */
+.player-info-meta span + span::before {
+  margin: 0 8px;
+  color: var(--faint);
+  content: '·';
+}
+
+.player-info-actor {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.player-info-label {
+  flex: none;
+  color: var(--faint);
+}
+
+.player-info-intro {
+  margin-top: 2px;
+}
+
+.player-info-intro p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  user-select: text;
+}
+
+.player-info-intro.is-open p {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.player-info-more {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.player-info-more:hover {
+  text-decoration: underline;
+}
+
+.player-info-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+/* ── 剧集面板 ── */
+
+.episode-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 46%), var(--ink-1);
+}
+
+.player-side .episode-panel {
+  max-height: calc(100vh - 70px);
+}
+
+.episode-panel.is-drawer {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink-1);
+}
+
+.episode-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.episode-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.episode-eyebrow {
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+}
+
+.episode-count {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.episode-lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.episode-line {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.episode-line:hover {
+  border-color: var(--line-strong);
+  color: var(--paper);
+}
+
+.episode-line.is-active {
+  border-color: var(--amber-line);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.episode-single-line {
+  overflow: hidden;
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episode-grid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+/* 剧集条：横向排，左右翻页 */
+.episode-grid.is-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 0 6px;
+  scroll-snap-type: x proximity;
+  scrollbar-gutter: auto;
+}
+
+.episode-grid.is-strip .episode-cell {
+  flex: 0 0 54px;
+  scroll-snap-align: start;
+}
+
+.episode-cell {
+  position: relative;
+  display: flex;
+  height: 46px;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--ink-2);
+  color: var(--paper);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.episode-cell:hover {
+  border-color: var(--line-strong);
+  background: var(--ink-3);
+}
+
+.episode-cell:active {
+  transform: scale(0.97);
+}
+
+.episode-cell.is-active {
+  border-color: var(--amber);
+  background: var(--amber);
+  box-shadow: 0 8px 20px -10px rgba(240, 180, 94, 0.6);
+  color: #1d1305;
+}
+
+.episode-num {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+}
+
+.episode-caption {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 9.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episode-cell.is-active .episode-caption {
+  color: rgba(29, 19, 5, 0.66);
+}
+
+/* 正在播放的格子右上角：三根跳动的电平条 */
+.episode-bars {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  height: 8px;
+  align-items: flex-end;
+  gap: 1.5px;
+}
+
+.episode-bars i {
+  display: block;
+  width: 1.5px;
+  height: 3px;
+  background: currentColor;
+  animation: player-eq 900ms ease-in-out infinite;
+}
+
+.episode-bars i:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.episode-bars i:nth-child(3) {
+  animation-delay: 300ms;
+}
+
+@keyframes player-eq {
+  0%,
+  100% {
+    height: 3px;
+  }
+
+  50% {
+    height: 8px;
+  }
+}
+
+.episode-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.episode-foot-label {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.episode-switch {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--ink-3);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.episode-switch.is-on {
+  border-color: var(--amber-line);
+  background: var(--amber-soft);
+}
+
+.episode-switch-knob {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--faint);
+  transform: translateY(-50%);
+  transition:
+    left 160ms ease,
+    background-color 160ms ease;
+}
+
+.episode-switch.is-on .episode-switch-knob {
+  left: 16px;
+  background: var(--amber);
+}
+
+.episode-strip-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.episode-arrow {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.episode-arrow:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--paper);
+}
+
+.episode-arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ── 影院布局的剧集浮层 ── */
+
+.player-drawer {
+  position: fixed;
+  z-index: 40;
+  inset: 46px 0 0;
+  pointer-events: none;
+}
+
+.player-drawer-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 5, 7, 0.56);
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.player-drawer-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  max-width: 86vw;
+  border-left: 1px solid var(--line);
+  background: var(--ink-1);
+  box-shadow: -30px 0 60px -30px rgba(0, 0, 0, 0.85);
+  transform: translateX(100%);
+  transition: transform 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.player-drawer.is-open {
+  pointer-events: auto;
+}
+
+.player-drawer.is-open .player-drawer-scrim {
+  opacity: 1;
+}
+
+.player-drawer.is-open .player-drawer-panel {
+  transform: translateX(0);
+}
+
+@media (max-width: 1080px) {
+  .player-app.is-standard .player-body {
+    grid-template-columns: minmax(0, 1fr) 272px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

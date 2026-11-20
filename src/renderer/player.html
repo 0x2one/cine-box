@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./src/assets/logo.svg" />
+    <title>映盒剧场 · 播放</title>
+    <!-- 播放页要直接拉第三方 m3u8 与分片，所以在主界面 CSP 的基础上放开 media / connect；
+         脚本仍然只允许本地打包产物，远程内容不会被当脚本执行 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: cine-img:; media-src 'self' blob: data: https: http:; connect-src 'self' ws: wss: blob: data: https: http:; worker-src 'self' blob:; font-src 'self' data:"
+    />
+  </head>
+
+  <body>
+    <div id="player-root"></div>
+    <script type="module" src="/src/player/main.tsx"></script>
+  </body>
+</html>

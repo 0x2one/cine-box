@@ -479,6 +479,7 @@ function BrowseView({
               {items.map((item) => (
                 <VideoCard
                   key={item.id}
+                  videoId={item.id}
                   title={item.name}
                   pic={item.pic}
                   note={item.note}

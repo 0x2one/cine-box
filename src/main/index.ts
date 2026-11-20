@@ -31,6 +31,7 @@ import { createCollectScheduler } from './collect-scheduler'
 import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
+import { createPlayerWindowManager } from './player-window'
 import type {
   HomeFeedResult,
   HomeItemPatch,
@@ -121,6 +122,11 @@ const pendingCategoryRefresh = new Map<string, { categories: SiteCategoryInput[]
 const PENDING_CATEGORY_TTL = 5 * 60 * 1000
 const updater = createUpdater(sendToRenderer, () => appSettingsStore.get().autoDownload)
 const cacheManager = createCacheManager()
+// 播放页跑在独立的无边框暗色窗口里，不复用主窗口（IPC 由它自己注册）
+createPlayerWindowManager({
+  preload: join(__dirname, '../preload/index.js'),
+  icon
+})
 
 function sendToRenderer(channel: string, ...args: unknown[]): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
@@ -453,24 +459,30 @@ function createWindow(): void {
 
 /* ── IPC：窗口控制 ── */
 
-ipcMain.handle('window:minimize', () => {
-  mainWindow?.minimize()
+/** 窗口控制按调用方定位：主窗口和播放窗口共用同一套通道 */
+function senderWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
+  return BrowserWindow.fromWebContents(event.sender)
+}
+
+ipcMain.handle('window:minimize', (event) => {
+  senderWindow(event)?.minimize()
 })
 
-ipcMain.handle('window:maximize', () => {
-  if (!mainWindow) return
-  if (mainWindow.isMaximized()) {
-    mainWindow.unmaximize()
+ipcMain.handle('window:maximize', (event) => {
+  const window = senderWindow(event)
+  if (!window) return
+  if (window.isMaximized()) {
+    window.unmaximize()
   } else {
-    mainWindow.maximize()
+    window.maximize()
   }
 })
 
-ipcMain.handle('window:close', () => {
-  mainWindow?.close()
+ipcMain.handle('window:close', (event) => {
+  senderWindow(event)?.close()
 })
 
-ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
+ipcMain.handle('window:isMaximized', (event) => senderWindow(event)?.isMaximized() ?? false)
 
 /* ── IPC：应用设置 ── */
 
