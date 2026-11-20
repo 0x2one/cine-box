@@ -4,11 +4,11 @@ import {
   ArrowLeftOutlined,
   BarChartOutlined,
   CloudDownloadOutlined,
+  CompassOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   FileTextOutlined,
   GlobalOutlined,
-  HomeOutlined,
   SaveOutlined,
   VideoCameraOutlined
 } from '@ant-design/icons'
@@ -26,7 +26,7 @@ import type { ConsoleSection } from '../types'
 
 const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOutlined }[] = [
   { key: 'overview', label: '概览', icon: DashboardOutlined },
-  { key: 'home', label: '推荐', icon: HomeOutlined },
+  { key: 'home', label: '推荐', icon: CompassOutlined },
   { key: 'sites', label: '站点', icon: GlobalOutlined },
   { key: 'categories', label: '分类', icon: ApartmentOutlined },
   { key: 'collect', label: '采集', icon: CloudDownloadOutlined },
