@@ -686,6 +686,13 @@ interface VideoListResult {
   error?: string
 }
 
+/** 只问数量时的结果（不取行） */
+interface VideoCountResult {
+  ok: boolean
+  total: number
+  error?: string
+}
+
 interface VideoUpdateInput {
   note?: string
   intro?: string
@@ -801,6 +808,8 @@ interface VideoCacheClearResult {
 
 interface VideosApi {
   list: (query: VideoListQuery) => Promise<VideoListResult>
+  /** 只问数量、不取行 */
+  count: (query: VideoListQuery) => Promise<VideoCountResult>
   update: (videoId: number, patch: VideoUpdateInput) => Promise<VideoUpdateResult>
   detail: (videoId: number, options?: { autoFetch?: boolean }) => Promise<VideoDetailResult>
   refreshDetail: (
@@ -808,7 +817,8 @@ interface VideosApi {
     options?: { force?: boolean }
   ) => Promise<VideoDetailRefreshResult>
   stats: () => Promise<VideoStats>
-  capacity: () => Promise<VideoCapacity>
+  /** { sites: false } 跳过按站点分组的统计 */
+  capacity: (options?: { sites?: boolean }) => Promise<VideoCapacity>
   scanCapacity: (options?: { fixMissing?: boolean }) => Promise<VideoCapacityScanResult>
   clearDetails: (options?: { siteId?: string }) => Promise<DetailClearResult>
   progress: (siteId?: string) => Promise<VideoCollectProgress[]>

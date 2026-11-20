@@ -569,9 +569,15 @@ ipcMain.handle('cache:clear', (event) =>
 
 /* ── IPC：视频缓存 ── */
 
-ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
-  if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
-  let filters: { siteId: string; categoryId: string }[] | undefined
+/**
+ * 把渲染层传的分类 id 解析成缓存库的（站点 + 在线分类）过滤条件。
+ * empty = true 表示「这次筛选没有任何可查的分类」（显式传了空数组 / 子树一条绑定都没有），
+ * 调用方要直接返回空结果，不能退化成查全库。
+ */
+function resolveVideoFilters(query: VideoListQuery | undefined): {
+  filters?: { siteId: string; categoryId: string }[]
+  empty: boolean
+} {
   // 列表页「全部」会一次传多个一级分类，把它们各自的子树一起解析成绑定过滤
   const rawCategoryIds = query?.categoryIds
   const categoryIds: string[] = Array.isArray(rawCategoryIds)
@@ -579,24 +585,27 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
     : query && query.categoryId
       ? [query.categoryId]
       : []
-  if (Array.isArray(rawCategoryIds) && categoryIds.length === 0) {
-    // 显式传了空数组（没有任何可见分类）：直接空结果，不要退化成全库
-    return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
-  }
-  if (categoryIds.length > 0) {
-    const seen = new Set<string>()
-    filters = []
-    for (const categoryId of categoryIds) {
-      // 选中的是父分类时，把它下面各级子分类的绑定一起算进来
-      for (const binding of bindingStore.forCategories(categoryStore.subtreeIds(categoryId))) {
-        const key = `${binding.siteId}\u0000${binding.sourceId}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        filters.push({ siteId: binding.siteId, categoryId: binding.sourceId })
-      }
+  // 显式传了空数组（没有任何可见分类）：直接空结果，不要退化成全库
+  if (Array.isArray(rawCategoryIds) && categoryIds.length === 0) return { empty: true }
+  if (categoryIds.length === 0) return { empty: false }
+  const seen = new Set<string>()
+  const filters: { siteId: string; categoryId: string }[] = []
+  for (const categoryId of categoryIds) {
+    // 选中的是父分类时，把它下面各级子分类的绑定一起算进来
+    for (const binding of bindingStore.forCategories(categoryStore.subtreeIds(categoryId))) {
+      const key = `${binding.siteId}\u0000${binding.sourceId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      filters.push({ siteId: binding.siteId, categoryId: binding.sourceId })
     }
-    if (filters.length === 0) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
   }
+  return { filters, empty: filters.length === 0 }
+}
+
+ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
+  const { filters, empty } = resolveVideoFilters(query)
+  if (empty) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
   const result = videoStore.listVideos(query ?? {}, filters)
   if (!result.ok || result.items.length === 0) return result
 
@@ -658,6 +667,13 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   }
 })
 
+ipcMain.handle('videos:count', (_event, query: VideoListQuery) => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), total: 0 }
+  const { filters, empty } = resolveVideoFilters(query)
+  if (empty) return { ok: true, total: 0 }
+  return { ok: true, total: videoStore.countVideos(query ?? {}, filters) }
+})
+
 ipcMain.handle('videos:update', (_event, videoId: number, patch: VideoUpdateInput) => {
   if (!videoCacheReady) return { ok: false, error: 'DB' }
   const result = videoStore.updateVideo(Number(videoId), patch ?? {})
@@ -687,7 +703,7 @@ ipcMain.handle('videos:stats', () => {
   return videoStore.stats()
 })
 
-ipcMain.handle('videos:capacity', () => {
+ipcMain.handle('videos:capacity', (_event, options?: { sites?: boolean }) => {
   if (!videoCacheReady) {
     return {
       dbBytes: 0,
@@ -704,7 +720,9 @@ ipcMain.handle('videos:capacity', () => {
       sites: []
     }
   }
-  return videoStore.capacity(siteNameMap())
+  // 概览只要总量，传 { sites: false } 跳过分站统计（十几万条来源要 100ms 上下）
+  const withSites = options?.sites !== false
+  return videoStore.capacity(withSites ? siteNameMap() : undefined, withSites)
 })
 
 ipcMain.handle('videos:capacity:scan', async (_event, options?: { fixMissing?: boolean }) => {
@@ -831,7 +849,8 @@ ipcMain.handle('videos:clear', async () => {
   collector.suspend()
   scheduler.stop()
   await collector.cancelAll()
-  const before = videoStore.capacity()
+  // 只为了算「释放了多少」，不需要按站点分组
+  const before = videoStore.capacity(undefined, false)
   try {
     await detailCache.removeAll()
     await videoStore.rebuild()

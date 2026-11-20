@@ -203,6 +203,13 @@ export interface VideoListResult {
   error?: string
 }
 
+/** 只问数量时的结果（不取行）：控制台概览的「隐藏了多少」用它 */
+export interface VideoCountResult {
+  ok: boolean
+  total: number
+  error?: string
+}
+
 /** 只允许改这些字段：名称是合并键，不提供修改入口 */
 export interface VideoUpdateInput {
   note?: string

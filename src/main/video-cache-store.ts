@@ -114,6 +114,11 @@ export interface VideoCacheStore {
     query: VideoListQuery,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ) => VideoListResult
+  /** 只数总数、不取行（控制台概览的「隐藏了多少」）：条件与 `listVideos` 完全一致 */
+  countVideos: (
+    query: Pick<VideoListQuery, 'keyword' | 'visibility'>,
+    categoryFilters?: { siteId: string; categoryId: string }[]
+  ) => number
   /** 按 id 批量取视频（首页海报 / 推荐条目用，可能不在分类前 100 条里） */
   listVideosByIds: (videoIds: number[]) => VideoListItem[]
   /** 指定视频各来源的在线分类，列表页据此解析绑定后的本地分类 */
@@ -122,7 +127,8 @@ export interface VideoCacheStore {
   ) => { videoId: number; siteId: string; categoryId: string }[]
   updateVideo: (videoId: number, patch: VideoUpdateInput) => VideoUpdateResult
   stats: () => VideoStats
-  capacity: (siteNames?: Map<string, string>) => VideoCapacity
+  /** withSites = false 时跳过「按站点分组」的统计（十几万条来源要 100ms+，概览用不到） */
+  capacity: (siteNames?: Map<string, string>, withSites?: boolean) => VideoCapacity
   getProgress: (id: string) => VideoCollectProgress | null
   listProgress: (siteId?: string) => VideoCollectProgress[]
   prepareTask: (input: {
@@ -845,21 +851,20 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     return num(counted?.n)
   }
 
-  function listVideos(
-    query: VideoListQuery,
+  /**
+   * 列表与「只数总数」共用的 WHERE 片段。关键词拼不出合法 FTS 查询时返回 null（= 空结果）。
+   * 返回的 `keyword` 决定总数要不要走带 FTS 的完整条件。
+   */
+  function buildListWhere(
+    query: Pick<VideoListQuery, 'keyword' | 'visibility'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
-  ): VideoListResult {
-    const connection = database()
+  ): { keyword: string; where: string[]; params: (string | number)[] } | null {
     const keyword = query.keyword?.trim() ?? ''
-    const pageSize = Math.min(Math.max(Number(query.pageSize) || 10, 1), 100)
-    const page = Math.max(Number(query.page) || 1, 1)
-    const offset = (page - 1) * pageSize
     const where: string[] = []
     const params: (string | number)[] = []
-
     if (keyword) {
       const match = makeFtsQuery(keyword)
-      if (!match) return { ok: true, items: [], total: 0, page, pageSize }
+      if (!match) return null
       where.push('v.id IN (SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?)')
       params.push(match)
     }
@@ -873,6 +878,41 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     const visibility = query.visibility ?? 'all'
     if (visibility === 'hidden') where.push('COALESCE(e.hidden, 0) = 1')
     if (visibility === 'shown') where.push('COALESCE(e.hidden, 0) = 0')
+    return { keyword, where, params }
+  }
+
+  /**
+   * 只数总数、不取行：控制台概览的「隐藏了多少」只要这个数。
+   * 以前是 `videos:list` 取一页凑 total，`visibility: 'hidden'` 又没有命中行时
+   * 会为了找 1 条把整张 videos 表连着两个 JOIN 扫一遍（实测 140–175ms）。
+   */
+  function countMatching(
+    query: Pick<VideoListQuery, 'keyword' | 'visibility'>,
+    categoryFilters?: { siteId: string; categoryId: string }[]
+  ): number {
+    const built = buildListWhere(query, categoryFilters)
+    if (!built) return 0
+    if (!built.keyword) {
+      return countVideos(database(), categoryFilters, query.visibility ?? 'all')
+    }
+    const from = `${VIDEO_ITEM_FROM}${built.where.length ? ` WHERE ${built.where.join(' AND ')}` : ''}`
+    const counted = database()
+      .prepare(`SELECT COUNT(*) AS n ${from}`)
+      .get(...built.params) as Record<string, unknown> | undefined
+    return num(counted?.n)
+  }
+
+  function listVideos(
+    query: VideoListQuery,
+    categoryFilters?: { siteId: string; categoryId: string }[]
+  ): VideoListResult {
+    const connection = database()
+    const pageSize = Math.min(Math.max(Number(query.pageSize) || 10, 1), 100)
+    const page = Math.max(Number(query.page) || 1, 1)
+    const offset = (page - 1) * pageSize
+    const built = buildListWhere(query, categoryFilters)
+    if (!built) return { ok: true, items: [], total: 0, page, pageSize }
+    const { keyword, where, params } = built
 
     const from = `
       ${VIDEO_ITEM_FROM}
@@ -899,7 +939,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
           Record<string, unknown> | undefined
         total = num(counted?.n)
       } else {
-        total = countVideos(connection, categoryFilters, visibility)
+        total = countVideos(connection, categoryFilters, query.visibility ?? 'all')
       }
     } catch {
       // FTS 语法错误 / 索引异常时返回空，而不是把异常抛给渲染层
@@ -1060,7 +1100,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     }
   }
 
-  function capacity(siteNames?: Map<string, string>): VideoCapacity {
+  function capacity(siteNames?: Map<string, string>, withSites = true): VideoCapacity {
     const connection = database()
     const videoCount = num(
       (connection.prepare('SELECT COUNT(*) AS n FROM videos').get() as Record<string, unknown>).n
@@ -1097,18 +1137,22 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       )
       .get() as Record<string, unknown>
 
-    const siteRows = connection
-      .prepare(
-        `SELECT site_id,
-                COUNT(DISTINCT video_id) AS videos,
-                COUNT(*) AS sources,
-                SUM(CASE WHEN detail_cached_at <> '' THEN 1 ELSE 0 END) AS detail_count,
-                SUM(CASE WHEN detail_cached_at <> '' THEN detail_size ELSE 0 END) AS detail_bytes
-         FROM video_sources
-         GROUP BY site_id
-         HAVING SUM(CASE WHEN detail_cached_at <> '' THEN 1 ELSE 0 END) > 0`
-      )
-      .all() as Record<string, unknown>[]
+    // 「按站点分组」要扫全部来源行（十几万条时 100ms+），只有容量页需要
+    const siteRows =
+      withSites === false
+        ? []
+        : (connection
+            .prepare(
+              `SELECT site_id,
+                      COUNT(DISTINCT video_id) AS videos,
+                      COUNT(*) AS sources,
+                      SUM(CASE WHEN detail_cached_at <> '' THEN 1 ELSE 0 END) AS detail_count,
+                      SUM(CASE WHEN detail_cached_at <> '' THEN detail_size ELSE 0 END) AS detail_bytes
+               FROM video_sources
+               GROUP BY site_id
+               HAVING SUM(CASE WHEN detail_cached_at <> '' THEN 1 ELSE 0 END) > 0`
+            )
+            .all() as Record<string, unknown>[])
     const sites: VideoCapacitySite[] = siteRows.map((raw) => {
       const siteId = text(raw.site_id)
       return {
@@ -1485,6 +1529,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     deleteSources,
     recomputeVideos,
     listVideos,
+    countVideos: countMatching,
     listVideosByIds,
     listSourceCategories,
     updateVideo,

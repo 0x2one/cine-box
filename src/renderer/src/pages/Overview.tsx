@@ -25,8 +25,8 @@ interface OverviewData {
   sites: Site[]
   categories: VideoCategory[]
   bindingCount: number
-  stats: VideoStats
   hiddenCount: number
+  /** 视频数 / 来源数 / 最后采集时间也在这个包里，不用再单独要一次 stats */
   capacity: VideoCapacity
   schedules: VideoSchedule[]
   progress: VideoCollectProgress[]
@@ -79,15 +79,15 @@ function OverviewPanel({
       if (!options?.silent) setLoading(true)
       try {
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-        const [sites, categories, counts, stats, hidden, capacity, schedules, progress, logs] =
+        const [sites, categories, counts, hidden, capacity, schedules, progress, logs] =
           await Promise.all([
             window.api.sites.list(),
             window.api.categories.list(),
             window.api.bindings.counts(),
-            window.api.videos.stats(),
-            // 只关心「隐藏了多少」，取一页拿 total 就够
-            window.api.videos.list({ visibility: 'hidden', page: 1, pageSize: 1 }),
-            window.api.videos.capacity(),
+            // 只关心「隐藏了多少」：只要数字，不取行（取一页拿 total 会扫整张表）
+            window.api.videos.count({ visibility: 'hidden' }),
+            // 概览只看总量，按站点分组的统计（十几万条来源）在这里用不到
+            window.api.videos.capacity({ sites: false }),
             window.api.videos.schedules(),
             window.api.videos.progress(),
             window.api.videos.logs({ since, order: 'newest', limit: 100 })
@@ -96,7 +96,6 @@ function OverviewPanel({
           sites,
           categories,
           bindingCount: Object.values(counts).reduce((sum, value) => sum + value, 0),
-          stats,
           hiddenCount: hidden.ok ? hidden.total : 0,
           capacity,
           schedules: schedules.schedules ?? [],
@@ -169,9 +168,9 @@ function OverviewPanel({
   const errorCount = issues.filter((log) => log.level === 'error').length
 
   const sites = data?.sites ?? []
-  const videoCount = data?.stats.videoCount ?? 0
-  const sourceCount = data?.stats.sourceCount ?? 0
-  const lastCollectedAt = data?.capacity.lastCollectedAt || data?.stats.lastCollectedAt || ''
+  const videoCount = data?.capacity.videoCount ?? 0
+  const sourceCount = data?.capacity.sourceCount ?? 0
+  const lastCollectedAt = data?.capacity.lastCollectedAt ?? ''
   const totalBytes = (data?.capacity.dbBytes ?? 0) + (data?.capacity.detailBytes ?? 0)
   const nextSchedule = upcoming[0]
 

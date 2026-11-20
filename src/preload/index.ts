@@ -157,6 +157,9 @@ const api = {
   videos: {
     list: (query: VideoListQuery): Promise<VideoListResult> =>
       ipcRenderer.invoke('videos:list', query),
+    /** 只问数量、不取行（概览的「隐藏了多少」）：比取一页拿 total 快两个数量级 */
+    count: (query: VideoListQuery): Promise<VideoCountResult> =>
+      ipcRenderer.invoke('videos:count', query),
     update: (videoId: number, patch: VideoUpdateInput): Promise<VideoUpdateResult> =>
       ipcRenderer.invoke('videos:update', videoId, patch),
     detail: (videoId: number, options?: { autoFetch?: boolean }): Promise<VideoDetailResult> =>
@@ -167,7 +170,9 @@ const api = {
     ): Promise<VideoDetailRefreshResult> =>
       ipcRenderer.invoke('videos:detail:refresh', videoId, options),
     stats: (): Promise<VideoStats> => ipcRenderer.invoke('videos:stats'),
-    capacity: (): Promise<VideoCapacity> => ipcRenderer.invoke('videos:capacity'),
+    /** { sites: false } 跳过按站点分组的统计（概览用不到，能省 100ms 上下） */
+    capacity: (options?: { sites?: boolean }): Promise<VideoCapacity> =>
+      ipcRenderer.invoke('videos:capacity', options),
     scanCapacity: (options?: { fixMissing?: boolean }): Promise<VideoCapacityScanResult> =>
       ipcRenderer.invoke('videos:capacity:scan', options),
     clearDetails: (options?: { siteId?: string }): Promise<DetailClearResult> =>
