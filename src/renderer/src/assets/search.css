@@ -415,7 +415,7 @@
 .search-recommend-inner {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   transform: translateY(var(--stagger));
   transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -425,15 +425,16 @@
   transform: translateY(calc(var(--stagger) - 8px));
 }
 
-/* 标题紧跟封面，固定一行；窄窗口下省略，完整片名在 title 里 */
+/* 标题紧跟封面，固定一行；字号和对比度都压到最低，只有悬停 / 聚焦时才提亮 */
 .search-recommend-title {
   overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 18px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 15px;
+  letter-spacing: 0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
-  opacity: 0.8;
+  opacity: 0.62;
   transition:
     color 0.18s ease,
     opacity 0.18s ease;
@@ -461,7 +462,7 @@
 
 .search-recommend-card:hover .search-recommend-title,
 .search-recommend-card:focus-visible .search-recommend-title {
-  color: var(--text);
+  color: var(--text-muted);
   opacity: 1;
 }
 

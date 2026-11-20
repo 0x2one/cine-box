@@ -3491,38 +3491,45 @@ button.video-episode:focus-visible {
   padding-bottom: 8px;
 }
 
-/* 首页配置：tab 条跟着标题行一起吸顶（标题行本身是 sticky，tab 贴在它下沿） */
+/* 推荐页标题行不吸顶，tab 条自己贴到页面顶部：滚动后只留 tab，顶部不会空一截 */
+.settings-panel-head.home-config-head {
+  position: static;
+}
+
 .home-config-tabs .ant-tabs-nav {
   position: sticky;
-  top: var(--head-h, 48px);
+  top: 0;
   z-index: 4;
   padding-top: 2px;
   background: var(--bg);
 }
 
-/* 标题行右侧的说明：跟着 tab 切换，超长省略，悬停看全文 */
+/* 标题行右侧的说明收成一个图标：悬停 / 聚焦看当前 tab 的全文，不占标题行宽度 */
 .home-config-tip {
   display: inline-flex;
-  max-width: 400px;
   align-items: center;
-  gap: 5px;
   margin-left: 8px;
   color: var(--text-faint);
-  font-size: 11.5px;
-  line-height: 1.5;
-  vertical-align: -2px;
+  line-height: 1;
+  vertical-align: -1px;
+  cursor: help;
 }
 
 .home-config-tip-icon {
   flex: none;
-  font-size: 12px;
+  font-size: 13px;
 }
 
-.home-config-tip-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.home-config-tip:hover .home-config-tip-icon {
+  color: var(--text-muted);
+}
+
+.home-config-tip:focus-visible {
+  outline: none;
+}
+
+.home-config-tip:focus-visible .home-config-tip-icon {
+  color: var(--accent);
 }
 
 .home-config-loading {

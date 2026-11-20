@@ -956,19 +956,6 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   /** 展开的分组（默认全收起，展开状态记到 localStorage）；「已移除」列表只在本页 */
   const [expanded, setExpanded] = useState<string[]>(readExpanded)
   const [removedOpen, setRemovedOpen] = useState<string[]>([])
-  /** 标题行自己是 sticky 的，tab 条要贴在它下沿，所以量一下它的实际高度 */
-  const headRef = useRef<HTMLDivElement>(null)
-  const [headHeight, setHeadHeight] = useState(0)
-
-  useEffect(() => {
-    const head = headRef.current
-    if (!head) return
-    const sync = (): void => setHeadHeight(head.offsetHeight)
-    sync()
-    const observer = new ResizeObserver(sync)
-    observer.observe(head)
-    return () => observer.disconnect()
-  }, [])
 
   useEffect(() => {
     try {
@@ -1571,7 +1558,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   return (
     <>
-      <div className="settings-panel-head has-actions" ref={headRef}>
+      <div className="settings-panel-head has-actions home-config-head">
         <h2 className="settings-panel-title">{title}</h2>
         <span className="settings-panel-sep">·</span>
         <p className="settings-panel-desc">
@@ -1580,10 +1567,10 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
             海报 {posters.length} 张 · 分类 {visibleSections}/{sections.length} 个 · 搜索推荐{' '}
             {search?.items.length ?? 0} 部
           </span>
+          {/* 说明收进图标，标题行只留标题 / 数量 / 刷新，避免长文案截断后挂在顶部 */}
           <Tooltip title={<div style={{ maxWidth: 360 }}>{hint}</div>} placement="bottomLeft">
-            <span className="home-config-tip" tabIndex={0}>
+            <span className="home-config-tip" tabIndex={0} role="img" aria-label={hint}>
               <ExclamationCircleOutlined className="home-config-tip-icon" />
-              <span className="home-config-tip-text">{hint}</span>
             </span>
           </Tooltip>
         </p>
@@ -1608,10 +1595,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
           <Button onClick={() => void load()}>重新读取</Button>
         </Empty>
       ) : (
-        <div
-          className="home-config-tabs"
-          style={{ '--head-h': `${headHeight}px` } as React.CSSProperties}
-        >
+        <div className="home-config-tabs">
           <Tabs
             activeKey={tab}
             onChange={(key) => setTab(key as 'poster' | 'section' | 'search')}
