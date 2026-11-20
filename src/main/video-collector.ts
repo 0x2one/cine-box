@@ -349,7 +349,15 @@ export function createVideoCollector(options: {
     let fetchTotalMs = 0
     let writeTotalMs = 0
     let detailTotalMs = 0
+    /**
+     * 详情落盘排在后台：它只碰文件和详情索引，和下一页的网络请求完全独立，
+     * 一页 100 条在 Windows 上要 150ms 上下，串在关键路径上纯属白等。
+     * 这里串成一条链，保证同一时刻只有一页在写（并发写文件实测只快 1.4×，
+     * 不值得为此打乱顺序），跑完列表阶段再统一收尾。
+     */
+    let detailChain: Promise<void> = Promise.resolve()
 
+    const listStart = Date.now()
     while (true) {
       if (signal.aborted || task.cancelled || disposed) {
         paused = true
@@ -436,45 +444,46 @@ export function createVideoCollector(options: {
           `抓取 ${progress.fetched} · 新增 ${progress.inserted} · 更新 ${progress.updated} · 失败 ${progress.failed}`
         )
       }
-      let detailPageMs = 0
-      let pageDirect = 0
-      let pageFetched = 0
+      let detailQueued = 0
       if (item.cacheDetail && write.sourceIds.length > 0) {
-        const detailStart = Date.now()
-        const sources = write.sourceIds
-          .map((id) => store.getDetailSource(id))
-          .filter((row): row is DetailSourceRow => row !== null)
-        if (sources.length > 0) {
-          try {
-            // 整页模式已经带回详情，先直接落盘；剩下的才联网补抓
-            const itemsById = new Map(page.items.map((entry) => [entry.sourceVideoId, entry]))
-            const direct = await details.warmFromPage(sources, itemsById)
-            detailCached += direct.cached
-            detailFailed += direct.failed
-            detailDirect += direct.cached
-            pageDirect = direct.cached
-            if (direct.fallback.length > 0) {
-              const warmed = await details.warm(direct.fallback)
-              detailCached += warmed.cached
-              detailFailed += warmed.failed
-              detailFetched += warmed.cached
-              pageFetched = warmed.cached
+        const sourceIds = write.sourceIds
+        const itemsById = new Map(page.items.map((entry) => [entry.sourceVideoId, entry]))
+        detailQueued = sourceIds.length
+        detailChain = detailChain
+          .then(async () => {
+            const detailStart = Date.now()
+            const sources = sourceIds
+              .map((id) => store.getDetailSource(id))
+              .filter((row): row is DetailSourceRow => row !== null)
+            if (sources.length > 0) {
+              try {
+                // 整页模式已经带回详情，先直接落盘；剩下的才联网补抓
+                const direct = await details.warmFromPage(sources, itemsById)
+                detailCached += direct.cached
+                detailFailed += direct.failed
+                detailDirect += direct.cached
+                if (direct.fallback.length > 0) {
+                  const warmed = await details.warm(direct.fallback)
+                  detailCached += warmed.cached
+                  detailFailed += warmed.failed
+                  detailFetched += warmed.cached
+                }
+              } catch {
+                // 详情预热失败不影响列表采集，下一页继续
+              }
             }
-          } catch {
-            // 详情预热失败不影响列表采集，下一页继续
-          }
-        }
-        detailPageMs = Date.now() - detailStart
+            detailTotalMs += Date.now() - detailStart
+          })
+          .catch(() => {})
       }
       fetchTotalMs += fetchPageMs
       writeTotalMs += writePageMs
-      detailTotalMs += detailPageMs
       log(
         'info',
         item,
-        `第 ${nextPage} 页耗时 ${formatMs(fetchPageMs + writePageMs + detailPageMs)}`,
-        `列表 ${formatMs(fetchPageMs)} · 写库 ${formatMs(writePageMs)} · 详情 ${formatMs(detailPageMs)}` +
-          (item.cacheDetail ? `（本页直接 ${pageDirect} 个 / 补抓 ${pageFetched} 个）` : '')
+        `第 ${nextPage} 页耗时 ${formatMs(fetchPageMs + writePageMs)}`,
+        `列表 ${formatMs(fetchPageMs)} · 写库 ${formatMs(writePageMs)}` +
+          (detailQueued > 0 ? ` · 详情 ${detailQueued} 个转后台落盘` : '')
       )
       if (page.pageCount > 0 && nextPage >= page.pageCount) {
         completed = true
@@ -484,10 +493,14 @@ export function createVideoCollector(options: {
       await delay(0)
     }
 
+    // 等后台详情落盘收尾（一般只剩最后一页），否则「完成」时计数还没写全
+    await detailChain
+    const listWallMs = Date.now() - listStart
+
     // 列表阶段耗时拆分：写进「暂停 / 完成 / 开始全量替换」日志，慢在哪一眼能看出来
     const phaseText =
-      `耗时 ${formatMs(fetchTotalMs + writeTotalMs + detailTotalMs)}` +
-      `（列表 ${formatMs(fetchTotalMs)} · 写库 ${formatMs(writeTotalMs)} · 详情 ${formatMs(detailTotalMs)}）`
+      `耗时 ${formatMs(listWallMs)}` +
+      `（列表 ${formatMs(fetchTotalMs)} · 写库 ${formatMs(writeTotalMs)} · 详情后台 ${formatMs(detailTotalMs)}）`
 
     if (paused) {
       const pausedProgress =
@@ -566,7 +579,7 @@ export function createVideoCollector(options: {
       '采集完成',
       `${final.page} 页 · 抓取 ${final.fetched} · 新增 ${final.inserted} · 更新 ${final.updated} · 失败 ${final.failed}` +
         (item.cacheDetail
-          ? ` · 详情缓存 ${detailCached} 个${detailFailed > 0 ? `（失败 ${detailFailed}）` : ''}（本页 ${detailDirect} / 补抓 ${detailFetched}）`
+          ? ` · 详情缓存 ${detailCached} 个${detailFailed > 0 ? `（失败 ${detailFailed}）` : ''}（直接 ${detailDirect} / 补抓 ${detailFetched}）`
           : '') +
         ` · ${phaseText}`
     )

@@ -213,6 +213,18 @@ export function createVideoDetailCache(options: {
   const { rootDir, store, listSites, epoch, bumpEpoch } = options
   const inflightRead = new Map<number, Promise<VideoDetailResult>>()
   const inflightRefresh = new Map<number, Promise<VideoDetailRefreshResult>>()
+  /**
+   * 已经 mkdir 过的目录：采集一页 100 条都在同一个站点目录下，逐条 mkdir 白花
+   * 100 次系统调用（实测 9ms/页）。清空 / 删站点时把对应项删掉，否则会往删掉的目录里写。
+   */
+  const createdDirs = new Set<string>()
+
+  /** 目录被整体删掉之后要忘记它，下次写入重新 mkdir */
+  function forgetDirs(prefix: string): void {
+    for (const dir of createdDirs) {
+      if (prefix === '' || dir === prefix || dir.startsWith(prefix + sep)) createdDirs.delete(dir)
+    }
+  }
 
   function siteById(siteId: string): Site | null {
     return listSites().find((site) => site.id === siteId) ?? null
@@ -266,7 +278,11 @@ export function createVideoDetailCache(options: {
   async function writeCached(source: DetailSourceRow, detail: CachedVideoDetail): Promise<number> {
     const startedEpoch = epoch()
     const target = pathOf(source)
-    await fs.mkdir(dirname(target.absolute), { recursive: true })
+    const dir = dirname(target.absolute)
+    if (!createdDirs.has(dir)) {
+      await fs.mkdir(dir, { recursive: true })
+      createdDirs.add(dir)
+    }
 
     let body = detail
     let serialized = JSON.stringify(body)
@@ -281,7 +297,9 @@ export function createVideoDetailCache(options: {
       }
       serialized = JSON.stringify(body)
     }
-    if (Buffer.byteLength(serialized, 'utf8') > MAX_FILE_SIZE) throw new Error('TOO_LARGE')
+    // 落盘大小就是这段字节数，不用再 stat 一次拿 size
+    const bytes = Buffer.byteLength(serialized, 'utf8')
+    if (bytes > MAX_FILE_SIZE) throw new Error('TOO_LARGE')
 
     const temp = `${target.absolute}.tmp-${randomUUID()}`
     try {
@@ -302,14 +320,13 @@ export function createVideoDetailCache(options: {
       throw error instanceof Error ? error : new Error('FILE_WRITE_FAILED')
     }
 
-    const stats = await fs.stat(target.absolute).catch(() => null)
     if (startedEpoch !== epoch()) throw new Error('ABORT')
     const current = store.getDetailSource(source.id)
     if (!current) throw new Error('NOT_FOUND')
     const now = new Date().toISOString()
     store.setDetailIndex(source.id, {
       detailPath: target.relative,
-      detailSize: stats?.size ?? Buffer.byteLength(serialized, 'utf8'),
+      detailSize: bytes,
       detailCachedAt: now,
       detailAccessedAt: now,
       detailSourceTs: body.sourceTs || source.sourceTs,
@@ -317,7 +334,7 @@ export function createVideoDetailCache(options: {
       detailStale: false,
       detailError: ''
     })
-    return stats?.size ?? Buffer.byteLength(serialized, 'utf8')
+    return bytes
   }
 
   function detailUrl(site: Site, ids: string[]): string {
@@ -512,6 +529,7 @@ export function createVideoDetailCache(options: {
   async function clear(siteId?: string): Promise<DetailClearResult> {
     bumpEpoch()
     const target = siteId ? join(rootDir, safeSiteSegment(siteId)) : rootDir
+    forgetDirs(resolve(target))
     const stats = await directoryStats(target)
     try {
       await fs.rm(target, { recursive: true, force: true })
@@ -531,13 +549,14 @@ export function createVideoDetailCache(options: {
 
   async function removeSite(siteId: string): Promise<void> {
     bumpEpoch()
-    await fs
-      .rm(join(rootDir, safeSiteSegment(siteId)), { recursive: true, force: true })
-      .catch(() => {})
+    const target = resolve(rootDir, safeSiteSegment(siteId))
+    forgetDirs(target)
+    await fs.rm(target, { recursive: true, force: true }).catch(() => {})
   }
 
   async function removeAll(): Promise<void> {
     bumpEpoch()
+    forgetDirs(rootDir)
     await fs.rm(rootDir, { recursive: true, force: true }).catch(() => {})
   }
 

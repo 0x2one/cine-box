@@ -722,8 +722,12 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
           updateRunToken.run(runToken, sourceId)
         }
         if (changed) result.updated += 1
-        if (oldVideoId !== merged.videoId) affected.add(oldVideoId)
-        affected.add(merged.videoId)
+        // 只有这条来源的内容 / 归属真的变了才需要重算视频聚合值；
+        // 未变（或只更新全量 token、只标详情过期）时重算结果一定相同，白白多 2 条 SELECT
+        if (changed) {
+          if (oldVideoId !== merged.videoId) affected.add(oldVideoId)
+          affected.add(merged.videoId)
+        }
       }
 
       for (const id of affected) recomputeVideo(tx, id, now)
