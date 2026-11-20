@@ -204,18 +204,25 @@ function SearchResultRow({
  * 只展示、不跳转：和首页 / 列表页一样，这里没有播放或详情入口。
  */
 function SearchView({
+  initialKeyword = '',
+  onKeywordChange,
   onOpenBrowse
 }: {
+  /** 从控制台 / 设置返回时恢复的搜索词，空串表示停在初始态 */
+  initialKeyword?: string
+  /** 已提交的关键词变化时上报，离开再回来时用它恢复这一页 */
+  onKeywordChange?: (keyword: string) => void
   /** 初始态的分类快捷入口：带分类 id 进入列表页，null 表示「全部」 */
   onOpenBrowse: (categoryId: string | null) => void
 }): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(initialKeyword)
   /** 已提交的关键词（去掉首尾空白）：空串表示停在初始态 */
-  const [keyword, setKeyword] = useState('')
+  const [keyword, setKeyword] = useState(initialKeyword)
   const [items, setItems] = useState<VideoListItem[]>([])
   const [total, setTotal] = useState<number | null>(null)
-  const [loading, setLoading] = useState(false)
+  /** 恢复上一次搜索时首帧就在加载态，避免先闪一下「没有找到」 */
+  const [loading, setLoading] = useState(() => initialKeyword.trim() !== '')
   const [failed, setFailed] = useState(false)
   const [exhausted, setExhausted] = useState(false)
   /** 搜索历史：最近 10 条，存在 localStorage */
@@ -237,7 +244,7 @@ function SearchView({
     exhausted: false
   })
   /** 滚动回调读当前关键词：避免闭包拿到上一次搜索的值 */
-  const keywordRef = useRef('')
+  const keywordRef = useRef(initialKeyword)
 
   const loadPage = useCallback(
     async (page: number, query: string, replace: boolean): Promise<void> => {
@@ -295,6 +302,7 @@ function SearchView({
       const next = raw.trim()
       keywordRef.current = next
       setKeyword(next)
+      onKeywordChange?.(next)
       setItems([])
       setTotal(null)
       setFailed(false)
@@ -318,8 +326,18 @@ function SearchView({
       setLoading(true)
       void loadPage(1, next, true)
     },
-    [loadPage]
+    [loadPage, onKeywordChange]
   )
+
+  // 从控制台 / 设置返回时恢复上次的搜索结果：只在挂载时跑一次，不重复记历史。
+  // 恢复现场要在挂载后补一次请求（先进入加载态），规则按调用点误报，这里显式关闭
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (initialKeyword.trim()) startSearch(initialKeyword)
+  }, [initialKeyword, startSearch])
 
   /** 记一条搜索历史：同一关键词只留一条（忽略大小写），最近的排最前，最多 10 条 */
   const rememberKeyword = useCallback((value: string): void => {

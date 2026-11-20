@@ -3,12 +3,14 @@ import { App, Button, Popconfirm, Progress, Segmented, Spin, Switch, Tooltip } f
 import {
   ArrowLeftOutlined,
   CheckOutlined,
+  CompassOutlined,
   DeleteOutlined,
   HddOutlined,
   InfoCircleOutlined,
   LaptopOutlined,
   MoonOutlined,
   ReloadOutlined,
+  SearchOutlined,
   SettingOutlined,
   SunOutlined,
   ThunderboltOutlined,
@@ -113,6 +115,50 @@ function ToggleRow({
   )
 }
 
+/** 默认首页：启动时直接打开推荐页还是搜索页 */
+function StartViewRow(): React.JSX.Element {
+  const { message } = App.useApp()
+  const [value, setValue] = useState<AppStartView>('home')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    void window.api.settings.get().then((settings) => {
+      if (!alive) return
+      setValue(settings.startView)
+      setLoading(false)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const onChange = (next: string | number): void => {
+    const startView: AppStartView = next === 'search' ? 'search' : 'home'
+    setValue(startView)
+    void window.api.settings.setStartView(startView).then((settings) => {
+      setValue(settings.startView)
+      message.success(
+        `默认首页已设为「${settings.startView === 'search' ? '搜索视频' : '推荐'}」，下次启动生效`
+      )
+    })
+  }
+
+  return (
+    <SettingRow title="默认首页" description="启动映盒剧场时直接打开的页面，下次启动生效">
+      <Segmented
+        value={value}
+        disabled={loading}
+        onChange={onChange}
+        options={[
+          { value: 'home', label: '推荐', icon: <CompassOutlined /> },
+          { value: 'search', label: '搜索视频', icon: <SearchOutlined /> }
+        ]}
+      />
+    </SettingRow>
+  )
+}
+
 function PreferencesPanel(): React.JSX.Element {
   const { mode, setMode, accent, setAccent } = useTheme()
 
@@ -155,6 +201,11 @@ function PreferencesPanel(): React.JSX.Element {
         <SettingRow title="界面语言" description="映盒剧场仅提供简体中文界面">
           <span className="settings-static">简体中文</span>
         </SettingRow>
+      </SettingsCard>
+
+      {/* 默认首页是页面偏好，单独一张卡片，不和开机自启 / 托盘 / 更新混在一起 */}
+      <SettingsCard>
+        <StartViewRow />
       </SettingsCard>
 
       <SettingsCard>

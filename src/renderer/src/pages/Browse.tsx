@@ -80,9 +80,12 @@ function resolveSelection(
  * 滚动到底部自动取下一页。数据只读分类树与视频库，不读首页配置。
  */
 function BrowseView({
-  initialCategoryId
+  initialCategoryId,
+  onCategoryChange
 }: {
   initialCategoryId: string | null
+  /** 用户切换分类时上报当前选中的分类 id（null = 全部），离开再回来时用来恢复 */
+  onCategoryChange?: (categoryId: string | null) => void
 }): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const [categories, setCategories] = useState<VideoCategory[] | null>(null)
@@ -314,18 +317,22 @@ function BrowseView({
     if (selection?.topId === null) return
     scrollToTop()
     setSelection({ topId: null, subId: null })
+    onCategoryChange?.(null)
   }
 
   const selectTop = (topId: string): void => {
     if (selection?.topId === topId && selection.subId === null) return
     scrollToTop()
     setSelection({ topId, subId: null })
+    onCategoryChange?.(topId)
   }
 
   const selectSub = (subId: string | null): void => {
     if (!selection || selection.topId === null || selection.subId === subId) return
     scrollToTop()
     setSelection({ topId: selection.topId, subId })
+    // 选中子分类就记子分类，选回「全部」记大类，回来时都能还原
+    onCategoryChange?.(subId ?? selection.topId)
   }
 
   const retry = (): void => {

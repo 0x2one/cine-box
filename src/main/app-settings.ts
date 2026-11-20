@@ -5,6 +5,9 @@ import { join } from 'path'
 /** 默认全局快捷键：在任何地方唤起 / 隐藏主窗口 */
 export const DEFAULT_SHOW_SHORTCUT = 'Ctrl+Shift+Space'
 
+/** 启动时打开的页面：推荐页（首页）或搜索页 */
+export type AppStartView = 'home' | 'search'
+
 export interface AppSettings {
   /** 开机自启（以操作系统登录项为准） */
   openAtLogin: boolean
@@ -14,6 +17,8 @@ export interface AppSettings {
   autoDownload: boolean
   /** 全局快捷键，空字符串表示未启用 */
   showShortcut: string
+  /** 启动映盒剧场时直接打开的页面 */
+  startView: AppStartView
 }
 
 interface StoreFile {
@@ -22,13 +27,15 @@ interface StoreFile {
   closeToTray?: boolean
   autoDownload?: boolean
   showShortcut?: string
+  startView?: string
 }
 
 const DEFAULTS: AppSettings = {
   openAtLogin: false,
   closeToTray: false,
   autoDownload: true,
-  showShortcut: DEFAULT_SHOW_SHORTCUT
+  showShortcut: DEFAULT_SHOW_SHORTCUT,
+  startView: 'home'
 }
 
 export interface AppSettingsStore {
@@ -38,6 +45,7 @@ export interface AppSettingsStore {
   setCloseToTray: (value: boolean) => AppSettings
   setAutoDownload: (value: boolean) => AppSettings
   setShowShortcut: (value: string | null) => AppSettings
+  setStartView: (value: string | null) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -78,7 +86,8 @@ export function createAppSettingsStore(): AppSettingsStore {
         autoDownload:
           typeof data?.autoDownload === 'boolean' ? data.autoDownload : DEFAULTS.autoDownload,
         showShortcut:
-          typeof data?.showShortcut === 'string' ? data.showShortcut : DEFAULTS.showShortcut
+          typeof data?.showShortcut === 'string' ? data.showShortcut : DEFAULTS.showShortcut,
+        startView: data?.startView === 'search' ? 'search' : 'home'
       }
     } catch {
       settings = { ...DEFAULTS }
@@ -91,7 +100,8 @@ export function createAppSettingsStore(): AppSettingsStore {
       openAtLogin: settings.openAtLogin,
       closeToTray: settings.closeToTray,
       autoDownload: settings.autoDownload,
-      showShortcut: settings.showShortcut
+      showShortcut: settings.showShortcut,
+      startView: settings.startView
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -132,6 +142,11 @@ export function createAppSettingsStore(): AppSettingsStore {
     },
     setShowShortcut: (value: string | null) => {
       settings = { ...settings, showShortcut: typeof value === 'string' ? value.trim() : '' }
+      persist()
+      return snapshot()
+    },
+    setStartView: (value: string | null) => {
+      settings = { ...settings, startView: value === 'search' ? 'search' : 'home' }
       persist()
       return snapshot()
     }

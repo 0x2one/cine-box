@@ -1,10 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+/** 主进程通过 additionalArguments 传入的启动页面，同步读取，首帧就能渲染正确的页面 */
+function readStartView(): AppStartView {
+  return process.argv.includes('--cinebox-start-view=search') ? 'search' : 'home'
+}
+
 // 暴露给渲染进程的自定义 API
 const api = {
   app: {
-    info: (): Promise<AppInfo> => ipcRenderer.invoke('app:info')
+    info: (): Promise<AppInfo> => ipcRenderer.invoke('app:info'),
+    startView: (): AppStartView => readStartView()
   },
   settings: {
     get: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
@@ -17,7 +23,9 @@ const api = {
     setShowShortcut: (value: string | null): Promise<SetShortcutResult> =>
       ipcRenderer.invoke('settings:setShowShortcut', value),
     resetShowShortcut: (): Promise<SetShortcutResult> =>
-      ipcRenderer.invoke('settings:resetShowShortcut')
+      ipcRenderer.invoke('settings:resetShowShortcut'),
+    setStartView: (value: AppStartView): Promise<AppSettings> =>
+      ipcRenderer.invoke('settings:setStartView', value)
   },
   sites: {
     list: (): Promise<Site[]> => ipcRenderer.invoke('sites:list'),

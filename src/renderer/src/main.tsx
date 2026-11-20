@@ -17,7 +17,7 @@ applyStoredAppearance()
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
-      <App />
+      <App startView={window.api.app.startView()} />
     </ThemeProvider>
   </StrictMode>
 )

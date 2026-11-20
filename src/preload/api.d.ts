@@ -21,12 +21,23 @@ interface AppInfo {
   canUpdate: boolean
 }
 
+/** 启动时打开的页面：推荐（首页）或搜索视频 */
+type AppStartView = 'home' | 'search'
+
+interface AppApi {
+  info: () => Promise<AppInfo>
+  /** 启动时打开的页面（主进程通过启动参数传入，同步读取） */
+  startView: () => AppStartView
+}
+
 interface AppSettings {
   openAtLogin: boolean
   closeToTray: boolean
   autoDownload: boolean
   /** 全局快捷键，空字符串表示未启用 */
   showShortcut: string
+  /** 默认首页：启动映盒剧场时打开的页面 */
+  startView: AppStartView
 }
 
 interface SetShortcutResult {
@@ -43,6 +54,8 @@ interface SettingsApi {
   setAutoDownload: (value: boolean) => Promise<AppSettings>
   setShowShortcut: (value: string | null) => Promise<SetShortcutResult>
   resetShowShortcut: () => Promise<SetShortcutResult>
+  /** 设置默认首页，返回保存后的设置；下次启动生效 */
+  setStartView: (value: AppStartView) => Promise<AppSettings>
 }
 
 type SiteFormat = 'xml' | 'json'
@@ -949,7 +962,7 @@ interface UpdaterApi {
 }
 
 interface Api {
-  app: { info: () => Promise<AppInfo> }
+  app: AppApi
   settings: SettingsApi
   sites: SitesApi
   categories: CategoriesApi

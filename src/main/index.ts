@@ -369,7 +369,9 @@ function createWindow(): void {
     icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      // 首屏打开哪一页由主进程在启动时决定，preload 同步读取，避免先渲染推荐页再跳搜索
+      additionalArguments: [`--cinebox-start-view=${appSettingsStore.get().startView}`]
     }
   }
   if (process.platform === 'darwin') {
@@ -503,6 +505,10 @@ ipcMain.handle('settings:resetShowShortcut', () => {
   if (result.ok) appSettingsStore.setShowShortcut(result.shortcut)
   return result
 })
+
+ipcMain.handle('settings:setStartView', (_event, value: string) =>
+  appSettingsStore.setStartView(value)
+)
 
 /* ── IPC：缓存管理 ── */
 
