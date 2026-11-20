@@ -376,9 +376,10 @@
 }
 
 /* ── 初始态底部的推荐位 ──
-   内容来自控制台「推荐 › 搜索推荐」：TOP 按更新时间取前 N 部，自定义只显示人工加进来的。
-   视觉上沿用原来的封面带：海报从页面底色里淡出来、单双张交错半格，悬停才亮起；
-   点一张等于用它的片名发起一次搜索，不跳播放 / 详情。 */
+   片名紧跟封面上方，整张卡片（标题 + 封面）一起单双张交错成波浪；
+   默认压暗，鼠标移上去时整张卡片丝滑地往上托一点并变亮。
+   容器 overflow: hidden 且不留下边距，所以偶数张的封面底部会被盖掉一截——
+   这就是改动前那条封面带的氛围，只是把配置里的片名补在了封面上方。 */
 
 .search-recommend {
   position: relative;
@@ -388,41 +389,79 @@
   gap: 12px;
   justify-content: center;
   width: 100%;
-  /* 底部留出交错那半格，免得偶数张被 overflow 裁掉一截 */
-  padding: 32px 0 12px;
+  padding-top: 32px;
   overflow: hidden;
   user-select: none;
 }
 
-/* 顶部用页面底色盖一层渐变，海报从背景里淡出来；比 mask 更稳，也自动跟随主题 */
-.search-recommend::before {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 2;
-  height: 76px;
-  background: linear-gradient(to bottom, var(--bg), transparent);
-  content: '';
-  pointer-events: none;
-}
-
-/* 一张海报：96 × 144 的 2:3 竖版，默认半透明，悬停 / 键盘聚焦时恢复 */
 .search-recommend-card {
-  flex: 0 0 auto;
-  width: 96px;
+  --stagger: 0px;
+  flex: 0 1 calc((100% - 84px) / 8);
+  min-width: 0;
   padding: 0;
   border: 0;
   background: none;
+  color: inherit;
+  font: inherit;
+  text-align: center;
   cursor: pointer;
-  opacity: 0.56;
-  transition: opacity 0.18s ease;
 }
 
 .search-recommend-card:nth-child(even) {
-  transform: translateY(12px);
+  --stagger: 12px;
 }
 
-.search-recommend-card:hover,
-.search-recommend-card:focus-visible {
+/* 标题和封面作为一个整体一起交错 / 抬起，波浪才是完整的 */
+.search-recommend-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transform: translateY(var(--stagger));
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.search-recommend-card:hover .search-recommend-inner,
+.search-recommend-card:focus-visible .search-recommend-inner {
+  transform: translateY(calc(var(--stagger) - 8px));
+}
+
+/* 标题紧跟封面，固定一行；窄窗口下省略，完整片名在 title 里 */
+.search-recommend-title {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+  transition:
+    color 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.search-recommend-poster {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  box-shadow: 0 12px 26px rgb(8 12 18 / 12%);
+  opacity: 0.56;
+  transition:
+    box-shadow 0.28s ease,
+    opacity 0.22s ease;
+}
+
+.search-recommend-card:hover .search-recommend-poster,
+.search-recommend-card:focus-visible .search-recommend-poster {
+  box-shadow: 0 18px 34px rgb(8 12 18 / 20%);
+  opacity: 1;
+}
+
+.search-recommend-card:hover .search-recommend-title,
+.search-recommend-card:focus-visible .search-recommend-title {
+  color: var(--text);
   opacity: 1;
 }
 
@@ -430,28 +469,9 @@
   outline: none;
 }
 
-.search-recommend-poster {
-  position: relative;
-  display: block;
-  width: 100%;
-  aspect-ratio: 2 / 3;
-  overflow: hidden;
-  border-radius: 10px;
-  background: var(--surface-muted);
-  box-shadow: 0 12px 26px rgb(8 12 18 / 12%);
-  transition: box-shadow 0.18s ease;
-}
-
-.search-recommend-card:hover .search-recommend-poster,
 .search-recommend-card:focus-visible .search-recommend-poster {
-  box-shadow: 0 16px 32px rgb(8 12 18 / 18%);
-}
-
-/* 占位首字比首页卡片小一档：卡片只有 96px 宽 */
-.search-recommend-poster .home-picture-letter {
-  color: var(--text-faint);
-  font-size: 20px;
-  font-weight: 600;
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
 }
 
 /* ── 结果列表 ── */
@@ -763,14 +783,6 @@
     max-width: 170px;
   }
 
-  .search-recommend {
-    gap: 10px;
-  }
-
-  .search-recommend-card {
-    width: 84px;
-  }
-
   .search-form.is-hero .search-form-submit.ant-btn {
     min-width: 72px;
   }
@@ -787,8 +799,15 @@
   .search-cat,
   .search-history-item,
   .search-history-clear,
-  .search-recommend-card,
+  .search-recommend-inner,
+  .search-recommend-title,
   .search-recommend-poster {
     transition: none;
+  }
+
+  /* 不做位移，只保留变亮，避免前庭敏感用户被突然的弹动影响 */
+  .search-recommend-card:hover .search-recommend-inner,
+  .search-recommend-card:focus-visible .search-recommend-inner {
+    transform: translateY(var(--stagger));
   }
 }

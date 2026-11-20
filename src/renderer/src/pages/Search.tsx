@@ -597,7 +597,7 @@ function SearchView({
               )}
             </div>
 
-            {/* 底部推荐位只是氛围：海报从背景里淡出来，悬停才亮起；点一张直接搜片名 */}
+            {/* 底部推荐位：片名紧跟封面上方，整张卡片波浪交错，悬停时丝滑上托 */}
             {recommendItems.length > 0 && (
               <section className="search-recommend" aria-label="推荐视频">
                 {recommendItems.map((item) => (
@@ -605,7 +605,6 @@ function SearchView({
                     key={item.videoId}
                     type="button"
                     className="search-recommend-card"
-                    title={`${item.title} · 搜索这部片`}
                     aria-label={`搜索：${item.title}`}
                     onClick={() => {
                       const term = (item.videoName || item.title).trim()
@@ -614,9 +613,14 @@ function SearchView({
                       runSearch(term)
                     }}
                   >
-                    <div className="search-recommend-poster">
-                      {/* 与控制台预览共用一套裁剪坐标：自定义图片按取景框显示 */}
-                      <HomePicture item={item} />
+                    <div className="search-recommend-inner">
+                      <span className="search-recommend-title" title={item.title}>
+                        {item.title}
+                      </span>
+                      <div className="search-recommend-poster">
+                        {/* 与控制台预览共用一套裁剪坐标：自定义图片按取景框显示 */}
+                        <HomePicture item={item} />
+                      </div>
                     </div>
                   </button>
                 ))}

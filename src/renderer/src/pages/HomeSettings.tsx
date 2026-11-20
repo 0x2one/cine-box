@@ -41,6 +41,8 @@ import HomePicture from '../components/HomePicture'
 const HERO_RATIO = 2.34
 /** 分类轨道的封面比例，和推荐页卡片一致 */
 const CARD_RATIO = 2 / 3
+/** 搜索页底部推荐位：展示端是 3:4 的竖版，裁剪器也按这个比例取景 */
+const SEARCH_CARD_RATIO = 3 / 4
 
 /** 两个 tab 的说明：放在标题行右侧，超长省略，悬停看全文 */
 const POSTER_HINT =
@@ -48,7 +50,7 @@ const POSTER_HINT =
 const SECTION_HINT =
   '每个一级分类对应推荐页上的一条轨道。自定义用「视频」页的「推荐」按钮加片；TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
 const SEARCH_HINT =
-  '搜索页初始状态底部的一排海报，默认按更新时间取前 8 部。自定义同样用「视频」页的「推荐」按钮加片；两种规则都能排序、移除、隐藏、改图。'
+  '搜索页初始状态底部的一排带片名海报，默认按更新时间取前 8 部。自定义同样用「视频」页的「推荐」按钮加片；两种规则都能排序、移除、隐藏、改图。'
 
 const HOME_ERRORS: Record<string, string> = {
   NOT_FOUND: '条目已不存在，刷新后再试',
@@ -1497,7 +1499,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
               <HomeItemCard
                 key={item.videoId}
                 item={item}
-                ratio={CARD_RATIO}
+                ratio={SEARCH_CARD_RATIO}
                 index={index}
                 total={search.items.length}
                 removeTitle={
@@ -1508,7 +1510,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                 hideLabel="搜索页"
                 onMove={(delta) => moveSearchItem(item.videoId, delta)}
                 onEdit={() =>
-                  setEditor({ kind: 'search', categoryId: '', ratio: CARD_RATIO, item })
+                  setEditor({ kind: 'search', categoryId: '', ratio: SEARCH_CARD_RATIO, item })
                 }
                 onToggleHidden={() =>
                   void act(
