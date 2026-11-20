@@ -802,6 +802,49 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     return { sources, videos: videoIds.length }
   }
 
+  /**
+   * 列表总数的轻量算法：有分类过滤时直接数 `video_sources` 里命中的来源视频 id（去重），
+   * 不扫整张 `videos` 表。`COUNT(*)` 那版每条过滤都要全表扫 + 逐行 EXISTS（十几万条时
+   * 一条 200ms 上下，过滤条件越多越慢）；这里只碰命中的来源行——单个大类最慢 100ms，
+   * 大部分分类在 25ms 以内，没有分类过滤时只数 videos 表（几毫秒）。
+   * 结果与 `COUNT(*)` 版一致：列表的 WHERE 是「分类命中 + 隐藏过滤」，而「主来源必须存在」
+   * 那层 JOIN 在正常库里恒真（`recomputeVideo` 保证 videos 一定有来源、主来源 id 有效）。
+   * 关键词检索走 FTS，不在这个范围里，仍按完整条件数（见 `listVideos`）。
+   */
+  function countVideos(
+    connection: DatabaseSync,
+    filters: { siteId: string; categoryId: string }[] | undefined,
+    visibility: 'all' | 'shown' | 'hidden'
+  ): number {
+    if (filters && filters.length > 0) {
+      const hiddenSql =
+        visibility === 'shown'
+          ? 'AND video_id NOT IN (SELECT video_id FROM video_edits WHERE hidden = 1)'
+          : visibility === 'hidden'
+            ? 'AND video_id IN (SELECT video_id FROM video_edits WHERE hidden = 1)'
+            : ''
+      const clauses = filters.map(() => '(site_id = ? AND category_id = ?)').join(' OR ')
+      const params: string[] = []
+      for (const filter of filters) params.push(filter.siteId, filter.categoryId)
+      const counted = connection
+        .prepare(
+          `SELECT COUNT(DISTINCT video_id) AS n FROM video_sources WHERE (${clauses}) ${hiddenSql}`
+        )
+        .get(...params) as Record<string, unknown> | undefined
+      return num(counted?.n)
+    }
+    const hiddenSql =
+      visibility === 'shown'
+        ? 'AND id NOT IN (SELECT video_id FROM video_edits WHERE hidden = 1)'
+        : visibility === 'hidden'
+          ? 'AND id IN (SELECT video_id FROM video_edits WHERE hidden = 1)'
+          : ''
+    const counted = connection
+      .prepare(`SELECT COUNT(*) AS n FROM videos WHERE 1 = 1 ${hiddenSql}`)
+      .get() as Record<string, unknown> | undefined
+    return num(counted?.n)
+  }
+
   function listVideos(
     query: VideoListQuery,
     categoryFilters?: { siteId: string; categoryId: string }[]
@@ -847,14 +890,16 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
         string,
         unknown
       >[]
-      // 不看总数的调用方（首页轨道）跳过这条 COUNT：它要扫一整张 videos 表，
-      // 十几万条时比取数本身贵两个数量级
+      // 调用方不看总数时跳过统计；有关键词时走 FTS 的完整条件，
+      // 其余情况用只碰来源行的轻量数法（见 countVideos）
       if (query.withTotal === false) {
         total = 0
-      } else {
+      } else if (keyword) {
         const counted = connection.prepare(`SELECT COUNT(*) AS n ${from}`).get(...params) as
           Record<string, unknown> | undefined
         total = num(counted?.n)
+      } else {
+        total = countVideos(connection, categoryFilters, visibility)
       }
     } catch {
       // FTS 语法错误 / 索引异常时返回空，而不是把异常抛给渲染层

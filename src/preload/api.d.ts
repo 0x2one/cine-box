@@ -640,6 +640,11 @@ interface VideoListQuery {
   page?: number
   pageSize?: number
   visibility?: 'all' | 'shown' | 'hidden'
+  /**
+   * 是否需要总数。默认 true；分页取第 2 页及以后时传 false，省掉一次统计，
+   * 此时返回的 total 为 0，不要拿它覆盖已经知道的总数。
+   */
+  withTotal?: boolean
 }
 
 interface VideoListItem {

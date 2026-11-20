@@ -3,7 +3,6 @@ import { Button, Spin } from 'antd'
 import { ArrowUpOutlined } from '@ant-design/icons'
 import VideoCard from '../components/VideoCard'
 import { visibleCategoryIds } from '../lib/category-tree'
-import { formatCount } from '../utils/format'
 import '../assets/browse.css'
 
 /** 每页条数：缓存库单页上限 100，按设计文档的默认 30 取 */
@@ -93,7 +92,6 @@ function BrowseView({
   const [reloadToken, setReloadToken] = useState(0)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [items, setItems] = useState<VideoListItem[]>([])
-  const [total, setTotal] = useState<number | null>(null)
   /** 当前 items 属于哪个分类：和选中分类不一致时先显示加载态，避免闪一下上一类的卡片 */
   const [loadedFilter, setLoadedFilter] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -189,7 +187,14 @@ function BrowseView({
       setLoading(true)
       setFailed(false)
       try {
-        const query: VideoListQuery = { page, pageSize: PAGE_SIZE, visibility: 'shown' }
+        // 不要总数：这一版又长又贵（「全部」要数九万多部、一百多毫秒），
+        // 列表本身只要几毫秒就能返回，翻到底用「这一页不满」判断
+        const query: VideoListQuery = {
+          page,
+          pageSize: PAGE_SIZE,
+          visibility: 'shown',
+          withTotal: false
+        }
         if (target.categoryId) query.categoryId = target.categoryId
         if (target.categoryIds) query.categoryIds = target.categoryIds
         const result = await window.api.videos.list(query)
@@ -206,10 +211,9 @@ function BrowseView({
           const seen = new Set(previous.map((item) => item.id))
           return [...previous, ...result.items.filter((item) => !seen.has(item.id))]
         })
-        setTotal(result.total)
         setLoadedFilter(target.key)
         guard.current.page = page + 1
-        const last = result.items.length < PAGE_SIZE || page * PAGE_SIZE >= result.total
+        const last = result.items.length < PAGE_SIZE
         guard.current.exhausted = last
         setExhausted(last)
       } catch {
@@ -239,7 +243,6 @@ function BrowseView({
         exhausted: false
       }
       setItems([])
-      setTotal(null)
       setLoading(true)
       setFailed(false)
       setExhausted(false)
@@ -271,7 +274,7 @@ function BrowseView({
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => maybeLoadMore())
     return () => window.cancelAnimationFrame(frame)
-  }, [maybeLoadMore, items.length, loading, total, failed, exhausted])
+  }, [maybeLoadMore, items.length, loading, failed, exhausted])
 
   // 头部吸顶收缩 + 滚动加载共用页面滚动事件（.page 才是滚动容器）
   useEffect(() => {
@@ -373,11 +376,6 @@ function BrowseView({
                 '视频库'
               )}
             </h1>
-            {total !== null && (
-              <span className="browse-count">
-                共 <b>{formatCount(total)}</b> 部
-              </span>
-            )}
           </div>
 
           {tops.length > 0 && (
