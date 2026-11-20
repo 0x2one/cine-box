@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
-import {
-  ArrowRightOutlined,
-  ArrowUpOutlined,
-  LeftOutlined,
-  RightOutlined,
-  SearchOutlined
-} from '@ant-design/icons'
+import { ArrowUpOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons'
 import HomePicture from '../components/HomePicture'
 import VideoCard from '../components/VideoCard'
-import { visibleCategoryIds } from '../lib/category-tree'
-import { formatCount, formatShortDateTime } from '../utils/format'
+import { formatCount } from '../utils/format'
 import '../assets/home.css'
 
 /** 叠层槽位：向右叠，露出的宽度越来越少（30 / 14 / 11 / 9 / 8） */
@@ -25,6 +18,21 @@ const SLOTS = [
 const AUTOPLAY_MS = 7000
 /** 叠层拖动超过这个距离才算翻页，太短就当作没拖 */
 const HERO_DRAG = 64
+
+/** 底部最新列表：一页 30 条，和「找片看」用同一套卡片 */
+const LATEST_PAGE_SIZE = 30
+/** 左上角跑马灯占的 TOP 条数：这几部不再进入下方列表 */
+const LATEST_LEAD = 5
+/** 跑马灯每部停留时长 */
+const LATEST_LEAD_MS = 3600
+/** 跑马灯左右拖动超过这个距离才翻页 */
+const LATEST_SWIPE = 40
+/** 距底部这么多像素就取下一页 */
+const LATEST_LOAD_AHEAD = 600
+/** 滚过这么多像素浮出「回到顶部」 */
+const LATEST_BACK_TOP_AT = 600
+/** 没有自定义裁剪时按 cover 铺满，和 VideoCard 保持一致 */
+const FULL_CROP: HomeCrop = { x: 0, y: 0, w: 1, h: 1 }
 
 /**
  * 一个分类轨道：头部两个箭头控制横向滚动。
@@ -267,94 +275,366 @@ function HomeRail({
 }
 
 /**
- * 推荐页收尾：最后一条轨道下面不再是空白，补一块片库速览。
- * 只放只读统计和三个入口，统计读不到就退化成文案 + 按钮。
+ * 推荐页底部：按更新时间倒序的整库列表，卡片与「找片看」一致，滚到底自动取下一页。
+ * 左上角第一格是最新 5 部的跑马灯：两行三列的大图，封面左右铺满、上下取中间，
+ * 信息压在图上（底部深色过渡），支持左右拖动切换；这 5 部不再进入下方列表。
  */
-function HomeFooter({
-  stats,
-  categoryCount,
-  onOpenSearch,
-  onOpenAll,
-  onBackTop
-}: {
-  stats: VideoStats | null
-  categoryCount: number | null
-  onOpenSearch: () => void
-  onOpenAll: () => void
-  onBackTop: () => void
-}): React.JSX.Element {
+function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.Element {
+  const rootRef = useRef<HTMLElement>(null)
+  const [items, setItems] = useState<VideoListItem[]>([])
+  const [total, setTotal] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  const [exhausted, setExhausted] = useState(false)
+  const [leadIndex, setLeadIndex] = useState(0)
+  const [leadPaused, setLeadPaused] = useState(false)
+  const [showBackTop, setShowBackTop] = useState(false)
+  /** 滚动回调要读的可变状态：放在 ref 里，避免闭包拿到过期的 page / loading */
+  const guard = useRef({ page: 1, loading: true, failed: false, exhausted: false })
+  const startedRef = useRef(false)
+
+  const load = useCallback(async (page: number, replace: boolean): Promise<void> => {
+    guard.current.loading = true
+    setLoading(true)
+    setFailed(false)
+    try {
+      const result = await window.api.videos.list({
+        page,
+        pageSize: LATEST_PAGE_SIZE,
+        visibility: 'shown'
+      })
+      if (!result.ok) {
+        guard.current.failed = true
+        setFailed(true)
+        return
+      }
+      setItems((previous) => {
+        if (replace) return result.items
+        // 采集 / 隐藏会让 offset 分页错位，按视频 id 去重，避免重复卡片
+        const seen = new Set(previous.map((item) => item.id))
+        return [...previous, ...result.items.filter((item) => !seen.has(item.id))]
+      })
+      setTotal(result.total)
+      guard.current.page = page + 1
+      const last = result.items.length < LATEST_PAGE_SIZE || page * LATEST_PAGE_SIZE >= result.total
+      guard.current.exhausted = last
+      setExhausted(last)
+    } catch {
+      guard.current.failed = true
+      setFailed(true)
+    } finally {
+      guard.current.loading = false
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    // StrictMode 下 effect 会执行两次，这里只让首次挂载真正请求
+    if (startedRef.current) return
+    startedRef.current = true
+    void load(1, true)
+  }, [load])
+
+  /** 距离底部不到 LATEST_LOAD_AHEAD 且还有下一页时继续取 */
+  const maybeLoadMore = useCallback((): void => {
+    const state = guard.current
+    if (state.loading || state.failed || state.exhausted) return
+    const page = rootRef.current?.closest('.page') as HTMLElement | null
+    if (!page) return
+    if (page.scrollHeight - page.scrollTop - page.clientHeight > LATEST_LOAD_AHEAD) return
+    void load(state.page, false)
+  }, [load])
+
+  // 一页填不满窗口时接着取，否则要等用户再滚一下才会触发
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => maybeLoadMore())
+    return () => window.cancelAnimationFrame(frame)
+  }, [maybeLoadMore, items.length, loading, total, failed, exhausted])
+
+  // 滚动加载 + 回到顶部共用页面滚动事件（.page 才是滚动容器）
+  useEffect(() => {
+    const page = rootRef.current?.closest('.page') as HTMLElement | null
+    if (!page) return
+    let frame = 0
+    const sync = (): void => {
+      setShowBackTop(page.scrollTop > LATEST_BACK_TOP_AT)
+      maybeLoadMore()
+    }
+    const onScroll = (): void => {
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        sync()
+      })
+    }
+    page.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      page.removeEventListener('scroll', onScroll)
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [maybeLoadMore])
+
+  const lead = items.slice(0, LATEST_LEAD)
+  const rest = items.slice(LATEST_LEAD)
+  const leadCount = lead.length
+  const activeLead = leadCount > 0 ? lead[leadIndex % leadCount] : null
+
+  /** 跑马灯拖动切换：往左拖看下一部，往右拖回上一部 */
+  const leadDrag = useRef<{ id: number; x: number; captured: boolean } | null>(null)
+  const [leadDragging, setLeadDragging] = useState(false)
+
+  const goLead = (target: number): void => {
+    if (leadCount < 2) return
+    setLeadIndex(((target % leadCount) + leadCount) % leadCount)
+  }
+
+  const onLeadPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    if (leadCount < 2) return
+    leadDrag.current = { id: event.pointerId, x: event.clientX, captured: false }
+  }
+
+  const onLeadPointerMove = (event: React.PointerEvent<HTMLElement>): void => {
+    const state = leadDrag.current
+    if (!state || state.id !== event.pointerId) return
+    // 移动超过一点再捕获指针：圆点的 click 不会被抢走，单纯点一下也不会暂停轮播
+    if (!state.captured && Math.abs(event.clientX - state.x) > 8) {
+      state.captured = true
+      setLeadDragging(true)
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+  }
+
+  const endLeadDrag = (event: React.PointerEvent<HTMLElement>, apply: boolean): void => {
+    const state = leadDrag.current
+    leadDrag.current = null
+    setLeadDragging(false)
+    if (!state || state.id !== event.pointerId) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (!apply) return
+    const dx = event.clientX - state.x
+    if (Math.abs(dx) < LATEST_SWIPE) return
+    goLead(leadIndex + (dx < 0 ? 1 : -1))
+  }
+
+  // 跑马灯自动轮播：悬停 / 聚焦 / 拖动时暂停；系统要求减少动效时不自动播
+  useEffect(() => {
+    if (leadCount < 2 || leadPaused || leadDragging) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const timer = window.setInterval(() => {
+      if (!document.hidden) setLeadIndex((index) => (index + 1) % leadCount)
+    }, LATEST_LEAD_MS)
+    return () => window.clearInterval(timer)
+  }, [leadCount, leadPaused, leadDragging])
+
+  const retry = (): void => {
+    const state = guard.current
+    if (state.loading) return
+    state.failed = false
+    setFailed(false)
+    void load(state.page, items.length === 0)
+  }
+
+  const backToTop = (): void => {
+    const page = rootRef.current?.closest('.page') as HTMLElement | null
+    if (!page) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    page.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' })
+  }
+
+  /** 压在大图上的小字：note + 类型 + 更新日期 */
+  const leadMeta = activeLead
+    ? [
+        activeLead.note,
+        activeLead.vodClass.split(',')[0]?.trim(),
+        activeLead.latestTime ? `更新 ${activeLead.latestTime.split(' ')[0]}` : ''
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : ''
+
   return (
-    <footer className="home-footer">
-      <div className="home-footer-main">
-        <div className="home-footer-copy">
-          <p className="home-footer-eyebrow">片库速览</p>
-          <h2 className="home-footer-title">从片库里继续找</h2>
-          <p className="home-footer-desc">本地缓存 · 按更新时间排序</p>
-        </div>
-        <div className="home-footer-actions">
-          <button type="button" className="home-footer-primary" onClick={onOpenSearch}>
-            <SearchOutlined />
-            搜索片库
-          </button>
-          <button type="button" className="home-footer-ghost" onClick={onOpenAll}>
-            浏览全部视频
-            <ArrowRightOutlined />
-          </button>
+    <section className="home-latest" ref={rootRef} aria-label="最新收录">
+      <div className="home-section-head">
+        <h2 className="home-section-title">最新收录</h2>
+        {total !== null && <span className="home-section-count">共 {formatCount(total)} 部</span>}
+        <div className="home-section-tools">
           <button
             type="button"
-            className="home-footer-top"
-            aria-label="回到顶部"
-            title="回到顶部"
-            onClick={onBackTop}
+            className="home-section-more"
+            title="在列表页浏览全部视频"
+            onClick={onOpenBrowse}
           >
-            <ArrowUpOutlined />
+            全部视频
           </button>
         </div>
       </div>
 
-      {(stats || categoryCount !== null) && (
-        <div className="home-footer-stats">
-          {stats && (
-            <div className="home-footer-stat">
-              <b>{formatCount(stats.videoCount)}</b>
-              <span>部视频</span>
-            </div>
-          )}
-          {stats && (
-            <div className="home-footer-stat">
-              <b>{formatCount(stats.sourceCount)}</b>
-              <span>个来源</span>
-            </div>
-          )}
-          {categoryCount !== null && (
-            <div className="home-footer-stat">
-              <b>{formatCount(categoryCount)}</b>
-              <span>个分类</span>
-            </div>
-          )}
-          {stats?.lastCollectedAt && (
-            <span className="home-footer-stamp">
-              最近采集 {formatShortDateTime(stats.lastCollectedAt)}
-            </span>
-          )}
-        </div>
+      {items.length === 0 ? (
+        failed ? (
+          <div className="home-latest-empty">
+            <span>最新视频读取失败</span>
+            <Button type="link" size="small" onClick={retry}>
+              重试
+            </Button>
+          </div>
+        ) : loading ? (
+          <div className="home-loading">
+            <Spin />
+          </div>
+        ) : (
+          <div className="home-latest-empty">
+            <span>片库里还没有可展示的视频</span>
+          </div>
+        )
+      ) : (
+        <>
+          <div className="home-latest-grid">
+            {activeLead && (
+              <article
+                className={`home-latest-lead${leadDragging ? ' is-dragging' : ''}`}
+                aria-roledescription="carousel"
+                aria-label={`最新 ${leadCount} 部`}
+                onPointerEnter={() => setLeadPaused(true)}
+                onPointerLeave={() => setLeadPaused(false)}
+                onFocus={(event) => {
+                  // 只有键盘聚焦才暂停：鼠标点圆点也会聚焦，不能让它一直停在那里
+                  const target = event.target
+                  if (target instanceof HTMLElement && target.matches(':focus-visible')) {
+                    setLeadPaused(true)
+                  }
+                }}
+                onBlur={() => setLeadPaused(false)}
+                onPointerDown={onLeadPointerDown}
+                onPointerMove={onLeadPointerMove}
+                onPointerUp={(event) => endLeadDrag(event, true)}
+                onPointerCancel={(event) => endLeadDrag(event, false)}
+                onDragStart={(event) => event.preventDefault()}
+              >
+                <div className="home-latest-media">
+                  {lead.map((item, index) => (
+                    <div
+                      key={item.id}
+                      className={`home-latest-slide${
+                        index === leadIndex % leadCount ? ' is-active' : ''
+                      }`}
+                      aria-hidden={index !== leadIndex % leadCount}
+                    >
+                      {item.pic && (
+                        <img
+                          className="home-latest-blur"
+                          src={item.pic}
+                          alt=""
+                          aria-hidden="true"
+                          draggable={false}
+                          loading={index === 0 ? 'eager' : 'lazy'}
+                          decoding="async"
+                          referrerPolicy="no-referrer"
+                          onError={(event) => {
+                            event.currentTarget.style.visibility = 'hidden'
+                          }}
+                        />
+                      )}
+                      <HomePicture
+                        item={{
+                          pic: item.pic,
+                          crop: FULL_CROP,
+                          customPic: false,
+                          title: item.name
+                        }}
+                        eager={index === 0}
+                      />
+                    </div>
+                  ))}
+                  <span className="home-latest-shade" aria-hidden="true" />
+                  <span className="home-latest-flag">TOP {leadCount}</span>
+                  {leadCount > 1 && (
+                    <div className="home-latest-dots">
+                      {lead.map((item, index) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`home-latest-dot${
+                            index === leadIndex % leadCount ? ' is-active' : ''
+                          }`}
+                          aria-label={`第 ${index + 1} 部：${item.name}`}
+                          aria-current={index === leadIndex % leadCount ? 'true' : undefined}
+                          onClick={() => setLeadIndex(index)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="home-latest-copy" key={activeLead.id}>
+                  <p className="home-latest-meta">{leadMeta}</p>
+                  <h3 className="home-latest-title" title={activeLead.name}>
+                    {activeLead.name}
+                  </h3>
+                  <p className="home-latest-sub">
+                    {activeLead.introExcerpt ||
+                      (activeLead.vodActor ? `主演 ${activeLead.vodActor}` : '')}
+                  </p>
+                </div>
+              </article>
+            )}
+
+            {rest.map((item) => (
+              <VideoCard
+                key={item.id}
+                title={item.name}
+                pic={item.pic}
+                note={item.note}
+                intro={item.introExcerpt}
+                actors={item.vodActor}
+                latestTime={item.latestTime}
+              />
+            ))}
+          </div>
+
+          <div className="home-latest-footer">
+            {failed ? (
+              <Button type="link" onClick={retry}>
+                加载失败，点击重试
+              </Button>
+            ) : loading ? (
+              <>
+                <Spin size="small" />
+                <span>正在加载…</span>
+              </>
+            ) : exhausted ? (
+              <span>{rest.length > 0 ? '已经全部加载' : ''}</span>
+            ) : null}
+          </div>
+        </>
       )}
-    </footer>
+
+      <button
+        type="button"
+        className={`home-backtop${showBackTop ? '' : ' is-hidden'}`}
+        aria-label="回到顶部"
+        title="回到顶部"
+        tabIndex={showBackTop ? 0 : -1}
+        onClick={backToTop}
+      >
+        <ArrowUpOutlined />
+      </button>
+    </section>
   )
 }
 
 /**
- * 推荐页：海报叠层（宽图铺满、右侧露边、循环翻页）+ 按一级分类的推荐轨道。
+ * 推荐页：海报叠层（宽图铺满、右侧露边、循环翻页）+ 按一级分类的推荐轨道，
+ * 末尾是按更新时间倒序的整库列表（左上角第一格是最新 5 部的跑马灯）。
  * 暂时不做播放 / 详情页，卡片和海报只展示；分类标题和「全部」跳到视频列表页。
  */
 function HomeView({
   onOpenConsole,
-  onOpenBrowse,
-  onOpenSearch
+  onOpenBrowse
 }: {
   onOpenConsole: () => void
   onOpenBrowse: (categoryId: string | null) => void
-  onOpenSearch: () => void
 }): React.JSX.Element {
   const [feed, setFeed] = useState<HomeFeed | null>(null)
   const [loading, setLoading] = useState(true)
@@ -362,10 +642,6 @@ function HomeView({
   const [index, setIndex] = useState(0)
   const [swapping, setSwapping] = useState(false)
   const [paused, setPaused] = useState(false)
-  /** 页脚用的只读统计：读失败就不显示对应数字，不影响推荐本身 */
-  const [stats, setStats] = useState<VideoStats | null>(null)
-  const [categoryCount, setCategoryCount] = useState<number | null>(null)
-  const viewRef = useRef<HTMLDivElement>(null)
   const swapTimer = useRef(0)
 
   const load = useCallback(async (): Promise<void> => {
@@ -390,39 +666,6 @@ function HomeView({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
-
-  // 页脚统计：视频数 / 来源数 / 可见分类数，读失败就少显示一块
-  useEffect(() => {
-    let cancelled = false
-    window.api.videos
-      .stats()
-      .then((value) => {
-        if (!cancelled) setStats(value)
-      })
-      .catch(() => {
-        // 统计失败时页脚只保留文案和入口
-      })
-    window.api.categories
-      .list()
-      .then((rows) => {
-        if (cancelled) return
-        const visible = visibleCategoryIds(rows)
-        setCategoryCount(rows.filter((row) => visible.has(row.id)).length)
-      })
-      .catch(() => {
-        // 分类读不到就不显示分类数
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const backToTop = (): void => {
-    const page = viewRef.current?.closest('.page') as HTMLElement | null
-    if (!page) return
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    page.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' })
-  }
 
   useEffect(
     () => () => {
@@ -589,7 +832,7 @@ function HomeView({
     : []
 
   return (
-    <div className="home-view" ref={viewRef}>
+    <div className="home-view">
       {loading ? (
         <div className="home-loading">
           <Spin />
@@ -703,16 +946,8 @@ function HomeView({
             />
           ))}
 
-          {/* 最后一条轨道下面用片库速览收尾 */}
-          {hasContent && (
-            <HomeFooter
-              stats={stats}
-              categoryCount={categoryCount}
-              onOpenSearch={onOpenSearch}
-              onOpenAll={() => onOpenBrowse(null)}
-              onBackTop={backToTop}
-            />
-          )}
+          {/* 最后一条轨道下面按更新时间倒序继续往下翻，第一格是最新 5 部的跑马灯 */}
+          {hasContent && <HomeLatest onOpenBrowse={() => onOpenBrowse(null)} />}
 
           {!hasContent && (
             <div className="home-empty-state">

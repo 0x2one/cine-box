@@ -64,11 +64,7 @@ function App({ startView = 'home' }: { startView?: AppStartView }): React.JSX.El
         {/* key 保证切换页面时重放一次轻微的淡入 */}
         <div className="page" key={view}>
           {view === 'home' && (
-            <HomeView
-              onOpenConsole={() => setView('console')}
-              onOpenBrowse={openBrowse}
-              onOpenSearch={() => navigate('search')}
-            />
+            <HomeView onOpenConsole={() => setView('console')} onOpenBrowse={openBrowse} />
           )}
           {view === 'browse' && (
             <BrowseView

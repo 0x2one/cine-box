@@ -504,211 +504,270 @@
   place-items: center;
 }
 
-/* ── 页脚：片库速览 ──
-   最后一条轨道下面不再直接露出页面底色；统计读不到时只留文案和入口。 */
+/* ── 最新收录：按更新时间倒序的整库列表 ──
+   卡片和「找片看」共用 .home-item 一套，左上角第一格是最新 5 部的跑马灯。 */
 
-.home-footer {
-  position: relative;
-  overflow: hidden;
-  margin-top: 58px;
-  padding: 28px 32px 20px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background:
-    radial-gradient(
-      120% 160% at 100% 0%,
-      color-mix(in srgb, var(--accent) 9%, transparent),
-      transparent 56%
-    ),
-    var(--surface);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
+.home-latest {
+  margin-top: 42px;
 }
 
-/* 背景大字水印：压到几乎看不见，只负责收尾的层次 */
-.home-footer::before {
+.home-latest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(146px, 1fr));
+  gap: 24px 14px;
+}
+
+/* 跑马灯：占两行三列的大图，封面左右铺满、上下取中间，信息压在图上；可左右拖动切换 */
+.home-latest-lead {
+  position: relative;
+  min-width: 0;
+  min-height: 520px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface-muted);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+  grid-column: span 3;
+  grid-row: span 2;
+}
+
+.home-latest-lead.is-dragging {
+  cursor: grabbing;
+}
+
+.home-latest-media {
   position: absolute;
-  right: 28px;
-  bottom: -20px;
-  color: color-mix(in srgb, var(--text) 3.5%, transparent);
-  font-family: var(--font-display);
-  font-size: 104px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  content: '映盒剧场';
+  inset: 0;
+  overflow: hidden;
+}
+
+.home-latest-slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.home-latest-slide.is-active {
+  opacity: 1;
+}
+
+/* 虚化补底层：同一张封面放大铺满，横版封面留白或换页时垫在下面 */
+.home-latest-blur {
+  position: absolute;
+  top: -12%;
+  left: -12%;
+  width: 124%;
+  height: 124%;
+  object-fit: cover;
+  filter: blur(30px) brightness(0.48) saturate(1.15);
   pointer-events: none;
+}
+
+/* 前景：宽度铺满，高度按原比例，超出的上下部分裁掉，只留中间 */
+.home-latest-slide .home-picture img {
+  inset: auto;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  transform: translateY(-50%);
+  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.25, 1);
+}
+
+.home-latest-lead:hover .home-latest-slide.is-active .home-picture img {
+  transform: translateY(-50%) scale(1.02);
+}
+
+/* 底部深色过渡，保证压在图上的片名 / note 清晰 */
+.home-latest-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to top,
+    rgb(0 0 0 / 88%) 0%,
+    rgb(0 0 0 / 62%) 22%,
+    rgb(0 0 0 / 24%) 44%,
+    transparent 66%
+  );
+  pointer-events: none;
+}
+
+/* 左上角标出 TOP 5，右上角是切换点 */
+.home-latest-flag {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 42%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.6;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.home-latest-dots {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 28%);
+  backdrop-filter: blur(6px);
+}
+
+.home-latest-dot {
+  width: 5px;
+  height: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 45%);
+  cursor: pointer;
+  transition:
+    width 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.home-latest-dot:hover {
+  background: rgb(255 255 255 / 75%);
+}
+
+.home-latest-dot.is-active {
+  width: 12px;
+  background: #fff;
+}
+
+/* 压在图上的文字：note / 类型 · 更新日期 / 片名 / 简介或主演 */
+.home-latest-copy {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  left: 18px;
+  z-index: 2;
+  animation: home-latest-copy-in 0.32s ease;
+}
+
+.home-latest-meta {
+  overflow: hidden;
+  margin: 0;
+  color: rgb(255 255 255 / 72%);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 底部一条断续的「胶片孔」装饰 */
-.home-footer::after {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 5px;
-  background: repeating-linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--text) 7%, transparent) 0 16px,
-    transparent 16px 32px
-  );
-  content: '';
-  opacity: 0.55;
-  pointer-events: none;
-}
-
-.home-footer-main {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  gap: 32px;
-  align-items: flex-end;
-  justify-content: space-between;
-}
-
-.home-footer-copy {
-  min-width: 0;
-}
-
-.home-footer-eyebrow {
-  margin: 0;
-  color: var(--accent);
-  font-size: 11px;
-  letter-spacing: 0.16em;
-}
-
-.home-footer-title {
-  margin: 7px 0 0;
-  color: var(--text);
+.home-latest-title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 6px 0 0;
+  color: #fff;
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 23px;
   font-weight: 600;
-  letter-spacing: 0.01em;
-  line-height: 1.3;
+  line-height: 1.25;
+  text-shadow: 0 1px 14px rgb(0 0 0 / 38%);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.home-footer-desc {
-  margin: 8px 0 0;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  line-height: 1.7;
+.home-latest-sub {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 6px 0 0;
+  color: rgb(255 255 255 / 74%);
+  font-size: 12px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.home-footer-actions {
+@keyframes home-latest-copy-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.home-latest-footer {
   display: flex;
-  flex: none;
-  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
+  min-height: 68px;
+  color: var(--text-faint);
+  font-size: 12.5px;
 }
 
-.home-footer-primary,
-.home-footer-ghost {
-  display: inline-flex;
-  gap: 7px;
+.home-latest-empty {
+  display: flex;
+  gap: 6px;
   align-items: center;
-  height: 36px;
-  padding: 0 16px;
-  border-radius: 999px;
-  font: inherit;
-  font-size: 12.5px;
+  justify-content: center;
+  min-height: 120px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+/* 回到顶部：和「找片看」一致，滚过一屏浮在内容列右下角 */
+.home-backtop {
+  position: fixed;
+  right: max(24px, calc((100vw - 1120px) / 2 + 32px));
+  bottom: 24px;
+  z-index: 30;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  color: var(--text-muted);
+  font-size: 15px;
   cursor: pointer;
+  box-shadow: 0 8px 20px rgb(8 12 18 / 12%);
+  backdrop-filter: blur(10px);
+  opacity: 1;
+  transform: translateY(0);
   transition:
+    opacity 0.18s ease,
+    transform 0.18s ease,
     color 0.15s ease,
     border-color 0.15s ease,
     background-color 0.15s ease;
 }
 
-.home-footer-primary {
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-
-.home-footer-primary:hover {
-  filter: brightness(1.06);
-}
-
-.home-footer-primary .anticon {
-  font-size: 13px;
-}
-
-.home-footer-ghost {
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--text-muted);
-}
-
-.home-footer-ghost:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.home-footer-ghost .anticon {
-  font-size: 11px;
-}
-
-.home-footer-top {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    border-color 0.15s ease;
-}
-
-.home-footer-top:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.home-footer-stats {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 36px;
-  align-items: baseline;
-  margin-top: 24px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
-}
-
-.home-footer-stat {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-
-.home-footer-stat b {
+.home-backtop:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   color: var(--text);
-  font-family: var(--font-display);
-  font-size: 23px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-  line-height: 1;
 }
 
-.home-footer-stat span {
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
-.home-footer-stamp {
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
+.home-backtop.is-hidden {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
 }
 
 @media (max-width: 1080px) {
@@ -732,36 +791,12 @@
     grid-auto-columns: 132px;
   }
 
-  .home-footer {
-    padding: 24px 24px 18px;
+  .home-latest-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
   }
 
-  .home-footer::before {
-    font-size: 86px;
-  }
-
-  .home-footer-title {
-    font-size: 22px;
-  }
-}
-
-@media (max-width: 760px) {
-  .home-footer-main {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 18px;
-  }
-
-  .home-footer-actions {
-    justify-content: flex-start;
-  }
-
-  .home-footer-stats {
-    gap: 10px 22px;
-  }
-
-  .home-footer-stamp {
-    margin-left: 0;
+  .home-latest-title {
+    font-size: 20px;
   }
 }
 
@@ -772,13 +807,15 @@
 
   .home-hero-info,
   .home-card::after,
-  .home-item-poster .home-picture img {
+  .home-item-poster .home-picture img,
+  .home-latest-slide,
+  .home-latest-slide .home-picture img,
+  .home-latest-dot,
+  .home-backtop {
     transition: none;
   }
 
-  .home-footer-primary,
-  .home-footer-ghost,
-  .home-footer-top {
-    transition: none;
+  .home-latest-copy {
+    animation: none;
   }
 }
