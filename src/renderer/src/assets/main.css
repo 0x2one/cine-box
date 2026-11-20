@@ -135,6 +135,10 @@
   .progress-card.is-active::after {
     animation: none;
   }
+
+  button.video-cover img {
+    transition: none;
+  }
 }
 
 .page-inner {
@@ -2893,7 +2897,7 @@ body .collect-form .ant-form-item-extra {
   width: 168px;
 }
 
-/* antd List 竖排布局：右侧封面垂直居中 */
+/* antd List 竖排布局：预览图在左、正文在右，整行垂直居中 */
 .video-list .ant-list-item {
   align-items: center;
   gap: 20px;
@@ -2904,7 +2908,10 @@ body .collect-form .ant-form-item-extra {
   min-width: 0;
 }
 
+/* extra 在 DOM 里排在正文后面，用 order 挪到左边；
+   正文是 flex: 1，剩下的宽度仍然全归它 */
 .video-list .ant-list-item-extra {
+  order: -1;
   margin-inline-start: 0;
   margin-block-start: 0;
 }
@@ -3100,6 +3107,33 @@ button.video-title-text:focus-visible {
   color: var(--text-faint);
   font-size: 24px;
   font-weight: 600;
+}
+
+/* 封面本身就是「查看详情」的入口：按钮沿用封面的盒子，悬停 / 聚焦给点反馈 */
+button.video-cover {
+  flex: 0 0 auto;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+button.video-cover img {
+  transition: transform 0.35s ease;
+}
+
+button.video-cover:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+button.video-cover:hover img {
+  transform: scale(1.04);
+}
+
+button.video-cover:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* 抽屉和弹窗的滚动容器从标题栏下方开始，窗口出现滚动条时不会压住窗口按钮。

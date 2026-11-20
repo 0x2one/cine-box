@@ -15,14 +15,14 @@ import {
   TreeSelect
 } from 'antd'
 import {
+  AppstoreAddOutlined,
+  EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  EditOutlined,
-  FileSearchOutlined,
+  InfoCircleOutlined,
   PictureOutlined,
   ReloadOutlined,
-  RightOutlined,
-  StarOutlined
+  RightOutlined
 } from '@ant-design/icons'
 import { formatDateTime } from '../utils/format'
 
@@ -669,7 +669,13 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
           <List.Item
             key={item.id}
             extra={
-              <div className="video-cover">
+              // 封面和标题、操作栏的「详情」一样打开侧边抽屉
+              <button
+                type="button"
+                className="video-cover"
+                aria-label={`查看 ${item.name} 的详情`}
+                onClick={() => void openDetail(item)}
+              >
                 <span className="video-cover-letter">{item.name.trim().slice(0, 1)}</span>
                 {item.pic && (
                   <img
@@ -682,7 +688,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                     }}
                   />
                 )}
-              </div>
+              </button>
             }
             actions={[
               <Tooltip key="poster" title={item.inPoster ? '已在推荐页海报中' : '添加到推荐页海报'}>
@@ -701,8 +707,8 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                   className="video-action"
                   type="text"
                   size="small"
-                  icon={<StarOutlined />}
-                  aria-label="推荐"
+                  icon={<AppstoreAddOutlined />}
+                  aria-label="加入推荐页分类"
                   onClick={() => setRecommendTarget(item)}
                 />
               </Tooltip>,
@@ -711,7 +717,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                   className="video-action"
                   type="text"
                   size="small"
-                  icon={<FileSearchOutlined />}
+                  icon={<InfoCircleOutlined />}
                   aria-label="查看详情"
                   onClick={() => void openDetail(item)}
                 />
