@@ -1,5 +1,5 @@
 /* ── 首页：搜索 + 海报叠层 + 分类轨道 ──
-   样式按 docs/首页原型.html 落地，全部收在 .home-view 下，避免和设置页 / antd 撞名。 */
+   样式全部收在 .home-view 下，避免和设置页 / antd 撞名。 */
 
 .home-view {
   max-width: 1120px;
