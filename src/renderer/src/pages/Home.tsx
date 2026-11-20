@@ -53,7 +53,9 @@ function HomeRail({
   const railRef = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ left: false, right: false })
   /** 指针横向拖动：按住往左拖就是往后看，和箭头按钮等价 */
-  const dragRef = useRef<{ id: number; x: number; scroll: number } | null>(null)
+  const dragRef = useRef<{ id: number; x: number; scroll: number; moved: boolean } | null>(null)
+  /** 上一次拖动的结束时间：松手后浏览器会补一个 click，用它挡掉（键盘回车不受影响） */
+  const dragEndAt = useRef(0)
   const [dragging, setDragging] = useState(false)
   /** 列表是否复制了一份（只有内容溢出时才需要循环） */
   const [looping, setLooping] = useState(false)
@@ -172,17 +174,28 @@ function HomeRail({
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     const rail = railRef.current
     if (!rail || event.button !== 0) return
-    dragRef.current = { id: event.pointerId, x: event.clientX, scroll: rail.scrollLeft }
+    // 先不捕获指针：捕获会把松手后的 click 挪到轨道上，卡片就点不开了
+    dragRef.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      scroll: rail.scrollLeft,
+      moved: false
+    }
     setDragging(true)
-    rail.setPointerCapture(event.pointerId)
   }
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
     const state = dragRef.current
     const rail = railRef.current
     if (!state || !rail || state.id !== event.pointerId) return
+    const dx = event.clientX - state.x
+    // 确认是在拖动才捕获，之后拖出轨道也能跟手
+    if (Math.abs(dx) > 6) {
+      state.moved = true
+      if (!rail.hasPointerCapture(event.pointerId)) rail.setPointerCapture(event.pointerId)
+    }
     // 直接写 scrollLeft（不是 scrollBy），这样拖到一半停住不会继续滑
-    rail.scrollLeft = state.scroll - (event.clientX - state.x)
+    rail.scrollLeft = state.scroll - dx
     normalize()
   }
 
@@ -190,6 +203,7 @@ function HomeRail({
     const state = dragRef.current
     if (!state || state.id !== event.pointerId) return
     dragRef.current = null
+    if (state.moved) dragEndAt.current = performance.now()
     setDragging(false)
     const rail = railRef.current
     if (rail?.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId)
@@ -252,6 +266,12 @@ function HomeRail({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        // 拖动结束后浏览器补的那一下 click 不再当成「点卡片」
+        onClickCapture={(event) => {
+          if (performance.now() - dragEndAt.current > 200) return
+          event.preventDefault()
+          event.stopPropagation()
+        }}
         onDragStart={(event) => event.preventDefault()}
       >
         {track.map((item, index) => (
