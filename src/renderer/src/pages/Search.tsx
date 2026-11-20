@@ -135,7 +135,7 @@ function SearchBar({
   )
 }
 
-/** 单条搜索结果：沿用控制台「视频」预览行的信息顺序，右侧是 3:4 封面 */
+/** 单条搜索结果：沿用控制台「视频」预览行的信息顺序，左侧是 3:4 封面 */
 function SearchResultRow({
   item,
   matcher
@@ -149,8 +149,16 @@ function SearchResultRow({
       ? item.localCategoryPaths.join('、')
       : item.vodClass || item.categoryName || '未分类'
 
+  /**
+   * 点封面 / 片名直接播放：和首页、列表页的卡片同一条口径，只给视频 id，
+   * 由播放页自己取详情、挑第一个能播的线路，这里不查详情、不进详情页。
+   */
+  const open = (): void => {
+    void window.api.player.open({ videoId: item.id, title: item.name })
+  }
+
   return (
-    <article className="search-result">
+    <article className="search-result is-openable">
       <div className="search-result-cover">
         <span className="search-cover-letter">{item.name.trim().slice(0, 1) || '影'}</span>
         {item.pic && (
@@ -164,13 +172,26 @@ function SearchResultRow({
             }}
           />
         )}
+        {/* 透明按钮铺满封面：整张图都能点开播放，键盘也能聚焦 */}
+        <button
+          type="button"
+          className="search-cover-open"
+          title={`播放《${item.name}》`}
+          aria-label={`播放 ${item.name}`}
+          onClick={open}
+        />
       </div>
 
       <div className="search-result-main">
         <div className="search-result-title-row">
-          <h3 className="search-result-title" title={item.name}>
+          <button
+            type="button"
+            className="search-result-title search-result-title-btn"
+            title={item.name}
+            onClick={open}
+          >
             {highlight(item.name, matcher)}
-          </h3>
+          </button>
           {item.note && (
             <span className="search-result-note" title={item.note}>
               {item.note}
@@ -201,7 +222,7 @@ function SearchResultRow({
  * 展示端搜索页：按片名检索已采集的视频（只搜展示中的）。
  * 初始态是居中的搜索落地页（搜索历史 / 分类入口 / 片库规模），
  * 提交后搜索条吸顶、结果按控制台「视频」的预览行排版，滚动到底自动取下一页。
- * 只展示、不跳转：和首页 / 列表页一样，这里没有播放或详情入口。
+ * 结果行的封面和片名都能点开独立播放窗口（同首页 / 列表页的卡片），没有详情页。
  */
 function SearchView({
   initialKeyword = '',

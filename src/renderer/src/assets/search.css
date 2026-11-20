@@ -527,6 +527,23 @@
   color: color-mix(in srgb, var(--accent) 82%, var(--text));
 }
 
+/* 片名本身就是播放入口：清掉按钮默认样式，只留文字排版（字号 / 字重沿用 .search-result-title） */
+.search-result-title-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+/* 鼠标放到整行上（或键盘聚焦片名）时片名提亮，和首页 / 列表页的卡片一致 */
+.search-result.is-openable:hover .search-result-title,
+.search-result-title-btn:focus-visible {
+  color: var(--accent);
+}
+
 .search-result-note {
   flex: 0 0 auto;
   overflow: hidden;
@@ -620,6 +637,24 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* 封面铺一张透明按钮：整张图都能点开播放，键盘也能聚焦；
+   不把占位字 / <img> 塞进 <button>，图片仍留在 .search-result-cover 里 */
+.search-cover-open {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.search-cover-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .search-cover-letter {
@@ -800,6 +835,7 @@
   .search-cat,
   .search-history-item,
   .search-history-clear,
+  .search-result-title-btn,
   .search-recommend-inner,
   .search-recommend-title,
   .search-recommend-poster {
