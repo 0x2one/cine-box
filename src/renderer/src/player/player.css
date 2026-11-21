@@ -362,7 +362,9 @@ button {
 .player-stage {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--border);
+  /* 描边跟黑画面一侧走，不能直接用 --border：浅色主题的 #e3e8ef 落在视频边上就是一圈白边。
+     这里把 --text 压到近黑，浅色主题下等于没有画框，暗色主题仍留一条比底色略亮的细边 */
+  border: 1px solid color-mix(in srgb, var(--text) 9%, #000);
   border-radius: 10px;
   aspect-ratio: 16 / 9;
   background: #000;
