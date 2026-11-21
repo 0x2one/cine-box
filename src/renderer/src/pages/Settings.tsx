@@ -4,7 +4,10 @@ import {
   ArrowLeftOutlined,
   CheckOutlined,
   CompassOutlined,
+  CompressOutlined,
   DeleteOutlined,
+  DesktopOutlined,
+  ExpandOutlined,
   HddOutlined,
   InfoCircleOutlined,
   LaptopOutlined,
@@ -44,6 +47,19 @@ const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
 
 const IS_MAC = window.electron?.process?.platform === 'darwin'
 const DEFAULT_SHORTCUT = 'Ctrl+Shift+Space'
+
+const WINDOW_SIZE_LABELS: Record<AppWindowSize, string> = {
+  medium: '适中',
+  large: '大屏',
+  xlarge: '超大'
+}
+
+/** 每档的目标尺寸（与 src/main/window-size.ts 的预设保持一致），主进程还会按主显示器工作区收缩 */
+const WINDOW_SIZE_HINTS: Record<AppWindowSize, string> = {
+  medium: '约 1200 × 780，适合笔记本与小屏',
+  large: '约 1400 × 880，适合 1080p 及以上的大屏',
+  xlarge: '约 1600 × 1000，适合 2K / 4K 显示器'
+}
 
 function SettingRow({
   title,
@@ -159,6 +175,52 @@ function StartViewRow(): React.JSX.Element {
   )
 }
 
+/** 启动时默认大小：窗口初始尺寸分三档，屏幕放不下时主进程按工作区收缩 */
+function WindowSizeRow(): React.JSX.Element {
+  const { message } = App.useApp()
+  const [value, setValue] = useState<AppWindowSize>('large')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    void window.api.settings.get().then((settings) => {
+      if (!alive) return
+      setValue(settings.windowSize)
+      setLoading(false)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const onChange = (next: string | number): void => {
+    const windowSize: AppWindowSize = next === 'medium' || next === 'xlarge' ? next : 'large'
+    setValue(windowSize)
+    void window.api.settings.setWindowSize(windowSize).then((settings) => {
+      setValue(settings.windowSize)
+      message.success(`启动大小已设为「${WINDOW_SIZE_LABELS[settings.windowSize]}」，下次启动生效`)
+    })
+  }
+
+  return (
+    <SettingRow
+      title="启动时默认大小"
+      description={`${WINDOW_SIZE_HINTS[value]}，屏幕放不下时自动收缩，下次启动生效`}
+    >
+      <Segmented
+        value={value}
+        disabled={loading}
+        onChange={onChange}
+        options={[
+          { value: 'medium', label: '适中', icon: <CompressOutlined /> },
+          { value: 'large', label: '大屏', icon: <DesktopOutlined /> },
+          { value: 'xlarge', label: '超大', icon: <ExpandOutlined /> }
+        ]}
+      />
+    </SettingRow>
+  )
+}
+
 function PreferencesPanel(): React.JSX.Element {
   const { mode, setMode, accent, setAccent } = useTheme()
 
@@ -203,9 +265,10 @@ function PreferencesPanel(): React.JSX.Element {
         </SettingRow>
       </SettingsCard>
 
-      {/* 默认首页是页面偏好，单独一张卡片，不和开机自启 / 托盘 / 更新混在一起 */}
+      {/* 默认首页与启动大小都是「下次启动生效」的启动偏好，单独一张卡片，不和开机自启 / 托盘 / 更新混在一起 */}
       <SettingsCard>
         <StartViewRow />
+        <WindowSizeRow />
       </SettingsCard>
 
       <SettingsCard>

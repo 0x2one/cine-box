@@ -53,6 +53,7 @@ import { createUpdater } from './updater'
 import { createVideoCacheStore } from './video-cache-store'
 import { createVideoCollector } from './video-collector'
 import { createVideoDetailCache } from './video-detail-cache'
+import { resolveWindowSize, WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from './window-size'
 import type {
   CollectMode,
   FetchRange,
@@ -395,11 +396,16 @@ function setupApplicationMenu(): void {
 /* ── 主窗口 ── */
 
 function createWindow(): void {
+  // 启动尺寸取偏好设置里的三档之一；屏幕放不下时按主显示器工作区收缩，不顶满屏幕
+  const { width, height } = resolveWindowSize(
+    appSettingsStore.get().windowSize,
+    screen.getPrimaryDisplay().workAreaSize
+  )
   const winOptions: Electron.BrowserWindowConstructorOptions = {
-    width: 1180,
-    height: 760,
-    minWidth: 920,
-    minHeight: 620,
+    width,
+    height,
+    minWidth: WINDOW_MIN_WIDTH,
+    minHeight: WINDOW_MIN_HEIGHT,
     show: false,
     autoHideMenuBar: true,
     // 任务栏 / 窗口图标：Windows、Linux 生效，macOS 走 Dock 图标（见下）
@@ -551,6 +557,10 @@ ipcMain.handle('settings:resetShowShortcut', () => {
 
 ipcMain.handle('settings:setStartView', (_event, value: string) =>
   appSettingsStore.setStartView(value)
+)
+
+ipcMain.handle('settings:setWindowSize', (_event, value: string) =>
+  appSettingsStore.setWindowSize(value)
 )
 
 /* ── IPC：缓存管理 ── */

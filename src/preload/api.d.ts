@@ -24,6 +24,9 @@ interface AppInfo {
 /** 启动时打开的页面：推荐（首页）或搜索视频 */
 type AppStartView = 'home' | 'search'
 
+/** 启动时主窗口的大小：适中 / 大屏 / 超大 */
+type AppWindowSize = 'medium' | 'large' | 'xlarge'
+
 interface AppApi {
   info: () => Promise<AppInfo>
   /** 启动时打开的页面（主进程通过启动参数传入，同步读取） */
@@ -86,6 +89,8 @@ interface AppSettings {
   showShortcut: string
   /** 默认首页：启动映盒剧场时打开的页面 */
   startView: AppStartView
+  /** 启动时主窗口的大小 */
+  windowSize: AppWindowSize
 }
 
 interface SetShortcutResult {
@@ -104,6 +109,8 @@ interface SettingsApi {
   resetShowShortcut: () => Promise<SetShortcutResult>
   /** 设置默认首页，返回保存后的设置；下次启动生效 */
   setStartView: (value: AppStartView) => Promise<AppSettings>
+  /** 设置启动时的窗口大小，返回保存后的设置；下次启动生效 */
+  setWindowSize: (value: AppWindowSize) => Promise<AppSettings>
 }
 
 type SiteFormat = 'xml' | 'json'

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { mkdirSync, promises as fsp, writeFileSync } from 'fs'
 import { join } from 'path'
+import { DEFAULT_WINDOW_SIZE, isAppWindowSize, type AppWindowSize } from './window-size'
 
 /** 默认全局快捷键：在任何地方唤起 / 隐藏主窗口 */
 export const DEFAULT_SHOW_SHORTCUT = 'Ctrl+Shift+Space'
@@ -19,6 +20,8 @@ export interface AppSettings {
   showShortcut: string
   /** 启动映盒剧场时直接打开的页面 */
   startView: AppStartView
+  /** 启动时主窗口的大小：适中 / 大屏 / 超大 */
+  windowSize: AppWindowSize
 }
 
 interface StoreFile {
@@ -28,6 +31,7 @@ interface StoreFile {
   autoDownload?: boolean
   showShortcut?: string
   startView?: string
+  windowSize?: string
 }
 
 const DEFAULTS: AppSettings = {
@@ -35,7 +39,8 @@ const DEFAULTS: AppSettings = {
   closeToTray: false,
   autoDownload: true,
   showShortcut: DEFAULT_SHOW_SHORTCUT,
-  startView: 'home'
+  startView: 'home',
+  windowSize: DEFAULT_WINDOW_SIZE
 }
 
 export interface AppSettingsStore {
@@ -46,6 +51,7 @@ export interface AppSettingsStore {
   setAutoDownload: (value: boolean) => AppSettings
   setShowShortcut: (value: string | null) => AppSettings
   setStartView: (value: string | null) => AppSettings
+  setWindowSize: (value: string | null) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -87,7 +93,8 @@ export function createAppSettingsStore(): AppSettingsStore {
           typeof data?.autoDownload === 'boolean' ? data.autoDownload : DEFAULTS.autoDownload,
         showShortcut:
           typeof data?.showShortcut === 'string' ? data.showShortcut : DEFAULTS.showShortcut,
-        startView: data?.startView === 'search' ? 'search' : 'home'
+        startView: data?.startView === 'search' ? 'search' : 'home',
+        windowSize: isAppWindowSize(data?.windowSize) ? data.windowSize : DEFAULTS.windowSize
       }
     } catch {
       settings = { ...DEFAULTS }
@@ -101,7 +108,8 @@ export function createAppSettingsStore(): AppSettingsStore {
       closeToTray: settings.closeToTray,
       autoDownload: settings.autoDownload,
       showShortcut: settings.showShortcut,
-      startView: settings.startView
+      startView: settings.startView,
+      windowSize: settings.windowSize
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -147,6 +155,14 @@ export function createAppSettingsStore(): AppSettingsStore {
     },
     setStartView: (value: string | null) => {
       settings = { ...settings, startView: value === 'search' ? 'search' : 'home' }
+      persist()
+      return snapshot()
+    },
+    setWindowSize: (value: string | null) => {
+      settings = {
+        ...settings,
+        windowSize: isAppWindowSize(value) ? value : DEFAULTS.windowSize
+      }
       persist()
       return snapshot()
     }

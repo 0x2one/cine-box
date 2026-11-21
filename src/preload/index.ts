@@ -52,7 +52,9 @@ const api = {
     resetShowShortcut: (): Promise<SetShortcutResult> =>
       ipcRenderer.invoke('settings:resetShowShortcut'),
     setStartView: (value: AppStartView): Promise<AppSettings> =>
-      ipcRenderer.invoke('settings:setStartView', value)
+      ipcRenderer.invoke('settings:setStartView', value),
+    setWindowSize: (value: AppWindowSize): Promise<AppSettings> =>
+      ipcRenderer.invoke('settings:setWindowSize', value)
   },
   sites: {
     list: (): Promise<Site[]> => ipcRenderer.invoke('sites:list'),
