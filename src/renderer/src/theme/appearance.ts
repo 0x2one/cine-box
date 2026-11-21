@@ -128,16 +128,10 @@ export function applyStoredAppearance(): void {
   applyAppearance(resolveMode(readStoredMode()), readStoredAccent())
 }
 
-/** 当前外观的完整快照：播放窗按它初始化，之后由主进程推变化 */
-export interface ResolvedAppearance {
-  theme: ResolvedTheme
-  accent: string
-  /** 页面底色：播放窗创建时用它做 BrowserWindow 的 backgroundColor，避免闪白 */
-  bg: string
-}
-
-export function readStoredAppearance(): ResolvedAppearance {
-  const theme = resolveMode(readStoredMode())
-  const accent = readStoredAccent()
-  return { theme, accent: accent.key, bg: SURFACES[theme].bg }
+/**
+ * 播放页的外观：固定套用深色色板（视频播放器的习惯，也让黑画面四周没有浅色画框），
+ * 只有强调色跟随主窗口。主窗口切明暗主题时播放页不变，切强调色时实时跟随。
+ */
+export function applyPlayerAppearance(accent: AccentOption): void {
+  applyAppearance('dark', accent)
 }

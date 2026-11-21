@@ -3,21 +3,12 @@ import {
   BorderOutlined,
   CloseOutlined,
   CompressOutlined,
-  ExpandOutlined,
-  LayoutOutlined,
   MinusOutlined,
   UnorderedListOutlined
 } from '@ant-design/icons'
 import logoUrl from '../assets/logo.svg'
-import type { PlayerLayout } from './player-data'
 
 const IS_MAC = window.electron?.process?.platform === 'darwin'
-
-const LAYOUTS: { value: PlayerLayout; label: string; icon: React.ReactNode }[] = [
-  { value: 'standard', label: '标准布局：播放器 + 右侧剧集', icon: <LayoutOutlined /> },
-  { value: 'cinema', label: '影院布局：全宽播放，剧集浮层', icon: <ExpandOutlined /> },
-  { value: 'below', label: '剧集条：剧集放在播放器下方', icon: <UnorderedListOutlined /> }
-]
 
 interface PlayerTitleBarProps {
   title: string
@@ -25,24 +16,24 @@ interface PlayerTitleBarProps {
   episode: string
   /** 当前线路的集数总量，0 表示还没读到 */
   total: number
-  layout: PlayerLayout
-  onLayout: (layout: PlayerLayout) => void
+  /** 右侧剧集 / 简介面板是否展开 */
   panelOpen: boolean
-  onTogglePanel: () => void
+  /** 面板正停在剧集 tab */
+  episodesActive: boolean
+  onEpisodes: () => void
 }
 
 /**
- * 播放窗自绘标题栏：左上角是片名与当前集数，右侧是布局切换和窗口按钮。
+ * 播放窗自绘标题栏：左上角是片名与当前集数，右侧是「选集」入口和窗口按钮。
  * 整条是拖拽区，所有按钮单独退出拖拽，否则点不到。
  */
 function PlayerTitleBar({
   title,
   episode,
   total,
-  layout,
-  onLayout,
   panelOpen,
-  onTogglePanel
+  episodesActive,
+  onEpisodes
 }: PlayerTitleBarProps): React.JSX.Element {
   const [maximized, setMaximized] = useState(false)
 
@@ -74,34 +65,19 @@ function PlayerTitleBar({
       <div className="player-titlebar-drag" />
 
       <div className="player-titlebar-actions">
-        {layout === 'cinema' && (
-          <button
-            type="button"
-            className={`player-text-btn${panelOpen ? ' is-active' : ''}`}
-            onClick={onTogglePanel}
-            title={panelOpen ? '收起剧集' : '展开剧集'}
-            aria-expanded={panelOpen}
-          >
-            <UnorderedListOutlined />
-            <span>选集</span>
-          </button>
-        )}
-
-        <div className="player-layout-switch" role="group" aria-label="播放布局">
-          {LAYOUTS.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              className={`player-layout-btn${layout === item.value ? ' is-active' : ''}`}
-              title={item.label}
-              aria-label={item.label}
-              aria-pressed={layout === item.value}
-              onClick={() => onLayout(item.value)}
-            >
-              {item.icon}
-            </button>
-          ))}
-        </div>
+        <button
+          type="button"
+          className={`player-text-btn${episodesActive ? ' is-active' : ''}`}
+          onClick={onEpisodes}
+          title="打开剧集 / 简介面板"
+          aria-label="打开剧集 / 简介面板"
+          aria-pressed={episodesActive}
+          aria-expanded={panelOpen}
+          disabled={total === 0}
+        >
+          <UnorderedListOutlined />
+          <span>选集</span>
+        </button>
 
         {!IS_MAC && (
           <>

@@ -24,6 +24,8 @@ export interface UseArtPlayerOptions {
   accent: string
   onEnded?: () => void
   onError?: (message: string) => void
+  /** 控制条里的「选集」：打开右侧剧集面板 */
+  onOpenEpisodes?: () => void
 }
 
 export interface ArtPlayerHandle {
@@ -42,7 +44,8 @@ export function useArtPlayer({
   poster,
   accent,
   onEnded,
-  onError
+  onError,
+  onOpenEpisodes
 }: UseArtPlayerOptions): ArtPlayerHandle {
   const artRef = useRef<Artplayer | null>(null)
   const urlRef = useRef(url)
@@ -50,6 +53,7 @@ export function useArtPlayer({
   const accentRef = useRef(accent)
   const endedRef = useRef(onEnded)
   const errorRef = useRef(onError)
+  const episodesRef = useRef(onOpenEpisodes)
   /**
    * 已经交给播放器的地址。不能拿 art.url 比：hls.js 会把 video.src 换成 blob:，
    * 创建完那一刻 art.url 永远不等于 m3u8，直接比会把同一集再切一次。
@@ -66,6 +70,7 @@ export function useArtPlayer({
     accentRef.current = accent
     endedRef.current = onEnded
     errorRef.current = onError
+    episodesRef.current = onOpenEpisodes
   })
 
   useEffect(() => {
@@ -111,6 +116,12 @@ export function useArtPlayer({
           const previous = art.hls as Hls | undefined
           if (previous) previous.destroy()
 
+          // 全屏时错误状态层会被全屏视频挡住，先退全屏再交给页面提示
+          const fail = (message: string): void => {
+            if (art.fullscreen) art.fullscreen = false
+            errorRef.current?.(message)
+          }
+
           if (Hls.isSupported()) {
             const hls = new Hls({
               enableWorker: true,
@@ -137,13 +148,13 @@ export function useArtPlayer({
                 return
               }
               hls.destroy()
-              errorRef.current?.('这条线路播放失败，换一条试试')
+              fail('这条线路播放失败，换一条试试')
             })
             art.hls = hls
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = sourceUrl
           } else {
-            errorRef.current?.('当前环境不支持 m3u8 播放')
+            fail('当前环境不支持 m3u8 播放')
           }
         }
       }
@@ -151,6 +162,19 @@ export function useArtPlayer({
 
     artRef.current = instance
     appliedRef.current = firstUrl
+
+    // 控制条右侧的「选集」：剧集面板在窗口里，全屏时先退全屏再打开
+    instance.controls.add({
+      name: 'cinebox-episodes',
+      html: '选集',
+      position: 'right',
+      index: 25,
+      tooltip: '选集',
+      click: () => {
+        if (instance.fullscreen) instance.fullscreen = false
+        episodesRef.current?.()
+      }
+    })
 
     instance.on('video:ended', () => endedRef.current?.())
     instance.on('video:volumechange', () => {
@@ -183,7 +207,9 @@ export function useArtPlayer({
         if (alive) void instance.play().catch(() => {})
       })
       .catch(() => {
-        if (alive) errorRef.current?.('这条线路播放失败，换一条试试')
+        if (!alive) return
+        if (instance.fullscreen) instance.fullscreen = false
+        errorRef.current?.('这条线路播放失败，换一条试试')
       })
     return () => {
       alive = false

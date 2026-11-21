@@ -28,6 +28,12 @@ export interface PlayerOpenResult {
 }
 
 /**
+ * 播放窗的固定底色：播放页固定深色（不跟主窗口明暗主题），
+ * 和应用深色色板的 bg 一致。主进程不引渲染层的色板，所以在这里写常量。
+ */
+const PLAYER_BG = '#0c0f13'
+
+/**
  * 独立播放窗口。
  *
  * 只保留一个窗口：再点别的集数时把新载荷推给已经打开的窗口，不堆一屏播放器。
@@ -39,7 +45,7 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
   let playerWindow: BrowserWindow | null = null
   let payload: PlayerPayload | null = null
   let token = 0
-  /** 主窗口当前外观：播放窗创建时用它定底色，之后主窗口每次切换都转发过去 */
+  /** 主窗口当前的强调色：播放窗创建后取一次，之后主窗口每次切换都转发过去 */
   let appearance: PlayerAppearance | null = null
 
   function rendererUrl(): string | null {
@@ -67,8 +73,8 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
       // 任务栏 / 窗口图标：Windows、Linux 生效
       icon: options.icon,
       title: '映盒剧场 · 播放',
-      // 首帧之前就是当前主题的底色，不会先闪一下另一种颜色
-      backgroundColor: appearance?.bg || '#0c0f13',
+      // 首帧之前就是播放页的深色底，不会先闪一下主窗口的配色
+      backgroundColor: PLAYER_BG,
       webPreferences: {
         preload: options.preload,
         sandbox: false,
@@ -176,20 +182,13 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
   // 外观中转：主窗口应用主题后推过来，播放窗挂载时再取一次
   ipcMain.handle('appearance:get', () => appearance)
   ipcMain.handle('appearance:set', (_event, value: PlayerAppearance) => {
-    if (!value || (value.theme !== 'light' && value.theme !== 'dark')) return
+    if (!value) return
     appearance = {
-      theme: value.theme,
-      accent: typeof value.accent === 'string' && value.accent ? value.accent : 'cine',
-      bg:
-        typeof value.bg === 'string' && value.bg
-          ? value.bg
-          : value.theme === 'light'
-            ? '#f5f7fa'
-            : '#0c0f13'
+      accent: typeof value.accent === 'string' && value.accent ? value.accent : 'cine'
     }
     if (playerWindow && !playerWindow.isDestroyed()) {
-      // 已打开的播放窗直接换色，不需要重新打开
-      playerWindow.setBackgroundColor(appearance.bg)
+      // 播放页固定深色底，只把强调色转给已打开的播放窗，不需要重新打开
+      playerWindow.setBackgroundColor(PLAYER_BG)
       playerWindow.webContents.send('appearance:change', appearance)
     }
   })

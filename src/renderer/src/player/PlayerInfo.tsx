@@ -9,8 +9,8 @@ interface PlayerInfoProps {
 }
 
 /**
- * 播放器下方的内容信息：封面 + 片名 + 元信息 + 主演 + 简介。
- * 简介默认收三行，长文可以展开，避免把播放器顶出首屏。
+ * 面板里的简介页：封面 + 片名 + 元信息 + 主演 / 导演 + 简介。
+ * 简介默认收六行，长文可以展开；整页由面板的滚动容器负责滚动。
  */
 function PlayerInfo({ detail, line, lineLabel }: PlayerInfoProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
@@ -28,54 +28,58 @@ function PlayerInfo({ detail, line, lineLabel }: PlayerInfoProps): React.JSX.Ele
     source?.categoryName?.trim(),
     detail?.note?.trim(),
     line ? `共 ${line.episodes.length} 集` : '',
-    source ? `来源 ${source.siteName}` : '',
-    lineLabel ? `线路 ${lineLabel}` : ''
+    lineLabel ? `线路 ${lineLabel}` : '',
+    source ? `来源 ${source.siteName}` : ''
   ].filter((item): item is string => Boolean(item))
 
-  const expandable = intro.length > 120
+  const expandable = intro.length > 140
 
   return (
     <section className="player-info">
-      <div className="player-poster">
-        <span className="player-poster-letter">{title.slice(0, 1) || '映'}</span>
-        {detail?.pic && (
-          <img
-            src={detail.pic}
-            alt=""
-            referrerPolicy="no-referrer"
-            onError={(event) => {
-              event.currentTarget.style.visibility = 'hidden'
-            }}
-          />
-        )}
+      <div className="player-info-hero">
+        <div className="player-poster">
+          <span className="player-poster-letter">{title.slice(0, 1) || '映'}</span>
+          {detail?.pic && (
+            <img
+              src={detail.pic}
+              alt=""
+              referrerPolicy="no-referrer"
+              onError={(event) => {
+                event.currentTarget.style.visibility = 'hidden'
+              }}
+            />
+          )}
+        </div>
+
+        <div className="player-info-head">
+          <h2 className="player-info-title" title={title}>
+            {title || '正在播放'}
+          </h2>
+          {chips.length > 0 && (
+            <p className="player-info-meta">
+              {chips.map((item, index) => (
+                <span key={`${item}-${index}`}>{item}</span>
+              ))}
+            </p>
+          )}
+        </div>
       </div>
 
-      <div className="player-info-body">
-        <h2 className="player-info-title" title={title}>
-          {title || '正在播放'}
-        </h2>
+      {actors && (
+        <p className="player-info-actor">
+          <span className="player-info-label">主演</span>
+          {actors}
+        </p>
+      )}
+      {director && (
+        <p className="player-info-actor">
+          <span className="player-info-label">导演</span>
+          {director}
+        </p>
+      )}
 
-        {chips.length > 0 && (
-          <p className="player-info-meta">
-            {chips.map((item, index) => (
-              <span key={`${item}-${index}`}>{item}</span>
-            ))}
-          </p>
-        )}
-
-        {actors && (
-          <p className="player-info-actor">
-            <span className="player-info-label">主演</span>
-            {actors}
-          </p>
-        )}
-        {director && (
-          <p className="player-info-actor">
-            <span className="player-info-label">导演</span>
-            {director}
-          </p>
-        )}
-
+      <div className="player-info-intro-block">
+        <span className="player-info-section">简介</span>
         {intro ? (
           <div className={`player-info-intro${expanded ? ' is-open' : ''}`}>
             <p>{intro}</p>

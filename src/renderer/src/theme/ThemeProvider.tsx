@@ -44,13 +44,10 @@ function ThemeProvider({ children }: { children: ReactNode }): React.JSX.Element
   // useLayoutEffect：在浏览器绘制前写入 CSS 变量，避免切换时闪白
   useLayoutEffect(() => {
     applyAppearance(resolved, accent)
-    // 独立播放窗有自己的一份 document：把当前外观推给主进程中转，
-    // 已经打开的播放窗收到后立刻跟着换，不用重新打开
-    void window.api.appearance.set({
-      theme: resolved,
-      accent: accent.key,
-      bg: SURFACES[resolved].bg
-    })
+    // 独立播放窗有自己的一份 document：把强调色推给主进程中转，
+    // 已经打开的播放窗收到后立刻跟着换，不用重新打开。
+    // 播放页固定深色，不需要 theme / bg。
+    void window.api.appearance.set({ accent: accent.key })
   }, [resolved, accent])
 
   const palette = SURFACES[resolved]

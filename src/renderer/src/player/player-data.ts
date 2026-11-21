@@ -3,8 +3,6 @@
  * 播放源只接受 HLS（.m3u8），其余格式在这里就被过滤掉，播放器不会拿到 mp4 / flv。
  */
 
-export type PlayerLayout = 'standard' | 'cinema' | 'below'
-
 export interface PlayerEpisode {
   /** 线路里的原始下标：播放载荷按它定位，过滤掉非 m3u8 后也不会错位 */
   index: number

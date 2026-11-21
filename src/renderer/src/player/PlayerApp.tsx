@@ -1,49 +1,57 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ReloadOutlined, VideoCameraOutlined } from '@ant-design/icons'
-import { applyAppearance, findAccent } from '../theme/appearance'
-import EpisodePanel from './EpisodePanel'
-import PlayerInfo from './PlayerInfo'
+import { LeftOutlined, ReloadOutlined, RightOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { applyPlayerAppearance, findAccent } from '../theme/appearance'
+import PlayerPanel, { type PlayerPanelTab } from './PlayerPanel'
 import PlayerTitleBar from './PlayerTitleBar'
-import {
-  buildLines,
-  episodeTitle,
-  lineLabels,
-  type PlayerLayout,
-  type PlayerLine
-} from './player-data'
+import { buildLines, episodeTitle, lineLabels, type PlayerLine } from './player-data'
 import { useArtPlayer } from './useArtPlayer'
 
-const LAYOUT_KEY = 'player-layout'
 const AUTO_NEXT_KEY = 'player-auto-next'
+const PANEL_OPEN_KEY = 'player-panel-open'
+const PANEL_TAB_KEY = 'player-panel-tab'
+/** 三档布局时代的旧键，已经不用了，启动时顺手清掉 */
+const LEGACY_LAYOUT_KEY = 'player-layout'
 
 type Phase = 'loading' | 'ready' | 'error'
-
-function readLayout(): PlayerLayout {
-  const stored = localStorage.getItem(LAYOUT_KEY)
-  return stored === 'cinema' || stored === 'below' ? stored : 'standard'
-}
 
 function readAutoNext(): boolean {
   return localStorage.getItem(AUTO_NEXT_KEY) !== '0'
 }
 
+function readPanelOpen(): boolean {
+  return localStorage.getItem(PANEL_OPEN_KEY) !== '0'
+}
+
+function readPanelTab(): PlayerPanelTab {
+  return localStorage.getItem(PANEL_TAB_KEY) === 'info' ? 'info' : 'episodes'
+}
+
 interface PlayerSessionProps {
   payload: PlayerPayload
-  layout: PlayerLayout
-  onLayout: (layout: PlayerLayout) => void
   /** 当前主题的强调色，ArtPlayer 的进度条 / 控件跟着它走 */
   accent: string
+  panelOpen: boolean
+  panelTab: PlayerPanelTab
+  /** 标题栏与播放器控制条里的「选集」：打开面板并切到剧集 */
+  onEpisodes: () => void
+  /** 右缘中部按钮与面板头部关闭：只做开合，保留当前 tab */
+  onTogglePanel: () => void
+  onPanelTab: (tab: PlayerPanelTab) => void
 }
 
 /**
  * 一部视频的播放会话：按 videoId 取详情、摊平线路、维护当前集数。
  * 外层按 payload.token 给它换 key，换片时整块重挂载，播放器不会残留上一部的状态。
+ * 面板的开合状态放在外层，换片不会把用户收起的面板重新弹出来。
  */
 function PlayerSession({
   payload,
-  layout,
-  onLayout,
-  accent
+  accent,
+  panelOpen,
+  panelTab,
+  onEpisodes,
+  onTogglePanel,
+  onPanelTab
 }: PlayerSessionProps): React.JSX.Element {
   const [detail, setDetail] = useState<VideoDetail | null>(null)
   const [lines, setLines] = useState<PlayerLine[]>([])
@@ -54,7 +62,6 @@ function PlayerSession({
   const [errorHint, setErrorHint] = useState('')
   const [playError, setPlayError] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
-  const [panelOpen, setPanelOpen] = useState(false)
   const [autoNext, setAutoNext] = useState(readAutoNext)
   const stageRef = useRef<HTMLDivElement>(null)
 
@@ -135,7 +142,8 @@ function PlayerSession({
     poster: detail?.pic,
     accent,
     onEnded: goNext,
-    onError: (message) => setPlayError(message)
+    onError: (message) => setPlayError(message),
+    onOpenEpisodes: onEpisodes
   })
 
   const reload = useCallback(() => {
@@ -144,14 +152,10 @@ function PlayerSession({
     setReloadToken((value) => value + 1)
   }, [])
 
-  const selectEpisode = useCallback(
-    (index: number) => {
-      setPlayError('')
-      setEpisodeIndex(index)
-      if (layout === 'cinema') setPanelOpen(false)
-    },
-    [layout]
-  )
+  const selectEpisode = useCallback((index: number) => {
+    setPlayError('')
+    setEpisodeIndex(index)
+  }, [])
 
   const switchLine = useCallback(
     (next: PlayerLine) => {
@@ -183,122 +187,119 @@ function PlayerSession({
     return lines[(index + 1) % lines.length]
   }, [line, lines])
 
-  const panel = line && (
-    <EpisodePanel
-      variant={layout === 'below' ? 'strip' : layout === 'cinema' ? 'drawer' : 'sidebar'}
-      lines={lines}
-      line={line}
-      onLine={switchLine}
-      episodeIndex={episodeIndex}
-      onEpisode={selectEpisode}
-      autoNext={autoNext}
-      onAutoNext={toggleAutoNext}
-      onClose={() => setPanelOpen(false)}
-    />
-  )
-
   return (
-    <div className={`player-app is-${layout}`}>
+    <div className="player-app">
       <PlayerTitleBar
         title={title}
         episode={episodeName}
         total={line?.episodes.length ?? 0}
-        layout={layout}
-        onLayout={onLayout}
         panelOpen={panelOpen}
-        onTogglePanel={() => setPanelOpen((value) => !value)}
+        episodesActive={panelOpen && panelTab === 'episodes'}
+        onEpisodes={onEpisodes}
       />
 
-      <div className="player-scroll">
-        <div
-          className={`player-body${layout === 'standard' && phase === 'error' ? ' is-solo' : ''}`}
-        >
-          <div className="player-main">
-            <section className={`player-stage${phase === 'ready' ? ' is-ready' : ''}`}>
-              {/* ArtPlayer 的挂载点：尺寸由外层 section 决定 */}
-              <div className="player-stage-art" ref={stageRef} />
+      <div className={`player-body${line && panelOpen ? ' has-panel' : ''}`}>
+        <section className="player-stage">
+          {/* ArtPlayer 的挂载点：尺寸由外层 section 决定 */}
+          <div className="player-stage-art" ref={stageRef} />
 
-              {phase === 'loading' && (
-                <div className="player-state">
-                  <span className="player-spinner" aria-hidden="true" />
-                  <p className="player-state-title">正在读取播放源…</p>
-                </div>
-              )}
+          {phase === 'loading' && (
+            <div className="player-state">
+              <span className="player-spinner" aria-hidden="true" />
+              <p className="player-state-title">正在读取播放源…</p>
+            </div>
+          )}
 
-              {phase === 'error' && (
-                <div className="player-state is-error">
-                  <VideoCameraOutlined className="player-state-icon" />
-                  <p className="player-state-title">{errorText}</p>
-                  {errorHint && <p className="player-state-hint">{errorHint}</p>}
-                  <button type="button" className="player-btn" onClick={reload}>
-                    <ReloadOutlined />
-                    重新加载
+          {phase === 'error' && (
+            <div className="player-state is-error">
+              <VideoCameraOutlined className="player-state-icon" />
+              <p className="player-state-title">{errorText}</p>
+              {errorHint && <p className="player-state-hint">{errorHint}</p>}
+              <button type="button" className="player-btn" onClick={reload}>
+                <ReloadOutlined />
+                重新加载
+              </button>
+            </div>
+          )}
+
+          {phase === 'ready' && playError && (
+            <div className="player-state is-overlay">
+              <p className="player-state-title">{playError}</p>
+              <div className="player-state-actions">
+                <button type="button" className="player-btn" onClick={retryPlayback}>
+                  重试
+                </button>
+                {nextLine && (
+                  <button
+                    type="button"
+                    className="player-btn is-ghost"
+                    onClick={() => switchLine(nextLine)}
+                  >
+                    换线路
                   </button>
-                </div>
-              )}
+                )}
+              </div>
+            </div>
+          )}
+        </section>
 
-              {phase === 'ready' && playError && (
-                <div className="player-state is-overlay">
-                  <p className="player-state-title">{playError}</p>
-                  <div className="player-state-actions">
-                    <button type="button" className="player-btn" onClick={retryPlayback}>
-                      重试
-                    </button>
-                    {nextLine && (
-                      <button
-                        type="button"
-                        className="player-btn is-ghost"
-                        onClick={() => switchLine(nextLine)}
-                      >
-                        换线路
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-
-            <PlayerInfo
-              key={detail?.id ?? 'loading'}
-              detail={detail}
-              line={line}
-              lineLabel={lineLabel}
-            />
-
-            {layout === 'below' && panel}
-          </div>
-
-          {layout === 'standard' && panel && <aside className="player-side">{panel}</aside>}
-        </div>
-      </div>
-
-      {layout === 'cinema' && panel && (
-        <div className={`player-drawer${panelOpen ? ' is-open' : ''}`}>
-          <div
-            className="player-drawer-scrim"
-            aria-hidden="true"
-            onClick={() => setPanelOpen(false)}
+        {line && panelOpen && (
+          <PlayerPanel
+            tab={panelTab}
+            onTab={onPanelTab}
+            onClose={onTogglePanel}
+            lines={lines}
+            line={line}
+            onLine={switchLine}
+            episodeIndex={episodeIndex}
+            onEpisode={selectEpisode}
+            autoNext={autoNext}
+            onAutoNext={toggleAutoNext}
+            detail={detail}
+            lineLabel={lineLabel}
           />
-          <aside className="player-drawer-panel">{panel}</aside>
-        </div>
-      )}
+        )}
+
+        {line && (
+          <button
+            type="button"
+            className="player-panel-toggle"
+            onClick={onTogglePanel}
+            title={panelOpen ? '收起侧边面板' : '展开侧边面板'}
+            aria-label={panelOpen ? '收起侧边面板' : '展开侧边面板'}
+            aria-expanded={panelOpen}
+          >
+            {panelOpen ? <LeftOutlined /> : <RightOutlined />}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
 
 /**
  * 独立播放窗口的页面：先取主进程给的播放载荷，再交给按 token 挂载的会话组件。
- * 主题与强调色跟随主窗口：主窗口每次切换都会推一份外观过来，这里直接换色，不用重开窗口。
+ * 播放页固定深色，只跟随主窗口的强调色；面板开合状态放在这一层，换片不会重置。
  */
-function PlayerApp({
-  initialAppearance
-}: {
-  initialAppearance: PlayerAppearance
-}): React.JSX.Element {
+function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Element {
   const [payload, setPayload] = useState<PlayerPayload | null>(null)
   const [missing, setMissing] = useState(false)
-  const [layout, setLayout] = useState<PlayerLayout>(readLayout)
-  const [appearance, setAppearance] = useState<PlayerAppearance>(initialAppearance)
+  const [accentKey, setAccentKey] = useState(initialAccent)
+  const [panelOpen, setPanelOpen] = useState(readPanelOpen)
+  const [panelTab, setPanelTab] = useState<PlayerPanelTab>(readPanelTab)
+
+  // 旧的三档布局已经删掉，清掉遗留的本地配置
+  useEffect(() => {
+    localStorage.removeItem(LEGACY_LAYOUT_KEY)
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(PANEL_OPEN_KEY, panelOpen ? '1' : '0')
+  }, [panelOpen])
+
+  useEffect(() => {
+    localStorage.setItem(PANEL_TAB_KEY, panelTab)
+  }, [panelTab])
 
   useEffect(() => {
     let alive = true
@@ -317,47 +318,50 @@ function PlayerApp({
     }
   }, [])
 
-  // 主窗口切换主题 / 强调色：写 CSS 变量，再更新 ArtPlayer 的主题色
+  // 主窗口切换强调色：播放页固定深色，只换强调色变量，再更新 ArtPlayer 的主题色
   useEffect(() => {
     return window.api.appearance.onChange((value) => {
-      applyAppearance(value.theme, findAccent(value.accent))
-      setAppearance(value)
+      applyPlayerAppearance(findAccent(value.accent))
+      setAccentKey(value.accent)
     })
   }, [])
 
-  const changeLayout = useCallback((next: PlayerLayout) => {
-    setLayout(next)
-    localStorage.setItem(LAYOUT_KEY, next)
+  // 标题栏 / 播放器控制条里的「选集」：打开面板并停在剧集 tab
+  const openEpisodes = useCallback(() => {
+    setPanelTab('episodes')
+    setPanelOpen(true)
   }, [])
 
-  const accent = findAccent(appearance.accent)[appearance.theme]
+  // 右缘中部按钮与面板头部关闭：只做开合，保留当前 tab
+  const togglePanel = useCallback(() => {
+    setPanelOpen((value) => !value)
+  }, [])
+
+  const changePanelTab = useCallback((tab: PlayerPanelTab) => setPanelTab(tab), [])
+
+  const accent = findAccent(accentKey).dark
 
   if (!payload) {
     return (
-      <div className={`player-app is-${layout}`}>
+      <div className="player-app">
         <PlayerTitleBar
           title={missing ? '无法播放' : '正在准备播放'}
           episode=""
           total={0}
-          layout={layout}
-          onLayout={changeLayout}
           panelOpen={false}
-          onTogglePanel={() => {}}
+          episodesActive={false}
+          onEpisodes={openEpisodes}
         />
-        <div className="player-scroll">
-          <div className="player-body">
-            <div className="player-main">
-              <section className="player-stage">
-                <div className="player-state is-error">
-                  <VideoCameraOutlined className="player-state-icon" />
-                  <p className="player-state-title">
-                    {missing ? '没有收到播放信息' : '正在读取播放信息…'}
-                  </p>
-                  {missing && <p className="player-state-hint">回到视频详情，重新点一集试试</p>}
-                </div>
-              </section>
+        <div className="player-body">
+          <section className="player-stage">
+            <div className="player-state is-error">
+              <VideoCameraOutlined className="player-state-icon" />
+              <p className="player-state-title">
+                {missing ? '没有收到播放信息' : '正在读取播放信息…'}
+              </p>
+              {missing && <p className="player-state-hint">回到视频详情，重新点一集试试</p>}
             </div>
-          </div>
+          </section>
         </div>
       </div>
     )
@@ -367,9 +371,12 @@ function PlayerApp({
     <PlayerSession
       key={payload.token}
       payload={payload}
-      layout={layout}
-      onLayout={changeLayout}
       accent={accent}
+      panelOpen={panelOpen}
+      panelTab={panelTab}
+      onEpisodes={openEpisodes}
+      onTogglePanel={togglePanel}
+      onPanelTab={changePanelTab}
     />
   )
 }

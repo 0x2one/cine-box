@@ -64,13 +64,13 @@ interface PlayerApi {
   onLoad: (callback: (payload: PlayerPayload) => void) => () => void
 }
 
-/** 主窗口当前的外观：播放窗按它初始化，并在主窗口切换主题 / 强调色时实时跟随 */
+/**
+ * 播放窗需要跟随的外观：播放页固定深色（不跟主窗口明暗主题），
+ * 只需要主窗口当前选中的强调色；底色由主进程固定成深色。
+ */
 interface PlayerAppearance {
-  theme: 'light' | 'dark'
   /** 强调色 key（见 theme/appearance.ts 的 ACCENTS） */
   accent: string
-  /** 页面底色，主进程用它做播放窗的 backgroundColor */
-  bg: string
 }
 
 interface AppearanceApi {
