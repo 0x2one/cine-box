@@ -74,6 +74,8 @@ export interface DetailSourceRow {
   detailNote: string
   detailStale: boolean
   detailError: string
+  /** 详情文件内容（简介 + 线路）的指纹，空 = 未知（老库还没回填） */
+  detailHash: string
 }
 
 export interface DetailIndexPatch {
@@ -85,6 +87,7 @@ export interface DetailIndexPatch {
   detailNote?: string
   detailStale?: boolean
   detailError?: string
+  detailHash?: string
 }
 
 export interface VideoCacheStore {
@@ -197,7 +200,11 @@ CREATE TABLE IF NOT EXISTS video_sources (
   detail_note TEXT NOT NULL DEFAULT '',
   detail_stale INTEGER NOT NULL DEFAULT 0,
   detail_error TEXT NOT NULL DEFAULT '',
+  -- 详情内容（简介 + 播放线路）的指纹：采集时用来判断缓存的详情要不要重写
+  detail_hash TEXT NOT NULL DEFAULT '',
   last_full_run TEXT NOT NULL DEFAULT '',
+  -- 备注最后一次被采集改掉的时间：任何来源改了 note 都让它接管 videos.note
+  note_changed_at TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (site_id, source_video_id)
@@ -356,7 +363,8 @@ function rowToDetailSource(row: Record<string, unknown>): DetailSourceRow {
     detailSourceTs: num(row.detail_source_ts),
     detailNote: text(row.detail_note),
     detailStale: num(row.detail_stale) !== 0,
-    detailError: text(row.detail_error)
+    detailError: text(row.detail_error),
+    detailHash: text(row.detail_hash)
   }
 }
 
@@ -421,6 +429,20 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
   function initSchema(connection: DatabaseSync): void {
     connection.exec(PRAGMAS)
     connection.exec(CREATE_SCHEMA)
+    // 后加列：老库补上（新库建表时已经有了），保持迁移幂等
+    const columns = new Set(
+      (
+        connection.prepare('PRAGMA table_info(video_sources)').all() as Record<string, unknown>[]
+      ).map((row) => text(row.name))
+    )
+    if (!columns.has('detail_hash')) {
+      connection.exec("ALTER TABLE video_sources ADD COLUMN detail_hash TEXT NOT NULL DEFAULT ''")
+    }
+    if (!columns.has('note_changed_at')) {
+      connection.exec(
+        "ALTER TABLE video_sources ADD COLUMN note_changed_at TEXT NOT NULL DEFAULT ''"
+      )
+    }
     connection.exec('PRAGMA user_version = 1')
   }
 
@@ -440,8 +462,8 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
   function recomputeVideo(connection: DatabaseSync, videoId: number, now: string): void {
     const sources = connection
       .prepare(
-        `SELECT id, name, pic, note, intro_excerpt, intro_truncated, source_ts, source_time,
-                vod_actor, vod_class
+        `SELECT id, name, pic, note, note_changed_at, intro_excerpt, intro_truncated, source_ts,
+                source_time, vod_actor, vod_class
          FROM video_sources
          WHERE video_id = ?
          ORDER BY source_ts DESC, id ASC`
@@ -464,6 +486,17 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       }
       return own ?? ''
     }
+    /**
+     * 备注是唯一「谁最新改的就听谁」的字段：任何站点（不管是不是主来源）在采集时改了
+     * note，都会在 writePage 里打上 note_changed_at，这里取时间最大的那条覆盖主来源的
+     * 备注；老数据没有这个时间（全为 ''）时退回原来的「主来源优先、为空回落」。
+     */
+    const noteSource = sources.reduce<Record<string, unknown> | null>((best, source) => {
+      const changedAt = text(source.note_changed_at)
+      if (!changedAt || !text(source.note)) return best
+      if (!best) return source
+      return changedAt > text(best.note_changed_at) ? source : best
+    }, null)
     const primaryName = text(primary.name)
     const searchText = makeSearchText(primaryName)
     const latestTs = Math.max(...sources.map((source) => num(source.source_ts)))
@@ -476,7 +509,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       primarySourceId: num(primary.id),
       sourceCount: sources.length,
       pic: text(pick('pic')),
-      note: text(pick('note')),
+      note: text(noteSource ? noteSource.note : pick('note')),
       vodActor: text(pick('vod_actor')),
       vodClass: text(pick('vod_class')),
       introExcerpt: text(introSource.intro_excerpt),
@@ -601,6 +634,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
            source_time = ?, source_ts = ?, category_id = ?, category_name = ?,
            vod_actor = ?, vod_class = ?,
            detail_stale = CASE WHEN ? = 1 THEN 1 ELSE detail_stale END,
+           note_changed_at = CASE WHEN ? = 1 THEN ? ELSE note_changed_at END,
            last_full_run = CASE WHEN ? = 1 THEN ? ELSE last_full_run END,
            updated_at = CASE WHEN ? = 1 THEN ? ELSE updated_at END
          WHERE id = ?`
@@ -697,6 +731,8 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
           text(existing.detail_cached_at) !== '' &&
           (merged.sourceTs !== num(existing.detail_source_ts) ||
             merged.note !== text(existing.detail_note))
+        // 备注被改过就记下时间：不管这条是不是主来源，videos.note 都要跟着这个新备注走
+        const noteChanged = text(existing.note) !== merged.note
         const tokenChanged = fullAll && text(existing.last_full_run) !== runToken
 
         if (changed || stale || tokenChanged) {
@@ -714,6 +750,8 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
             merged.vodActor,
             merged.vodClass,
             stale ? 1 : 0,
+            noteChanged ? 1 : 0,
+            now,
             fullAll ? 1 : 0,
             runToken,
             changed ? 1 : 0,
@@ -1420,7 +1458,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
         `SELECT id, site_id, source_video_id, video_id, name, pic, note, source_time, source_ts,
                 category_id, category_name, vod_actor, vod_class,
                 detail_path, detail_size, detail_cached_at, detail_accessed_at,
-                detail_source_ts, detail_note, detail_stale, detail_error
+                detail_source_ts, detail_note, detail_stale, detail_error, detail_hash
          FROM video_sources WHERE video_id = ? ORDER BY source_ts DESC, id ASC`
       )
       .all(videoId) as Record<string, unknown>[]
@@ -1473,7 +1511,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
         `SELECT id, site_id, source_video_id, video_id, name, pic, note, source_time, source_ts,
                 category_id, category_name, vod_actor, vod_class,
                 detail_path, detail_size, detail_cached_at, detail_accessed_at,
-                detail_source_ts, detail_note, detail_stale, detail_error
+                detail_source_ts, detail_note, detail_stale, detail_error, detail_hash
          FROM video_sources WHERE id = ?`
       )
       .get(sourceId) as Record<string, unknown> | undefined
@@ -1499,6 +1537,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       values.push(patch.detailStale ? 1 : 0)
     }
     set('detail_error', patch.detailError)
+    set('detail_hash', patch.detailHash)
     if (assignments.length === 0) return
     values.push(sourceId)
     database()
@@ -1523,7 +1562,8 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       .prepare(
         `UPDATE video_sources SET
            detail_path = '', detail_size = 0, detail_cached_at = '', detail_accessed_at = '',
-           detail_source_ts = 0, detail_note = '', detail_stale = 0, detail_error = ''
+           detail_source_ts = 0, detail_note = '', detail_stale = 0, detail_error = '',
+           detail_hash = ''
          WHERE id = ?`
       )
       .run(sourceId)
@@ -1534,11 +1574,13 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     const sql = siteId
       ? `UPDATE video_sources SET
            detail_path = '', detail_size = 0, detail_cached_at = '', detail_accessed_at = '',
-           detail_source_ts = 0, detail_note = '', detail_stale = 0, detail_error = ''
+           detail_source_ts = 0, detail_note = '', detail_stale = 0, detail_error = '',
+           detail_hash = ''
          WHERE site_id = ? AND (detail_path <> '' OR detail_cached_at <> '' OR detail_error <> '')`
       : `UPDATE video_sources SET
            detail_path = '', detail_size = 0, detail_cached_at = '', detail_accessed_at = '',
-           detail_source_ts = 0, detail_note = '', detail_stale = 0, detail_error = ''
+           detail_source_ts = 0, detail_note = '', detail_stale = 0, detail_error = '',
+           detail_hash = ''
          WHERE detail_path <> '' OR detail_cached_at <> '' OR detail_error <> ''`
     return Number(
       (siteId ? connection.prepare(sql).run(siteId) : connection.prepare(sql).run()).changes

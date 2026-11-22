@@ -122,6 +122,17 @@ function buildDetail(item: CollectedVideo, source: DetailSourceRow): CachedVideo
   }
 }
 
+/**
+ * 详情内容指纹：只算「库里没有、只存在于详情文件」的两样——完整简介和播放线路。
+ * `video_sources` 里不存线路，所以「只有播放地址变了」靠 `source_ts` / 备注是发现不了的；
+ * 采集时用这次响应算出指纹跟缓存里的比，不一致就重写缓存。
+ */
+function detailFingerprint(detail: Pick<CachedVideoDetail, 'intro' | 'playLines'>): string {
+  return createHash('sha1')
+    .update(JSON.stringify({ intro: detail.intro, playLines: detail.playLines }))
+    .digest('hex')
+}
+
 function asString(value: unknown, max = 2000): string {
   return typeof value === 'string' ? value.slice(0, max) : ''
 }
@@ -332,7 +343,8 @@ export function createVideoDetailCache(options: {
       detailSourceTs: body.sourceTs || source.sourceTs,
       detailNote: body.note || source.note,
       detailStale: false,
-      detailError: ''
+      detailError: '',
+      detailHash: detailFingerprint(body)
     })
     return bytes
   }
@@ -643,6 +655,10 @@ export function createVideoDetailCache(options: {
    * 直接 buildDetail + 写文件即可，省掉「每 10 个 id 再抓一次」的重复下载。
    * 整页响应里缺条目、或简介与线路都为空时，说明这站的整页模式可能不给详情，
    * 交回给 warm() 按 id 补抓，行为与改造前一致。
+   *
+   * 「要不要重写」的判断：有新内容、已过期、或者内容指纹和缓存里的不一样。
+   * 最后一条正是为了「播放线路换了但 source_ts 没变」——这种情况库里的字段一个都没动，
+   * 只能靠这里比对详情内容本身；指纹一致就跳过，避免每次采集都重写几万个文件。
    */
   async function warmFromPage(
     sources: DetailSourceRow[],
@@ -652,14 +668,20 @@ export function createVideoDetailCache(options: {
     let cached = 0
     let failed = 0
     for (const source of sources) {
-      if (source.detailCachedAt !== '' && !source.detailStale) continue
       const item = items.get(source.sourceVideoId)
       if (!item || (item.playLines.length === 0 && item.intro === '')) {
         fallback.push(source)
         continue
       }
+      const detail = buildDetail(item, source)
+      const hasFile =
+        source.detailCachedAt !== '' && source.detailPath !== '' && !source.detailStale
+      // 指纹为空 = 老库还没回填，宁可多写一次也要把指纹补上，否则永远发现不了线路变化
+      if (hasFile && source.detailHash !== '' && source.detailHash === detailFingerprint(detail)) {
+        continue
+      }
       try {
-        await writeCached(source, buildDetail(item, source))
+        await writeCached(source, detail)
         cached += 1
       } catch (error) {
         const code = errorOf(error)
