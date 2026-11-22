@@ -2657,13 +2657,20 @@ body .collect-form .ant-form-item-extra {
 
 .capacity-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1.1fr) minmax(140px, 1fr) minmax(140px, 1fr);
+  grid-template-columns: minmax(140px, 1.1fr) minmax(120px, 1fr) minmax(120px, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
+}
+
+.capacity-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  justify-self: end;
 }
 
 .capacity-row-name {
@@ -2686,6 +2693,62 @@ body .collect-form .ant-form-item-extra {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* 清理详情的范围选择：一行一个站点，右侧直接标出体积，不用再点开下拉找。
+   antd 的样式是运行时注入的，选择器多带一层 .capacity-clear 才压得住 .ant-radio-group */
+.capacity-clear .capacity-scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  margin: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.capacity-scope-list .capacity-scope-row {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+
+.capacity-scope-list .capacity-scope-row:hover {
+  border-color: var(--accent);
+}
+
+/* antd 把 children 放在 .ant-radio-label 里，撑满剩余宽度才能左右分栏 */
+.capacity-scope-list .capacity-scope-row .ant-radio-label {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.capacity-scope-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capacity-scope-meta {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .capacity-warning {
@@ -2878,6 +2941,11 @@ body .collect-form .ant-form-item-extra {
   .capacity-row {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .capacity-row-actions {
+    justify-self: start;
+    margin-top: 2px;
   }
 }
 

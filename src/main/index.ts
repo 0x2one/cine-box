@@ -61,6 +61,7 @@ import type {
   VideoCollectStartInput,
   VideoListQuery,
   VideoScheduleInput,
+  VideoSitePurgeResult,
   VideoUpdateInput
 } from './video-types'
 
@@ -169,24 +170,33 @@ async function reconcileVideoCache(): Promise<void> {
  * 所以它不堵在 IPC 的返回路径上——调用方立刻拿到结果，这里排队慢慢清；
  * 同一站点连续触发时串行执行，第二次不会插到第一次中间。
  */
-const siteCachePurges = new Map<string, Promise<void>>()
+type SiteCachePurgeStats = { sources: number; videos: number; shared: number }
 
-async function purgeSiteCache(siteId: string): Promise<void> {
-  collector.cancel({ siteId })
+const siteCachePurges = new Map<string, Promise<SiteCachePurgeStats | null>>()
+
+async function purgeSiteCache(siteId: string): Promise<SiteCachePurgeStats | null> {
+  // 先停掉这个站点的采集并等它退出：只置取消标记的话，在途那一页会在删完之后写回来
+  await collector.stopAndWait(siteId)
   // 先作废推荐页那份缓存：清理期间重建也不会再看到这个站点的视频
   invalidateHomeFeed()
-  if (!videoCacheReady) return
+  if (!videoCacheReady) return null
+  let removed: SiteCachePurgeStats
   try {
-    videoStore.removeSite(siteId)
+    removed = videoStore.removeSite(siteId)
   } catch (error) {
     console.error('清理站点视频缓存失败', error)
-    return
+    return null
   }
   await detailCache.removeSite(siteId).catch(() => {})
   invalidateHomeFeed()
+  return removed
 }
 
-function scheduleSiteCachePurge(siteId: string): void {
+/**
+ * 排队清理一个站点的缓存。返回的是这次（含前面排着的同站点清理）的 Promise：
+ * `sites:update` / `sites:remove` 不关心结果，容量页的「删除站点数据」要等它删完报数字。
+ */
+function scheduleSiteCachePurge(siteId: string): Promise<SiteCachePurgeStats | null> {
   const next = (siteCachePurges.get(siteId) ?? Promise.resolve())
     .catch(() => {})
     .then(() => purgeSiteCache(siteId))
@@ -194,6 +204,7 @@ function scheduleSiteCachePurge(siteId: string): void {
       if (siteCachePurges.get(siteId) === next) siteCachePurges.delete(siteId)
     })
   siteCachePurges.set(siteId, next)
+  return next
 }
 
 /** 采集 / 清空缓存 / 恢复备份前先等后台清理做完，否则刚写进去的数据会被它删掉 */
@@ -803,6 +814,43 @@ ipcMain.handle('videos:details:clear', async (_event, options?: { siteId?: strin
   return detailCache.clear(options?.siteId ? String(options.siteId) : undefined)
 })
 
+/**
+ * 容量页「删除站点数据」：这个站点的来源、只属于它的视频（连人工编辑）、详情文件、
+ * 采集进度与采集日志一次清掉。站点本身、在线 / 本地分类、绑定与定时计划在业务库里，不动。
+ * 走和改地址 / 删站点同一条清理队列（按站点串行），所以采集器入队时也能等到它删完。
+ */
+ipcMain.handle(
+  'videos:site:purge',
+  async (_event, input?: { siteId?: string }): Promise<VideoSitePurgeResult> => {
+    const empty: VideoSitePurgeResult = {
+      ok: false,
+      sources: 0,
+      videos: 0,
+      shared: 0,
+      detailCount: 0,
+      detailBytes: 0,
+      logs: 0
+    }
+    if (!videoCacheReady) return { ...empty, error: 'CACHE_UNAVAILABLE' }
+    const siteId = String(input?.siteId ?? '').trim()
+    if (!siteId) return { ...empty, error: 'INVALID_INPUT' }
+    // 先量好这个站点的详情体积，删完就查不到了
+    const before = videoStore.capacity(siteNameMap()).sites.find((row) => row.siteId === siteId)
+    const removed = await scheduleSiteCachePurge(siteId)
+    if (!removed) return { ...empty, error: 'DB' }
+    const logs = collectLogs.clear(siteId)
+    return {
+      ok: true,
+      sources: removed.sources,
+      videos: removed.videos,
+      shared: removed.shared,
+      detailCount: before?.detailCount ?? 0,
+      detailBytes: before?.detailBytes ?? 0,
+      logs
+    }
+  }
+)
+
 ipcMain.handle('videos:progress', (_event, siteId?: string) => {
   if (!videoCacheReady) return []
   return videoStore.listProgress(siteId ? String(siteId) : undefined)
@@ -964,7 +1012,7 @@ ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
   if (formatChanged || !isSameSiteHost(existing.address, result.site.address)) {
     // 先同步作废推荐页那份缓存：清理是异步的，别让接下来的 home:get 还拿到旧 feed
     invalidateHomeFeed()
-    scheduleSiteCachePurge(siteId)
+    void scheduleSiteCachePurge(siteId)
   }
   return result
 })
@@ -982,7 +1030,7 @@ ipcMain.handle('sites:remove', (_event, id: string) => {
     syncHomeRecommendations()
     invalidateHomeFeed()
     // 站点缓存与详情目录在后台清，几万条来源时不拖住删除操作
-    scheduleSiteCachePurge(siteId)
+    void scheduleSiteCachePurge(siteId)
   }
   return result
 })

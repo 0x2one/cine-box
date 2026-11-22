@@ -181,6 +181,9 @@ const api = {
     clearOrphans: (): Promise<VideoOrphanPurgeResult> => ipcRenderer.invoke('videos:orphans:clear'),
     clearDetails: (options?: { siteId?: string }): Promise<DetailClearResult> =>
       ipcRenderer.invoke('videos:details:clear', options),
+    /** 删除一个站点的全部缓存数据（来源 / 视频 / 详情 / 进度 / 日志） */
+    purgeSite: (input: { siteId: string }): Promise<VideoSitePurgeResult> =>
+      ipcRenderer.invoke('videos:site:purge', input),
     progress: (siteId?: string): Promise<VideoCollectProgress[]> =>
       ipcRenderer.invoke('videos:progress', siteId),
     collect: (input: VideoCollectStartInput): Promise<VideoCollectStartResult> =>

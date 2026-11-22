@@ -817,6 +817,22 @@ interface DetailClearResult {
   error?: string
 }
 
+/** 容量页「删除站点数据」的结果 */
+interface VideoSitePurgeResult {
+  ok: boolean
+  error?: string
+  /** 删掉的来源行 */
+  sources: number
+  /** 跟着一起删掉的视频（只在这个站点有来源的那些） */
+  videos: number
+  /** 与其它站点共有、只重新挑主来源的视频数 */
+  shared: number
+  detailCount: number
+  detailBytes: number
+  /** 一起清掉的采集日志条数 */
+  logs: number
+}
+
 interface VideoCacheClearResult {
   ok: boolean
   freedBytes?: number
@@ -840,6 +856,8 @@ interface VideosApi {
   /** 清掉没有任何来源的视频（容量页的手动修复入口） */
   clearOrphans: () => Promise<VideoOrphanPurgeResult>
   clearDetails: (options?: { siteId?: string }) => Promise<DetailClearResult>
+  /** 删除一个站点的全部缓存数据（来源 / 视频 / 详情 / 进度 / 日志） */
+  purgeSite: (input: { siteId: string }) => Promise<VideoSitePurgeResult>
   progress: (siteId?: string) => Promise<VideoCollectProgress[]>
   collect: (input: VideoCollectStartInput) => Promise<VideoCollectStartResult>
   cancelCollect: (input: {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { App, Button, Checkbox, Modal, Radio, Select, Space, Spin, Tooltip } from 'antd'
+import { App, Button, Checkbox, Modal, Radio, Spin, Tooltip } from 'antd'
 import {
   ClearOutlined,
   DatabaseOutlined,
@@ -8,7 +8,7 @@ import {
   ReloadOutlined,
   ScanOutlined
 } from '@ant-design/icons'
-import { formatBytes, formatDateTime } from '../utils/format'
+import { formatBytes, formatCount, formatDateTime } from '../utils/format'
 
 /** 控制台「容量」：缓存索引 + 详情文件缓存体积，支持手动清理 */
 function CapacityPanel({ title, desc }: { title: string; desc: string }): React.JSX.Element {
@@ -21,9 +21,11 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [clearAllOpen, setClearAllOpen] = useState(false)
   const [orphanOpen, setOrphanOpen] = useState(false)
-  const [scope, setScope] = useState<'all' | 'site'>('all')
-  const [clearSiteId, setClearSiteId] = useState('')
-  const [clearing, setClearing] = useState<'details' | 'all' | 'orphans' | null>(null)
+  /** 清理详情的范围：'all' = 全部站点，否则是站点 id；弹窗里的单选也用它 */
+  const [clearTarget, setClearTarget] = useState('all')
+  /** 要删掉全部缓存数据的站点 id，空串 = 弹窗关着 */
+  const [purgeTarget, setPurgeTarget] = useState('')
+  const [clearing, setClearing] = useState<'details' | 'all' | 'orphans' | 'site' | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -42,13 +44,21 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
   }, [load])
 
   const sites = capacity?.sites ?? []
+  /** 有详情缓存的站点：清理详情的弹窗只列这些，全部站点那一行始终在 */
+  const detailSites = useMemo(() => sites.filter((site) => site.detailCount > 0), [sites])
   const totalBytes = (capacity?.dbBytes ?? 0) + (capacity?.detailBytes ?? 0)
-  const selectedSite = useMemo(
-    () => sites.find((site) => site.siteId === clearSiteId) ?? null,
-    [sites, clearSiteId]
+  const targetSite = useMemo(
+    () => sites.find((site) => site.siteId === clearTarget) ?? null,
+    [sites, clearTarget]
   )
-  const estimatedBytes =
-    scope === 'all' ? (capacity?.detailBytes ?? 0) : (selectedSite?.detailBytes ?? 0)
+  /** 清理范围的文案（全部站点 / 站点名），用在弹窗说明和成功提示里 */
+  const targetName = clearTarget === 'all' ? '全部站点' : (targetSite?.siteName ?? '该站点')
+  const targetBytes =
+    clearTarget === 'all' ? (capacity?.detailBytes ?? 0) : (targetSite?.detailBytes ?? 0)
+  const purgeSite = useMemo(
+    () => sites.find((site) => site.siteId === purgeTarget) ?? null,
+    [sites, purgeTarget]
+  )
 
   const scan = async (): Promise<void> => {
     setScanning(true)
@@ -64,28 +74,60 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
     }
   }
 
+  /** 打开「清理详情」弹窗：工具栏按钮默认清全部，站点行的「清理详情」直接选中这个站点 */
+  const openDetailClear = (target: string): void => {
+    setClearTarget(target)
+    setDetailsOpen(true)
+  }
+
   const clearDetails = async (): Promise<void> => {
-    if (scope === 'site' && !clearSiteId) {
-      message.warning('请选择要清理的站点')
-      return
-    }
     setClearing('details')
     try {
       const result = await window.api.videos.clearDetails(
-        scope === 'site' ? { siteId: clearSiteId } : undefined
+        clearTarget === 'all' ? undefined : { siteId: clearTarget }
       )
       if (!result.ok) {
         message.warning(
           `部分文件被占用，索引已重置${result.freedBytes ? `，释放 ${formatBytes(result.freedBytes)}` : ''}`
         )
       } else {
-        message.success(`详情缓存已清理，释放 ${formatBytes(result.freedBytes ?? 0)}`)
+        message.success(
+          `${targetName}的详情缓存已清理，释放 ${formatBytes(result.freedBytes ?? 0)}`
+        )
       }
       setDetailsOpen(false)
       setDrift(null)
       await load()
     } catch {
       message.error('清理详情缓存失败')
+    } finally {
+      setClearing(null)
+    }
+  }
+
+  /**
+   * 删除一个站点的全部缓存数据：来源、只属于它的视频、详情文件、采集进度与采集日志。
+   * 站点本身与分类 / 绑定 / 计划在业务库里，不在这里删。
+   */
+  const purgeSiteData = async (): Promise<void> => {
+    if (!purgeTarget) return
+    setClearing('site')
+    try {
+      const result = await window.api.videos.purgeSite({ siteId: purgeTarget })
+      if (!result.ok) {
+        message.error('删除站点数据失败')
+        return
+      }
+      message.success(
+        `已删除「${purgeSite?.siteName ?? '该站点'}」的数据：${formatCount(result.sources)} 个来源、` +
+          `${formatCount(result.videos)} 部视频，释放 ${formatBytes(result.detailBytes)}` +
+          (result.shared > 0 ? `（${formatCount(result.shared)} 部与其它站点共有，已保留）` : '')
+      )
+      setPurgeTarget('')
+      setDrift(null)
+      await load()
+    } catch {
+      message.error('删除站点数据失败')
     } finally {
       setClearing(null)
     }
@@ -151,11 +193,7 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
           <Button
             icon={<DeleteOutlined />}
             disabled={!capacity || capacity.detailCount === 0}
-            onClick={() => {
-              setScope('all')
-              setClearSiteId('')
-              setDetailsOpen(true)
-            }}
+            onClick={() => openDetailClear('all')}
           >
             清理详情
           </Button>
@@ -276,8 +314,8 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
             </div>
             {sites.length === 0 ? (
               <div className="sites-placeholder">
-                <span className="sites-empty-title">还没有详情缓存</span>
-                <span className="sites-empty-hint">打开视频详情后会按需产生缓存文件</span>
+                <span className="sites-empty-title">还没有站点缓存</span>
+                <span className="sites-empty-hint">采集视频后会按来源分站点统计</span>
               </div>
             ) : (
               <ul className="capacity-list">
@@ -291,6 +329,25 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
                     </span>
                     <span className="capacity-row-detail">
                       {site.detailCount} 个详情 · {formatBytes(site.detailBytes)}
+                    </span>
+                    <span className="capacity-row-actions">
+                      <Button
+                        size="small"
+                        type="text"
+                        disabled={site.detailCount === 0}
+                        onClick={() => openDetailClear(site.siteId)}
+                      >
+                        清理详情
+                      </Button>
+                      <Button
+                        size="small"
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => setPurgeTarget(site.siteId)}
+                      >
+                        删除数据
+                      </Button>
                     </span>
                   </li>
                 ))}
@@ -309,33 +366,63 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
         confirmLoading={clearing === 'details'}
         onOk={() => void clearDetails()}
         onCancel={() => setDetailsOpen(false)}
-        width={480}
+        width={520}
       >
         <div className="capacity-clear">
           <Radio.Group
-            value={scope}
-            onChange={(event) => setScope(event.target.value as 'all' | 'site')}
+            className="capacity-scope-list"
+            value={clearTarget}
+            onChange={(event) => setClearTarget(event.target.value as string)}
           >
-            <Space direction="vertical">
-              <Radio value="all">清理全部站点的详情缓存</Radio>
-              <Radio value="site">只清理指定站点</Radio>
-            </Space>
+            <Radio className="capacity-scope-row" value="all">
+              <span className="capacity-scope-name">全部站点</span>
+              <span className="capacity-scope-meta">
+                {capacity?.detailCount ?? 0} 个详情 · {formatBytes(capacity?.detailBytes ?? 0)}
+              </span>
+            </Radio>
+            {detailSites.map((site) => (
+              <Radio className="capacity-scope-row" value={site.siteId} key={site.siteId}>
+                <span className="capacity-scope-name">
+                  {site.siteName || `已删除站点 ${site.siteId.slice(0, 8)}`}
+                </span>
+                <span className="capacity-scope-meta">
+                  {site.detailCount} 个详情 · {formatBytes(site.detailBytes)}
+                </span>
+              </Radio>
+            ))}
           </Radio.Group>
-          {scope === 'site' && (
-            <Select
-              style={{ width: '100%', marginTop: 12 }}
-              placeholder="选择站点"
-              value={clearSiteId || undefined}
-              onChange={setClearSiteId}
-              options={sites.map((site) => ({
-                value: site.siteId,
-                label: `${site.siteName || site.siteId.slice(0, 8)}（${site.detailCount} 个详情）`
-              }))}
-            />
-          )}
           <p className="capacity-warning">
-            将删除对应的详情文件并重置详情索引，预计释放 {formatBytes(estimatedBytes)}。
+            将删除「{targetName}」的详情文件并重置详情索引，预计释放 {formatBytes(targetBytes)}。
             列表、搜索、采集进度、日志与定时计划都会保留；再次打开详情会重新抓取并回填。
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        title="删除站点数据"
+        open={Boolean(purgeTarget)}
+        okText="删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        confirmLoading={clearing === 'site'}
+        onOk={() => void purgeSiteData()}
+        onCancel={() => setPurgeTarget('')}
+        width={480}
+      >
+        <div className="capacity-clear">
+          <p className="capacity-warning">
+            将删除「{purgeSite?.siteName ?? '该站点'}」的 {formatCount(purgeSite?.sourceCount ?? 0)}{' '}
+            个来源、{formatCount(purgeSite?.detailCount ?? 0)} 个详情文件（
+            {formatBytes(purgeSite?.detailBytes ?? 0)}）、这个站点的采集进度与采集日志，涉及{' '}
+            {formatCount(purgeSite?.videoCount ?? 0)} 部视频。
+          </p>
+          <p className="capacity-warning">
+            只在这个站点有来源的视频会一起删掉，人工备注 / 简介 /
+            封面等编辑跟着消失；与其它站点共有的视频保留，并重新挑主来源。正在跑的采集会先停下。
+          </p>
+          <p className="capacity-warning">
+            站点本身、在线 /
+            本地分类、绑定关系与定时采集计划都不受影响——要连站点一起删，请去「站点」。推荐页里指向这些视频的条目会显示「视频已丢失」，需要手动移除。
           </p>
         </div>
       </Modal>

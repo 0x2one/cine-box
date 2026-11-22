@@ -22,6 +22,11 @@ export interface VideoCollector {
   cancel: (input: { siteId: string; mode?: CollectMode; fetchRange?: FetchRange }) => {
     ok: boolean
   }
+  /**
+   * 取消该站点正在跑的任务并等它真正退出（删站点缓存前调用）：
+   * 只置取消标记的话，在途的那一页还会落库，刚删干净的站点又被写回来一页。
+   */
+  stopAndWait: (siteId: string) => Promise<void>
   /** 取消运行中任务与排队任务，但保留采集器可用（清空缓存前调用） */
   cancelAll: () => Promise<void>
   /** 清空缓存期间暂停入队，避免重建数据库时又启动任务 */
@@ -689,6 +694,21 @@ export function createVideoCollector(options: {
     return { ok: true }
   }
 
+  async function stopAndWait(siteId: string): Promise<void> {
+    cancel({ siteId })
+    const running = active && active.item.siteId === siteId ? activeDone : null
+    if (!running) return
+    // 任务会在当前这一页结束时退出；卡在请求上时最多等 15s，别把清理挂死
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      running.catch(() => {}),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, 15000)
+      })
+    ])
+    if (timer) clearTimeout(timer)
+  }
+
   async function cancelAll(): Promise<void> {
     if (active) {
       active.cancelled = true
@@ -733,6 +753,7 @@ export function createVideoCollector(options: {
   return {
     enqueue,
     cancel,
+    stopAndWait,
     cancelAll,
     suspend: () => {
       suspended = true

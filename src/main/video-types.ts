@@ -135,6 +135,26 @@ export interface VideoOrphanPurgeResult {
   edits: number
 }
 
+/**
+ * 容量页「删除站点数据」的结果：这个站点的来源、只属于它的视频、详情文件、
+ * 采集进度与采集日志全部删掉，站点与分类 / 绑定 / 计划不动。
+ */
+export interface VideoSitePurgeResult {
+  ok: boolean
+  error?: string
+  /** 删掉的来源行 */
+  sources: number
+  /** 跟着一起删掉的视频（只在这个站点有来源的那些） */
+  videos: number
+  /** 与其它站点共有、只重新挑主来源的视频数 */
+  shared: number
+  /** 顺带删掉的详情文件数 / 体积 */
+  detailCount: number
+  detailBytes: number
+  /** 一起清掉的采集日志条数 */
+  logs: number
+}
+
 export interface VideoCollectStartInput {
   siteId: string
   mode: CollectMode

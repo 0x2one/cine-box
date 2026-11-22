@@ -98,7 +98,11 @@ export interface VideoCacheStore {
   rebuild: () => Promise<void>
   ensureSite: (site: { id: string; address: string; format: string }) => void
   listCacheSites: () => { siteId: string; address: string; format: string }[]
-  removeSite: (siteId: string) => { sources: number; videos: number }
+  /**
+   * 删掉一个站点的来源、该站点的采集进度与 cache_sites 行。
+   * `videos` 是跟着删掉的视频数，`shared` 是与其它站点共有、只重新挑主来源的视频数。
+   */
+  removeSite: (siteId: string) => { sources: number; videos: number; shared: number }
   /** 清掉没有任何来源的视频与它们的人工编辑（容量页的手动修复入口） */
   purgeOrphanVideos: () => { videos: number; edits: number }
   writePage: (
@@ -868,10 +872,11 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
    * 删完来源后只重算「还有来源」的那一部分，其余孤儿视频走 `deleteOrphanVideos` 整批删掉：
    * 同一份数据 7.7s → 1.4s。
    */
-  function removeSite(siteId: string): { sources: number; videos: number } {
+  function removeSite(siteId: string): { sources: number; videos: number; shared: number } {
     const connection = database()
     let sources = 0
     let affected = 0
+    let shared = 0
     inTransaction(connection, (tx) => {
       // 临时表属于这个连接（不写进库文件），每次清理前清空
       tx.exec('CREATE TEMP TABLE IF NOT EXISTS purge_videos (id INTEGER PRIMARY KEY)')
@@ -897,11 +902,12 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
              FROM video_sources s JOIN purge_videos p ON p.id = s.video_id`
         )
         .all() as Record<string, unknown>[]
+      shared = survivors.length
       const now = new Date().toISOString()
       for (const row of survivors) recomputeVideo(tx, num(row.id), now)
       deleteOrphanVideos(tx)
     })
-    return { sources, videos: affected }
+    return { sources, videos: affected - shared, shared }
   }
 
   /** 容量页的手动修复：一次清掉库里所有没有来源的视频 */
@@ -1244,7 +1250,9 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       .get() as Record<string, unknown>
 
     // 「按站点分组」要扫全部来源行（十几万条时 100ms+），只有容量页需要；
-    // 无来源视频同样只在这条路径上数（概览的 capacity({ sites: false }) 不付这个开销）
+    // 无来源视频同样只在这条路径上数（概览的 capacity({ sites: false }) 不付这个开销）。
+    // 这里列出「有来源的所有站点」而不只是有详情的：容量页的「删除数据」要按站点清理，
+    // 没开详情缓存的站点也得能删；详情那两列在页面上照常显示 0 个 / 0 B。
     const siteRows =
       withSites === false
         ? []
@@ -1256,8 +1264,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
                       SUM(CASE WHEN detail_cached_at <> '' THEN 1 ELSE 0 END) AS detail_count,
                       SUM(CASE WHEN detail_cached_at <> '' THEN detail_size ELSE 0 END) AS detail_bytes
                FROM video_sources
-               GROUP BY site_id
-               HAVING SUM(CASE WHEN detail_cached_at <> '' THEN 1 ELSE 0 END) > 0`
+               GROUP BY site_id`
             )
             .all() as Record<string, unknown>[])
     const orphanCount =
