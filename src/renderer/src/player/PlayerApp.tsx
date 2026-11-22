@@ -32,8 +32,11 @@ interface PlayerSessionProps {
   accent: string
   panelOpen: boolean
   panelTab: PlayerPanelTab
-  /** 播放器控制条里的「选集」：开 / 关面板（收起或在「简介」时打开并切到剧集） */
-  onToggleEpisodes: () => void
+  /**
+   * 播放器控制条里的「选集」：开 / 关面板（收起或在「简介」时打开并切到剧集）。
+   * 参数是从全屏退出来的：全屏时面板看不见，那一下只开不关。
+   */
+  onEpisodes: (fromFullscreen: boolean) => void
   /** 右缘中部按钮与面板头部关闭：只做开合，保留当前 tab */
   onTogglePanel: () => void
   onPanelTab: (tab: PlayerPanelTab) => void
@@ -49,7 +52,7 @@ function PlayerSession({
   accent,
   panelOpen,
   panelTab,
-  onToggleEpisodes,
+  onEpisodes,
   onTogglePanel,
   onPanelTab
 }: PlayerSessionProps): React.JSX.Element {
@@ -143,7 +146,7 @@ function PlayerSession({
     accent,
     onEnded: goNext,
     onError: (message) => setPlayError(message),
-    onToggleEpisodes
+    onEpisodes
   })
 
   const reload = useCallback(() => {
@@ -319,16 +322,20 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
     })
   }, [])
 
-  // 标题栏 / 播放器控制条里的「选集」是开关：收起或在「简介」tab 时打开并切到剧集，
-  // 已经停在剧集时再点一下收起
-  const toggleEpisodes = useCallback(() => {
-    if (panelOpen && panelTab === 'episodes') {
-      setPanelOpen(false)
-      return
-    }
-    setPanelTab('episodes')
-    setPanelOpen(true)
-  }, [panelOpen, panelTab])
+  // 控制条里的「选集」是开关：收起或在「简介」tab 时打开并切到剧集，
+  // 已经停在剧集时再点一下收起；但从全屏退出来那一次只能算「打开」——
+  // 全屏下面板在播放器外面根本看不见，当成收起就会出现「退出全屏后没有侧栏」
+  const toggleEpisodes = useCallback(
+    (fromFullscreen = false) => {
+      if (!fromFullscreen && panelOpen && panelTab === 'episodes') {
+        setPanelOpen(false)
+        return
+      }
+      setPanelTab('episodes')
+      setPanelOpen(true)
+    },
+    [panelOpen, panelTab]
+  )
 
   // 右缘中部按钮与面板头部关闭：只做开合，保留当前 tab
   const togglePanel = useCallback(() => {
@@ -365,7 +372,7 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
       accent={accent}
       panelOpen={panelOpen}
       panelTab={panelTab}
-      onToggleEpisodes={toggleEpisodes}
+      onEpisodes={toggleEpisodes}
       onTogglePanel={togglePanel}
       onPanelTab={changePanelTab}
     />

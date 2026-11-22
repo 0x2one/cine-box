@@ -38,8 +38,12 @@ export interface UseArtPlayerOptions {
   accent: string
   onEnded?: () => void
   onError?: (message: string) => void
-  /** 控制条里的「选集」：开 / 关右侧剧集面板 */
-  onToggleEpisodes?: () => void
+  /**
+   * 控制条里的「选集」：开 / 关右侧剧集面板。
+   * 参数是全屏状态：全屏时面板在播放器元素外面、根本看不见，所以那一下只能是「打开」，
+   * 不能当成「再点一次收起」，否则退出全屏后会看不到侧栏。
+   */
+  onEpisodes?: (fromFullscreen: boolean) => void
 }
 
 export interface ArtPlayerHandle {
@@ -59,7 +63,7 @@ export function useArtPlayer({
   accent,
   onEnded,
   onError,
-  onToggleEpisodes
+  onEpisodes
 }: UseArtPlayerOptions): ArtPlayerHandle {
   const artRef = useRef<Artplayer | null>(null)
   const urlRef = useRef(url)
@@ -67,7 +71,7 @@ export function useArtPlayer({
   const accentRef = useRef(accent)
   const endedRef = useRef(onEnded)
   const errorRef = useRef(onError)
-  const episodesRef = useRef(onToggleEpisodes)
+  const episodesRef = useRef(onEpisodes)
   /**
    * 已经交给播放器的地址。不能拿 art.url 比：hls.js 会把 video.src 换成 blob:，
    * 创建完那一刻 art.url 永远不等于 m3u8，直接比会把同一集再切一次。
@@ -84,7 +88,7 @@ export function useArtPlayer({
     accentRef.current = accent
     endedRef.current = onEnded
     errorRef.current = onError
-    episodesRef.current = onToggleEpisodes
+    episodesRef.current = onEpisodes
   })
 
   useEffect(() => {
@@ -183,7 +187,7 @@ export function useArtPlayer({
     appliedRef.current = firstUrl
 
     // 控制条右侧的「选集」：只放图标（走 ArtPlayer 的 .art-icon，和自带控件同一套
-    // 尺寸 / 悬停提亮 / 按压缩小）；点击是开 / 关剧集面板，全屏时先退全屏再切换
+    // 尺寸 / 悬停提亮 / 按压缩小）；全屏时先退全屏再打开面板（全屏下面板看不见，只开不关）
     instance.controls.add((art) => ({
       name: 'cinebox-episodes',
       html: art.icons.episodes,
@@ -191,8 +195,15 @@ export function useArtPlayer({
       index: 25,
       tooltip: '选集',
       click: () => {
-        if (instance.fullscreen) instance.fullscreen = false
-        episodesRef.current?.()
+        // 直接调 document.exitFullscreen()：ArtPlayer 的 fullscreen setter 要等
+        // video:loadedmetadata 才装上，内部也只是转调这个方法，直接用标准 API 更稳
+        const fromFullscreen = Boolean(document.fullscreenElement)
+        if (fromFullscreen) {
+          void document.exitFullscreen().catch(() => {})
+        } else if (instance.fullscreen) {
+          instance.fullscreen = false
+        }
+        episodesRef.current?.(fromFullscreen)
       }
     }))
 
