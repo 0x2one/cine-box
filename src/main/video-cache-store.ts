@@ -149,6 +149,8 @@ export interface VideoCacheStore {
   getVideoDetail: (videoId: number) => VideoDetail | null
   getDetailSource: (sourceId: number) => DetailSourceRow | null
   setDetailIndex: (sourceId: number, patch: DetailIndexPatch) => void
+  /** 批量补详情指纹（老库回填用，一页一次事务，不逐行提交） */
+  setDetailHashes: (entries: { id: number; hash: string }[]) => void
   touchDetailAccess: (sourceId: number, at: string, thresholdMs: number) => void
   clearDetailIndex: (sourceId: number) => void
   resetDetailIndex: (siteId?: string) => number
@@ -1545,6 +1547,15 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       .run(...values)
   }
 
+  function setDetailHashes(entries: { id: number; hash: string }[]): void {
+    if (entries.length === 0) return
+    const connection = database()
+    inTransaction(connection, (tx) => {
+      const update = tx.prepare('UPDATE video_sources SET detail_hash = ? WHERE id = ?')
+      for (const entry of entries) update.run(entry.hash, entry.id)
+    })
+  }
+
   function touchDetailAccess(sourceId: number, at: string, thresholdMs: number): void {
     const row = database()
       .prepare('SELECT detail_accessed_at FROM video_sources WHERE id = ?')
@@ -1667,6 +1678,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     getVideoDetail,
     getDetailSource,
     setDetailIndex,
+    setDetailHashes,
     touchDetailAccess,
     clearDetailIndex,
     resetDetailIndex,

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'crypto'
-import { promises as fs } from 'fs'
+import { existsSync, promises as fs } from 'fs'
 import { dirname, join, resolve, sep } from 'path'
 import { fetchCollectText } from './collect-http'
 import { parseCollectPage, type CollectedVideo } from './video-collect-parser'
@@ -133,6 +133,23 @@ function detailFingerprint(detail: Pick<CachedVideoDetail, 'intro' | 'playLines'
     .digest('hex')
 }
 
+/**
+ * 详情大到会被 `writeCached` 截断时，落盘的内容和这份对象不一样、指纹必然对不上，
+ * 这种条目干脆不做指纹比对（保留现有缓存），否则每次采集都会白重写一遍两兆的文件。
+ * 只按字符串长度粗估，不序列化，常见详情几微秒。
+ */
+function mightTruncate(detail: Pick<CachedVideoDetail, 'intro' | 'playLines'>): boolean {
+  let size = detail.intro.length
+  for (const line of detail.playLines) {
+    size += line.flag.length
+    for (const episode of line.episodes) {
+      size += episode.name.length + episode.url.length + 40
+      if (size > MAX_FILE_SIZE) return true
+    }
+  }
+  return false
+}
+
 function asString(value: unknown, max = 2000): string {
   return typeof value === 'string' ? value.slice(0, max) : ''
 }
@@ -222,6 +239,14 @@ export function createVideoDetailCache(options: {
   bumpEpoch: () => void
 }): VideoDetailCache {
   const { rootDir, store, listSites, epoch, bumpEpoch } = options
+  /**
+   * 回收目录：整目录先 rename 到这里，再后台慢慢删。
+   * 同一卷上 rename 是瞬时的，而删 5 万个文件要好几分钟——清缓存 / 删站点之后马上开始的
+   * 采集不该等这一步；挪走之后新写入也不会被在途删除误伤。
+   */
+  const trashDir = join(dirname(rootDir), 'videos-trash')
+  // 上次退出时没删完的（崩溃 / 强杀）在后台清掉，不阻塞启动
+  void fs.rm(trashDir, { recursive: true, force: true }).catch(() => {})
   const inflightRead = new Map<number, Promise<VideoDetailResult>>()
   const inflightRefresh = new Map<number, Promise<VideoDetailRefreshResult>>()
   /**
@@ -235,6 +260,22 @@ export function createVideoDetailCache(options: {
     for (const dir of createdDirs) {
       if (prefix === '' || dir === prefix || dir.startsWith(prefix + sep)) createdDirs.delete(dir)
     }
+  }
+
+  /**
+   * 删掉一个目录：先整体 rename 到回收目录（瞬时），真正的删除在后台跑。
+   * rename 失败（跨卷 / 被占用）时退回原地删除，保证清理最终一定完成。
+   */
+  async function discardDirectory(target: string): Promise<void> {
+    const staged = join(trashDir, randomUUID())
+    try {
+      await fs.mkdir(trashDir, { recursive: true })
+      await fs.rename(target, staged)
+    } catch {
+      await fs.rm(target, { recursive: true, force: true }).catch(() => {})
+      return
+    }
+    void fs.rm(staged, { recursive: true, force: true }).catch(() => {})
   }
 
   function siteById(siteId: string): Site | null {
@@ -286,7 +327,30 @@ export function createVideoDetailCache(options: {
     }
   }
 
-  async function writeCached(source: DetailSourceRow, detail: CachedVideoDetail): Promise<number> {
+  /**
+   * 只读详情文件算指纹，不碰索引 / 访问时间。
+   * 采集回填指纹（老库 `detail_hash` 为空）时用：读 + 解析约 70µs，重写一个文件约 1.7ms，
+   * 5 万条缓存下来差 80 秒左右。
+   */
+  async function readFileFingerprint(source: DetailSourceRow): Promise<string | null> {
+    const target = pathOf(source)
+    try {
+      const stats = await fs.lstat(target.absolute)
+      if (!stats.isFile() || stats.isSymbolicLink() || stats.size > MAX_FILE_SIZE) return null
+      const parsed = JSON.parse(await fs.readFile(target.absolute, 'utf8')) as unknown
+      const detail = parseCachedDetail(parsed, source.siteId, source.sourceVideoId)
+      return detail ? detailFingerprint(detail) : null
+    } catch {
+      return null
+    }
+  }
+
+  async function writeCached(
+    source: DetailSourceRow,
+    detail: CachedVideoDetail,
+    /** 调用方已经算过的指纹，省一次序列化 + sha1 */
+    fingerprint = detailFingerprint(detail)
+  ): Promise<number> {
     const startedEpoch = epoch()
     const target = pathOf(source)
     const dir = dirname(target.absolute)
@@ -311,6 +375,8 @@ export function createVideoDetailCache(options: {
     // 落盘大小就是这段字节数，不用再 stat 一次拿 size
     const bytes = Buffer.byteLength(serialized, 'utf8')
     if (bytes > MAX_FILE_SIZE) throw new Error('TOO_LARGE')
+    // 被截断过的话指纹必须按落盘的这份算，否则下次采集读回文件会一直对不上、每次重写
+    const hash = body === detail ? fingerprint : detailFingerprint(body)
 
     const temp = `${target.absolute}.tmp-${randomUUID()}`
     try {
@@ -344,7 +410,7 @@ export function createVideoDetailCache(options: {
       detailNote: body.note || source.note,
       detailStale: false,
       detailError: '',
-      detailHash: detailFingerprint(body)
+      detailHash: hash
     })
     return bytes
   }
@@ -563,13 +629,16 @@ export function createVideoDetailCache(options: {
     bumpEpoch()
     const target = resolve(rootDir, safeSiteSegment(siteId))
     forgetDirs(target)
-    await fs.rm(target, { recursive: true, force: true }).catch(() => {})
+    if (existsSync(target)) await discardDirectory(target)
   }
 
   async function removeAll(): Promise<void> {
     bumpEpoch()
     forgetDirs(rootDir)
-    await fs.rm(rootDir, { recursive: true, force: true }).catch(() => {})
+    if (!existsSync(rootDir)) return
+    await discardDirectory(rootDir)
+    // 回收目录已经接管旧文件，这里把空目录补回来，后续写入照常
+    await fs.mkdir(rootDir, { recursive: true }).catch(() => {})
   }
 
   async function removeSourceFile(source: DetailSourceRow): Promise<void> {
@@ -665,6 +734,8 @@ export function createVideoDetailCache(options: {
     items: Map<string, CollectedVideo>
   ): Promise<{ cached: number; failed: number; fallback: DetailSourceRow[] }> {
     const fallback: DetailSourceRow[] = []
+    /** 老库回填：只是补指纹，文件内容不变，攒一页一次性写库 */
+    const backfill: { id: number; hash: string }[] = []
     let cached = 0
     let failed = 0
     for (const source of sources) {
@@ -674,14 +745,24 @@ export function createVideoDetailCache(options: {
         continue
       }
       const detail = buildDetail(item, source)
+      const fingerprint = detailFingerprint(detail)
       const hasFile =
         source.detailCachedAt !== '' && source.detailPath !== '' && !source.detailStale
-      // 指纹为空 = 老库还没回填，宁可多写一次也要把指纹补上，否则永远发现不了线路变化
-      if (hasFile && source.detailHash !== '' && source.detailHash === detailFingerprint(detail)) {
-        continue
+      // 超大详情会被落盘截断，指纹比不准，直接保留现有缓存（别每次重写 2MB）
+      if (hasFile && mightTruncate(detail)) continue
+      if (hasFile) {
+        if (source.detailHash !== '') {
+          if (source.detailHash === fingerprint) continue
+        } else {
+          // 老库还没有指纹：读一下现有文件对比，内容一致就只补指纹，不重写文件
+          if ((await readFileFingerprint(source)) === fingerprint) {
+            backfill.push({ id: source.id, hash: fingerprint })
+            continue
+          }
+        }
       }
       try {
-        await writeCached(source, detail)
+        await writeCached(source, detail, fingerprint)
         cached += 1
       } catch (error) {
         const code = errorOf(error)
@@ -689,6 +770,13 @@ export function createVideoDetailCache(options: {
         store.setDetailIndex(source.id, { detailError: code })
         // 缓存库正在清空 / 应用退出，后面的也不用写了
         if (code === 'ABORT') break
+      }
+    }
+    if (backfill.length > 0) {
+      try {
+        store.setDetailHashes(backfill)
+      } catch {
+        // 缓存库已关闭 / 正在重建：指纹下次再补，不影响本次采集
       }
     }
     return { cached, failed, fallback }
