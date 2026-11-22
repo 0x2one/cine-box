@@ -931,6 +931,9 @@ ipcMain.handle('videos:clear', async () => {
   videoCacheReady = true
   // 清空缓存的语义是整个缓存库重建：队列里还没落库的日志一并丢弃
   collectLogs.clear()
+  // 推荐配置（海报 / 分类轨道 / 搜索推荐）里的条目全指向刚删掉的视频，
+  // 留着只会是一片「视频已丢失」，所以跟着一起清空（自定义图片也删）
+  homeStore.clear()
   collector.resume()
   scheduler.start()
   // 缓存库整体重建，推荐页的卡片全部作废

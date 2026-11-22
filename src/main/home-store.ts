@@ -1,5 +1,13 @@
 import { randomUUID } from 'crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'fs'
 import { basename, extname, join } from 'path'
 import {
   HOME_DEFAULT_TOP_N,
@@ -82,6 +90,11 @@ export interface HomeStore {
   importImage: (sourcePath: string) => { ok: boolean; error?: string; url?: string }
   /** 自定义协议用：把 cine-img://home/<文件名> 还原成本地绝对路径 */
   imageFile: (fileName: string) => string | null
+  /**
+   * 清空整份推荐配置（海报 / 分类轨道 / 搜索推荐）并删掉自定义图片。
+   * 清空全部视频缓存时调用：配置里的条目全指向已删除的视频，留着只会全是「视频已丢失」。
+   */
+  clear: () => HomeActionResult
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -715,6 +728,19 @@ export function createHomeStore(directory: string): HomeStore {
       if (!/^[0-9a-f-]{36}\.(jpg|jpeg|png|webp|gif|avif)$/.test(name)) return null
       const path = join(imagesDir, name)
       return existsSync(path) ? path : null
+    },
+
+    clear: () => {
+      config = { posters: [], sections: [], search: defaultSearch() }
+      persist()
+      // 配置清空后这些图片没有引用了，一起删掉免得白占磁盘；目录留着，下次换图直接写
+      try {
+        rmSync(imagesDir, { recursive: true, force: true })
+        mkdirSync(imagesDir, { recursive: true })
+      } catch (error) {
+        console.error('推荐配置图片清理失败', error)
+      }
+      return { ok: true }
     }
   }
 }

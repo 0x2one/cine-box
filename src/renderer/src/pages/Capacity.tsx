@@ -379,6 +379,9 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
             {formatBytes(totalBytes)}。
           </p>
           <p className="capacity-warning">
+            推荐页的配置（海报、分类轨道、搜索推荐）也会一并清空，自定义图片同时删除——它们指向的视频都已经不在了。
+          </p>
+          <p className="capacity-warning">
             站点、在线分类、本地分类、绑定关系与定时采集计划保存在业务库中，不受影响；定时计划到点后会重新入队。
           </p>
         </div>
