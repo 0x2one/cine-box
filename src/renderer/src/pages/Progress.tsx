@@ -24,7 +24,12 @@ function modeText(mode: CollectMode): string {
 
 function progressText(item: VideoCollectProgress): string {
   if (item.pageCount > 0) return `第 ${item.page} / ${item.pageCount} 页`
-  return item.page > 0 ? `第 ${item.page} 页` : '等待开始'
+  if (item.page > 0) return `第 ${item.page} 页`
+  // 增量没有新数据也是正常结束（0 页），别再显示成「等待开始」
+  if (item.status === 'done') {
+    return item.mode === 'incremental' && item.fetched === 0 ? '最近没有新数据' : '0 页'
+  }
+  return '等待开始'
 }
 
 /** 控制台「进度」：按站点展示当前 / 最后一次采集，订阅事件实时更新 */

@@ -610,6 +610,25 @@ export function createVideoCollector(options: {
       return
     }
 
+    // 增量只看最近 24 / 48 小时：站点这段时间没有更新时也是正常结束（0 页），
+    // 但日志里写「采集完成 0 页」看不出原因，单独说明一句，顺便提示怎么导入整库。
+    if (completed && item.mode === 'incremental' && progress.page === 0 && progress.fetched === 0) {
+      const noUpdate = store.updateProgress(progress.id, {
+        status: 'done',
+        error: '',
+        finishedAt: nowIso()
+      })
+      emit(noUpdate)
+      log(
+        'info',
+        item,
+        '最近没有新视频',
+        `${item.fetchRange === '24h' ? '最近 24 小时' : '最近 48 小时'}内站点没有返回更新；` +
+          `需要导入整库请改用全量采集 · ${phaseText}`
+      )
+      return
+    }
+
     const done = store.updateProgress(progress.id, {
       status: 'done',
       error: '',
