@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { App, Button, Checkbox, Popconfirm, Progress, Segmented, Spin, Tooltip } from 'antd'
+import { App, Button, Checkbox, Modal, Popconfirm, Progress, Spin, Tooltip } from 'antd'
 import {
   CheckCircleOutlined,
   CheckOutlined,
+  EyeOutlined,
   InfoCircleOutlined,
   PictureOutlined,
   ReloadOutlined,
   SyncOutlined,
   VideoCameraOutlined
 } from '@ant-design/icons'
-import FallbackImage from '../components/FallbackImage'
+import { useFallbackPic } from '../hooks/useFallbackPic'
 import { formatCount, formatShortDateTime } from '../utils/format'
 import type { ConsoleSection } from '../types'
 
@@ -22,11 +23,222 @@ function formatDuration(ms: number): string {
   return `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`
 }
 
+type CoverSize = { width: number; height: number }
+type CompareTone = 'up' | 'down' | 'flat' | 'warn'
+
+/** 原图分辨率：清晰度对比最直观的数字 */
+function formatPixels(size: CoverSize): string {
+  return `${formatCount(size.width)} × ${formatCount(size.height)}`
+}
+
+function formatMegapixels(size: CoverSize): string {
+  const wan = (size.width * size.height) / 10000
+  return `${wan >= 100 ? Math.round(wan) : wan.toFixed(1)} 万像素`
+}
+
+/**
+ * 用像素总量判断清晰度变化。两个站点可能只是同一张图换了地址，
+ * 像素量接近时显示「相近」，不硬说更清晰。
+ */
+function compareQuality(
+  before: CoverSize | null,
+  after: CoverSize | null,
+  beforeUrl: string,
+  afterUrl: string
+): { label: string; tone: CompareTone } {
+  if (!beforeUrl && !afterUrl) return { label: '两边都没有封面', tone: 'flat' }
+  if (!beforeUrl) return { label: '新增封面', tone: 'up' }
+  if (!afterUrl) return { label: '同步后无封面', tone: 'warn' }
+  if (!before || !after) return { label: '尺寸未知', tone: 'flat' }
+  const ratio = (after.width * after.height) / (before.width * before.height)
+  if (ratio >= 1.25) return { label: '清晰度提升', tone: 'up' }
+  if (ratio <= 0.8) return { label: '清晰度下降', tone: 'down' }
+  return { label: '清晰度相近', tone: 'flat' }
+}
+
+/** 单张对比图：等图加载完把原图尺寸报给父组件，用于计算清晰度差异 */
+function CompareImage({
+  url,
+  alt,
+  onSize
+}: {
+  url: string
+  alt: string
+  onSize: (size: CoverSize | null) => void
+}): React.JSX.Element {
+  const { src, onError } = useFallbackPic(url)
+  const [failed, setFailed] = useState(false)
+  const imageRef = useRef<HTMLImageElement>(null)
+
+  // 有些图片在 ref 挂上之前就已经从缓存加载完了，onLoad 不会再触发，这里补一次尺寸
+  useEffect(() => {
+    const image = imageRef.current
+    if (image?.complete && image.naturalWidth > 0) {
+      onSize({ width: image.naturalWidth, height: image.naturalHeight })
+    }
+  }, [src, onSize])
+
+  if (!src) {
+    return (
+      <span className="cover-compare-placeholder">{url && failed ? '加载失败' : '无封面'}</span>
+    )
+  }
+  return (
+    <img
+      ref={imageRef}
+      src={src}
+      alt={alt}
+      loading="eager"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onLoad={(event) => {
+        setFailed(false)
+        onSize({
+          width: event.currentTarget.naturalWidth,
+          height: event.currentTarget.naturalHeight
+        })
+      }}
+      onError={() => {
+        setFailed(true)
+        onSize(null)
+        onError()
+      }}
+    />
+  )
+}
+
+/** 2× 细节图：直接把中心区域放大，低分辨率封面会明显发虚 */
+function ZoomImage({ url }: { url: string }): React.JSX.Element {
+  const { src, onError } = useFallbackPic(url)
+  const [failed, setFailed] = useState(false)
+  if (!src) {
+    return (
+      <span className="cover-compare-placeholder">{url && failed ? '加载失败' : '无封面'}</span>
+    )
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      loading="eager"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      onError={() => {
+        setFailed(true)
+        onError()
+      }}
+    />
+  )
+}
+
+/** 一条前后对比：左边当前封面，右边按候选来源同步后的封面 */
+function CompareRow({
+  sample,
+  targetLabel
+}: {
+  sample: PicSample
+  targetLabel: string
+}): React.JSX.Element {
+  const [before, setBefore] = useState<CoverSize | null>(null)
+  const [after, setAfter] = useState<CoverSize | null>(null)
+  const quality = compareQuality(before, after, sample.currentPic, sample.nextPic)
+
+  const note = (() => {
+    if (!sample.currentPic && !sample.nextPic) {
+      return '两边都没有封面，同步后仍显示片名首字。'
+    }
+    if (!sample.currentPic) return '当前没有封面；同步后会补上这个站点的封面。'
+    if (!sample.nextPic) return '同步后取不到封面，会回落到片名首字占位。'
+    if (!before || !after) return '拿不到两张原图的尺寸，暂时无法比较清晰度。'
+    if (quality.tone === 'down') {
+      return `同步后的像素量更少（${formatMegapixels(before)} → ${formatMegapixels(after)}），放大看会更模糊。`
+    }
+    if (quality.tone === 'up') {
+      return `同步后的像素量更多（${formatMegapixels(before)} → ${formatMegapixels(after)}），放大看会更清楚。`
+    }
+    return '两张图的像素量接近，清晰度看不出明显差别。'
+  })()
+
+  return (
+    <article className="cover-compare-row">
+      <header className="cover-compare-row-head">
+        <span className="cover-compare-name" title={sample.name}>
+          {sample.name}
+        </span>
+        <span className={`cover-compare-flag${sample.changed ? ' is-changed' : ''}`}>
+          {sample.changed ? '封面会变' : '封面不变'}
+        </span>
+        <span className={`cover-compare-quality is-${quality.tone}`}>{quality.label}</span>
+      </header>
+      <div className="cover-compare-pair">
+        <figure className="cover-compare-side">
+          <div className="cover-compare-frame">
+            <CompareImage
+              key={`before-${sample.videoId}-${sample.currentPic}`}
+              url={sample.currentPic}
+              alt=""
+              onSize={setBefore}
+            />
+          </div>
+          <figcaption>
+            <span className="cover-compare-side-label">当前封面</span>
+            <span className="cover-compare-size">
+              {sample.currentPic
+                ? before
+                  ? `${formatPixels(before)} · ${formatMegapixels(before)}`
+                  : '尺寸未知'
+                : '无封面'}
+            </span>
+          </figcaption>
+        </figure>
+        <span className="cover-compare-arrow" aria-hidden="true">
+          →
+        </span>
+        <figure className="cover-compare-side">
+          <div className="cover-compare-frame">
+            <CompareImage
+              key={`after-${sample.videoId}-${sample.nextPic}`}
+              url={sample.nextPic}
+              alt=""
+              onSize={setAfter}
+            />
+          </div>
+          <figcaption>
+            <span className="cover-compare-side-label">同步后 · {targetLabel}</span>
+            <span className="cover-compare-size">
+              {sample.nextPic
+                ? after
+                  ? `${formatPixels(after)} · ${formatMegapixels(after)}`
+                  : '尺寸未知'
+                : '无封面'}
+            </span>
+          </figcaption>
+        </figure>
+      </div>
+      <div className="cover-compare-detail">
+        <div className="cover-compare-detail-item">
+          <div className="cover-compare-zoom">
+            <ZoomImage url={sample.currentPic} />
+          </div>
+          <span className="cover-compare-detail-label">当前 · 2× 细节</span>
+        </div>
+        <div className="cover-compare-detail-item">
+          <div className="cover-compare-zoom">
+            <ZoomImage url={sample.nextPic} />
+          </div>
+          <span className="cover-compare-detail-label">同步后 · 2× 细节</span>
+        </div>
+      </div>
+      <p className="cover-compare-note">{note}</p>
+    </article>
+  )
+}
+
 /**
  * 控制台「封面」：把「采集时用哪个站点的封面」和「已有封面同步到哪个来源」放在同一页。
  *
  * 选来源只改草稿，页面先用它统计覆盖率、待同步数和样张；点应用才写入默认来源，
- * 勾选「同时同步已有封面」时顺手把 videos.pic 重写一遍。同步任务的状态存在主进程，
+ * 勾选「同时同步已有封面」时顺手把已有视频的封面重写一遍。同步任务的状态存在主进程，
  * 页面切走再回来能回填进度，不会出现「按钮点不动」。
  */
 function PreviewPanel({
@@ -50,7 +262,10 @@ function PreviewPanel({
   const [stats, setStats] = useState<PicCleanStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
   const [statsError, setStatsError] = useState(false)
-  const [previewMode, setPreviewMode] = useState<'current' | 'next'>('next')
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewSamples, setPreviewSamples] = useState<PicSample[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState(false)
   const [syncOnApply, setSyncOnApply] = useState(true)
   const [starting, setStarting] = useState(false)
   const [cleaning, setCleaning] = useState(false)
@@ -61,6 +276,7 @@ function PreviewPanel({
   const [cleanError, setCleanError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const statsGeneration = useRef(0)
+  const previewGeneration = useRef(0)
 
   const applyStatus = useCallback((status: PicCleanStatus): void => {
     setCleaning(status.running)
@@ -166,7 +382,6 @@ function PreviewPanel({
   /** 选来源只改草稿：先把旧来源的统计清掉，避免用上一个站点的样张冒充 */
   const chooseDraft = (siteId: string): void => {
     if (cleaning || starting) return
-    setPreviewMode('next')
     if (siteId === draftSiteId) {
       // 统计失败或还没回来时再点一次当前项，等于重试
       if (!stats || statsError) setRefreshKey((value) => value + 1)
@@ -176,6 +391,33 @@ function PreviewPanel({
     setStats(null)
     setStatsLoading(true)
     setStatsError(false)
+  }
+
+  /** 大图对比弹窗的样张：打开时先铺已有样张，再向主进程要一批新的 */
+  const loadPreviewSamples = useCallback(async (): Promise<void> => {
+    const generation = ++previewGeneration.current
+    setPreviewLoading(true)
+    setPreviewError(false)
+    try {
+      const next = await window.api.videos.picsStats({ siteId: draftSiteId })
+      if (generation !== previewGeneration.current) return
+      if (!next.ok) {
+        setPreviewError(true)
+        return
+      }
+      setPreviewSamples(next.samples)
+    } catch {
+      if (generation === previewGeneration.current) setPreviewError(true)
+    } finally {
+      if (generation === previewGeneration.current) setPreviewLoading(false)
+    }
+  }, [draftSiteId])
+
+  const openPreview = (): void => {
+    if (cleaning || starting || statsLoading || statsError || !stats) return
+    setPreviewSamples(stats.samples ?? [])
+    setPreviewOpen(true)
+    void loadPreviewSamples()
   }
 
   const savedLabel = siteLabel(savedSiteId)
@@ -315,7 +557,6 @@ function PreviewPanel({
   const percent = progress?.percent ?? 0
   const hasTotal = (progress?.total ?? 0) > 0
   const runningLabel = siteLabel(runningSiteId || draftSiteId)
-  const samples = stats?.samples ?? []
 
   const statTiles = useMemo(
     () => [
@@ -418,8 +659,7 @@ function PreviewPanel({
               <div className="cover-block-heading">
                 <h3 className="cover-block-title">采集时用哪个站点的封面</h3>
                 <p className="cover-block-sub">
-                  写入和更新 videos.pic
-                  时优先取这个站点的封面；站点没有该视频或封面为空时回落主来源。
+                  采集和更新视频时，优先用这个站点的封面；站点没有该视频或封面为空时，回落到主来源。
                 </p>
               </div>
             </header>
@@ -508,104 +748,20 @@ function PreviewPanel({
           <section className="cover-block">
             <header className="cover-block-head">
               <div className="cover-block-heading">
-                <h3 className="cover-block-title">效果预览</h3>
+                <h3 className="cover-block-title">同步已有封面</h3>
                 <p className="cover-block-sub">
-                  从视频库里抽样 8 部，切换「当前封面 / 新规则」看会变成什么样。
+                  按「{draftLabel}」重新选一遍已有视频的封面；只改封面，不动标题、简介等其它信息。
                 </p>
               </div>
               <div className="cover-block-actions">
-                <Segmented
-                  size="small"
-                  value={previewMode}
-                  onChange={(value) => setPreviewMode(value as 'current' | 'next')}
-                  options={[
-                    { label: '当前封面', value: 'current' },
-                    { label: '新规则', value: 'next' }
-                  ]}
-                />
                 <Button
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  loading={statsLoading}
-                  onClick={() => setRefreshKey((value) => value + 1)}
+                  icon={<EyeOutlined />}
+                  onClick={openPreview}
+                  disabled={cleaning || starting || statsLoading || statsError || !stats}
                 >
-                  换一批
+                  效果预览
                 </Button>
               </div>
-            </header>
-            <div className="cover-block-body">
-              {statsLoading && !stats ? (
-                <div className="cover-loading">
-                  <Spin size="small" />
-                  <span>正在生成预览…</span>
-                </div>
-              ) : samples.length === 0 ? (
-                <div className="cover-loading cover-loading--empty">
-                  <PictureOutlined />
-                  <span>
-                    {statsError
-                      ? '统计失败，暂时没有可预览的封面。'
-                      : stats && stats.total === 0
-                        ? '视频库还是空的，采集之后再来预览。'
-                        : '没有可预览的视频。'}
-                  </span>
-                </div>
-              ) : (
-                <div className="cover-preview-grid">
-                  {samples.map((sample) => {
-                    const pic = previewMode === 'next' ? sample.nextPic : sample.currentPic
-                    const badge = !sample.nextPic ? '无封面' : sample.changed ? '会变' : '不变'
-                    return (
-                      <figure className="cover-preview-card" key={sample.videoId}>
-                        <div className="cover-preview-frame">
-                          <span className="cover-preview-letter" aria-hidden="true">
-                            {sample.name.trim().slice(0, 1) || '映'}
-                          </span>
-                          {pic && (
-                            <FallbackImage
-                              src={pic}
-                              alt=""
-                              loading="lazy"
-                              decoding="async"
-                              referrerPolicy="no-referrer"
-                            />
-                          )}
-                          <span
-                            className={`cover-preview-badge${
-                              badge === '会变'
-                                ? ' is-changed'
-                                : badge === '无封面'
-                                  ? ' is-empty'
-                                  : ''
-                            }`}
-                          >
-                            {badge}
-                          </span>
-                        </div>
-                        <figcaption className="cover-preview-name" title={sample.name}>
-                          {sample.name}
-                        </figcaption>
-                      </figure>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="cover-block">
-            <header className="cover-block-head">
-              <div className="cover-block-heading">
-                <h3 className="cover-block-title">同步已有封面</h3>
-                <p className="cover-block-sub">
-                  按「{draftLabel}」重写已有 videos.pic；只改封面，不动其它字段。
-                </p>
-              </div>
-              {lastResult && !cleaning && (
-                <span className="cover-block-meta">
-                  上次 {formatShortDateTime(lastResult.finishedAt)}
-                </span>
-              )}
             </header>
             <div className="cover-block-body">
               {cleaning ? (
@@ -734,6 +890,73 @@ function PreviewPanel({
           </div>
         </>
       )}
+
+      <Modal
+        open={previewOpen}
+        title="效果预览"
+        width={1120}
+        className="cover-preview-modal"
+        footer={null}
+        destroyOnHidden
+        onCancel={() => setPreviewOpen(false)}
+        styles={{ body: { padding: 0 } }}
+      >
+        <div className="cover-compare-body">
+          <div className="cover-compare-head">
+            <div className="cover-compare-headtext">
+              <strong>当前封面 → 同步后「{draftLabel}」</strong>
+              <span>
+                左右两张都按原图比例完整显示；下方标注原图分辨率和像素量，方便判断清晰度变化。
+              </span>
+            </div>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={previewLoading}
+              onClick={() => void loadPreviewSamples()}
+            >
+              换一批
+            </Button>
+          </div>
+
+          {previewLoading && previewSamples.length === 0 ? (
+            <div className="cover-compare-loading">
+              <Spin size="small" />
+              <span>正在读取样张…</span>
+            </div>
+          ) : previewError && previewSamples.length === 0 ? (
+            <div className="cover-compare-loading">
+              <span>读取样张失败。</span>
+              <Button size="small" onClick={() => void loadPreviewSamples()}>
+                重试
+              </Button>
+            </div>
+          ) : previewSamples.length === 0 ? (
+            <div className="cover-compare-loading cover-compare-loading--empty">
+              <PictureOutlined />
+              <span>
+                {stats && stats.total === 0
+                  ? '视频库还是空的，采集之后再来预览。'
+                  : '没有可预览的视频。'}
+              </span>
+            </div>
+          ) : (
+            <div className="cover-compare-grid">
+              {previewSamples.map((sample) => (
+                <CompareRow
+                  key={`${sample.videoId}-${sample.currentPic}-${sample.nextPic}`}
+                  sample={sample}
+                  targetLabel={draftLabel}
+                />
+              ))}
+            </div>
+          )}
+
+          {previewError && previewSamples.length > 0 && (
+            <div className="cover-compare-error">换一批失败，显示的是上一批样张。</div>
+          )}
+        </div>
+      </Modal>
     </>
   )
 }
