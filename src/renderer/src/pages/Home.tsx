@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
-import { ArrowUpOutlined, CaretRightFilled, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, CaretRightFilled } from '@ant-design/icons'
 import FallbackImage from '../components/FallbackImage'
 import HomePicture from '../components/HomePicture'
 import VideoCard from '../components/VideoCard'
@@ -41,6 +41,51 @@ const FULL_CROP: HomeCrop = { x: 0, y: 0, w: 1, h: 1 }
  * 这里再留一层是为了连「等 IPC 的那一帧」都不闪转圈。
  */
 let lastFeed: HomeFeed | null = null
+
+/**
+ * 按钮里的左右箭头。
+ *
+ * 不用 <LeftOutlined />：antd 的箭头画在 12px 的小 <svg> 里，墨迹本身比图标框中心偏出
+ * 约 2%（LeftOutlined 的路径中心 x = 492.15，画布中心是 512），12px 的小盒子在 125%
+ * 缩放下还会被取整到整像素，看着就像没对准圆心。这里改用「和按钮等大」的画布
+ * （viewBox 就是按钮尺寸）把同一份路径数据缩放到画布正中：画布和按钮共用同一个取整
+ * 后的原点，箭头墨迹的中心因此正好落在圆心。
+ */
+const ARROW_PATH = {
+  left: {
+    d: 'M724 218.3V141c0-6.7-7.7-10.4-12.9-6.3L260.3 486.8a31.86 31.86 0 000 50.3l450.8 352.1c5.3 4.1 12.9.4 12.9-6.3v-77.3c0-4.9-2.3-9.6-6.1-12.6l-360-281 360-281.1c3.8-3 6.1-7.7 6.1-12.6z',
+    center: 492.15
+  },
+  right: {
+    d: 'M765.7 486.8L314.9 134.7A7.97 7.97 0 00302 141v77.3c0 4.9 2.3 9.6 6.1 12.6l360 281.1-360 281.1c-3.9 3-6.1 7.7-6.1 12.6V883c0 6.7 7.7 10.4 12.9 6.3l450.8-352.1a31.96 31.96 0 000-50.4z',
+    center: 533.85
+  }
+} as const
+/** 箭头墨迹的纵向中心（两份路径的 UI 坐标一样） */
+const ARROW_CENTER_Y = 512
+
+/** box 是按钮的整宽（含 1px 描边），要和 home.css 里按钮的宽高一致 */
+function ArrowIcon({
+  dir,
+  box,
+  size
+}: {
+  dir: 'left' | 'right'
+  box: number
+  size: number
+}): React.JSX.Element {
+  const arrow = ARROW_PATH[dir]
+  const scale = size / 1024
+  return (
+    <svg className="home-arrow" viewBox={`0 0 ${box} ${box}`} aria-hidden="true" focusable="false">
+      <path
+        d={arrow.d}
+        fill="currentColor"
+        transform={`translate(${box / 2} ${box / 2}) scale(${scale}) translate(${-arrow.center} ${-ARROW_CENTER_Y})`}
+      />
+    </svg>
+  )
+}
 
 /**
  * 一个分类轨道：头部两个箭头控制横向滚动。
@@ -247,7 +292,7 @@ function HomeRail({
             disabled={!looping && !edges.left}
             onClick={() => step(-1)}
           >
-            <LeftOutlined />
+            <ArrowIcon dir="left" box={26} size={14} />
           </button>
           <button
             type="button"
@@ -256,7 +301,7 @@ function HomeRail({
             disabled={!looping && !edges.right}
             onClick={() => step(1)}
           >
-            <RightOutlined />
+            <ArrowIcon dir="right" box={26} size={14} />
           </button>
         </div>
       </div>
@@ -963,7 +1008,7 @@ function HomeView({
                       aria-label="上一部"
                       onClick={() => clickGo(index - 1)}
                     >
-                      <LeftOutlined />
+                      <ArrowIcon dir="left" box={32} size={12} />
                     </button>
                     <button
                       type="button"
@@ -971,7 +1016,7 @@ function HomeView({
                       aria-label="下一部"
                       onClick={() => clickGo(index + 1)}
                     >
-                      <RightOutlined />
+                      <ArrowIcon dir="right" box={32} size={12} />
                     </button>
                   </div>
                 </div>

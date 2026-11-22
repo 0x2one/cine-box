@@ -324,14 +324,13 @@
   flex: none;
 }
 
-/* 图标铺满圆形按钮再居中：antd 图标自带的 vertical-align / line-height
-   会让箭头在圆钮里偏上偏左一点 */
-.home-pager-btn .anticon {
+/* 箭头画布铺满整个圆钮（-1px 就是那颗 1px 描边），箭头在画布中心按比例绘制：
+   画布和按钮共用同一个取整后的原点，125% 缩放下也不会偏半个像素 */
+.home-arrow {
   position: absolute;
-  display: grid;
-  inset: 0;
-  font-size: 12px;
-  place-items: center;
+  inset: -1px;
+  display: block;
+  pointer-events: none;
 }
 
 /* 分类区块 */
@@ -403,6 +402,7 @@
 }
 
 .home-rail-btn {
+  position: relative;
   display: grid;
   width: 26px;
   height: 26px;
