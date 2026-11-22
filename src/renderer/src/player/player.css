@@ -109,20 +109,13 @@ button {
   background: #000;
 }
 
-/* 控制条里的「选集」：ArtPlayer 的自定义控件，排在设置之前 */
-.player-stage .art-control-cinebox-episodes {
-  display: flex;
-  width: auto;
-  align-items: center;
-  padding: 0 8px;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 13px;
-  white-space: nowrap;
-  transition: color 140ms ease;
-}
-
-.player-stage .art-control-cinebox-episodes:hover {
-  color: var(--accent);
+/*
+ * 控制条整排抬离窗口底边：窗口是铺满的，默认那 0 底边距会让按钮贴着窗口下沿。
+ * 选择器要多带一层 `.art-video-player`：ArtPlayer 的 `.art-video-player .art-bottom`
+ * 在运行时注入，同权重时后者胜出，压不住它。
+ */
+.player-stage .art-video-player .art-bottom {
+  padding-bottom: 12px;
 }
 
 /* ── 标题栏 ── */
@@ -201,46 +194,6 @@ button {
   align-items: center;
   gap: 4px;
   -webkit-app-region: no-drag;
-}
-
-.player-text-btn {
-  display: inline-flex;
-  height: 26px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  transition:
-    border-color 140ms ease,
-    background-color 140ms ease,
-    color 140ms ease;
-}
-
-.player-text-btn:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  color: var(--text);
-}
-
-.player-text-btn.is-active {
-  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-}
-
-.player-text-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.player-titlebar-divider {
-  width: 1px;
-  height: 16px;
-  margin: 0 6px;
-  background: var(--border);
 }
 
 .player-win-btn {

@@ -32,8 +32,8 @@ interface PlayerSessionProps {
   accent: string
   panelOpen: boolean
   panelTab: PlayerPanelTab
-  /** 标题栏与播放器控制条里的「选集」：打开面板并切到剧集 */
-  onEpisodes: () => void
+  /** 播放器控制条里的「选集」：开 / 关面板（收起或在「简介」时打开并切到剧集） */
+  onToggleEpisodes: () => void
   /** 右缘中部按钮与面板头部关闭：只做开合，保留当前 tab */
   onTogglePanel: () => void
   onPanelTab: (tab: PlayerPanelTab) => void
@@ -49,7 +49,7 @@ function PlayerSession({
   accent,
   panelOpen,
   panelTab,
-  onEpisodes,
+  onToggleEpisodes,
   onTogglePanel,
   onPanelTab
 }: PlayerSessionProps): React.JSX.Element {
@@ -143,7 +143,7 @@ function PlayerSession({
     accent,
     onEnded: goNext,
     onError: (message) => setPlayError(message),
-    onOpenEpisodes: onEpisodes
+    onToggleEpisodes
   })
 
   const reload = useCallback(() => {
@@ -189,14 +189,7 @@ function PlayerSession({
 
   return (
     <div className="player-app">
-      <PlayerTitleBar
-        title={title}
-        episode={episodeName}
-        total={line?.episodes.length ?? 0}
-        panelOpen={panelOpen}
-        episodesActive={panelOpen && panelTab === 'episodes'}
-        onEpisodes={onEpisodes}
-      />
+      <PlayerTitleBar title={title} episode={episodeName} total={line?.episodes.length ?? 0} />
 
       <div className={`player-body${line && panelOpen ? ' has-panel' : ''}`}>
         <section className="player-stage">
@@ -326,11 +319,16 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
     })
   }, [])
 
-  // 标题栏 / 播放器控制条里的「选集」：打开面板并停在剧集 tab
-  const openEpisodes = useCallback(() => {
+  // 标题栏 / 播放器控制条里的「选集」是开关：收起或在「简介」tab 时打开并切到剧集，
+  // 已经停在剧集时再点一下收起
+  const toggleEpisodes = useCallback(() => {
+    if (panelOpen && panelTab === 'episodes') {
+      setPanelOpen(false)
+      return
+    }
     setPanelTab('episodes')
     setPanelOpen(true)
-  }, [])
+  }, [panelOpen, panelTab])
 
   // 右缘中部按钮与面板头部关闭：只做开合，保留当前 tab
   const togglePanel = useCallback(() => {
@@ -344,14 +342,7 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
   if (!payload) {
     return (
       <div className="player-app">
-        <PlayerTitleBar
-          title={missing ? '无法播放' : '正在准备播放'}
-          episode=""
-          total={0}
-          panelOpen={false}
-          episodesActive={false}
-          onEpisodes={openEpisodes}
-        />
+        <PlayerTitleBar title={missing ? '无法播放' : '正在准备播放'} episode="" total={0} />
         <div className="player-body">
           <section className="player-stage">
             <div className="player-state is-error">
@@ -374,7 +365,7 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
       accent={accent}
       panelOpen={panelOpen}
       panelTab={panelTab}
-      onEpisodes={openEpisodes}
+      onToggleEpisodes={toggleEpisodes}
       onTogglePanel={togglePanel}
       onPanelTab={changePanelTab}
     />

@@ -1,11 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  BorderOutlined,
-  CloseOutlined,
-  CompressOutlined,
-  MinusOutlined,
-  UnorderedListOutlined
-} from '@ant-design/icons'
+import { BorderOutlined, CloseOutlined, CompressOutlined, MinusOutlined } from '@ant-design/icons'
 import logoUrl from '../assets/logo.svg'
 
 const IS_MAC = window.electron?.process?.platform === 'darwin'
@@ -16,25 +10,13 @@ interface PlayerTitleBarProps {
   episode: string
   /** 当前线路的集数总量，0 表示还没读到 */
   total: number
-  /** 右侧剧集 / 简介面板是否展开 */
-  panelOpen: boolean
-  /** 面板正停在剧集 tab */
-  episodesActive: boolean
-  onEpisodes: () => void
 }
 
 /**
- * 播放窗自绘标题栏：左上角是片名与当前集数，右侧是「选集」入口和窗口按钮。
+ * 播放窗自绘标题栏：左上角是片名与当前集数，右侧只有窗口按钮。
  * 整条是拖拽区，所有按钮单独退出拖拽，否则点不到。
  */
-function PlayerTitleBar({
-  title,
-  episode,
-  total,
-  panelOpen,
-  episodesActive,
-  onEpisodes
-}: PlayerTitleBarProps): React.JSX.Element {
+function PlayerTitleBar({ title, episode, total }: PlayerTitleBarProps): React.JSX.Element {
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
@@ -65,23 +47,8 @@ function PlayerTitleBar({
       <div className="player-titlebar-drag" />
 
       <div className="player-titlebar-actions">
-        <button
-          type="button"
-          className={`player-text-btn${episodesActive ? ' is-active' : ''}`}
-          onClick={onEpisodes}
-          title="打开剧集 / 简介面板"
-          aria-label="打开剧集 / 简介面板"
-          aria-pressed={episodesActive}
-          aria-expanded={panelOpen}
-          disabled={total === 0}
-        >
-          <UnorderedListOutlined />
-          <span>选集</span>
-        </button>
-
         {!IS_MAC && (
           <>
-            <span className="player-titlebar-divider" aria-hidden />
             <button
               type="button"
               className="player-win-btn"

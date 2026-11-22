@@ -5,6 +5,20 @@ import Hls from 'hls.js'
 const VOLUME_KEY = 'player-volume'
 const MUTED_KEY = 'player-muted'
 
+/**
+ * 控制条「选集」的图标：列表造型的 22×22 SVG。
+ * 22×22 跟 ArtPlayer 自带图标一致，外层会套 `.art-icon`，尺寸 / 悬停 / 按压缩放都走它自己的样式。
+ */
+const EPISODES_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24">' +
+  '<circle cx="4" cy="6.5" r="1.6"/>' +
+  '<rect x="8" y="5.3" width="13" height="2.4" rx="0.4"/>' +
+  '<circle cx="4" cy="12" r="1.6"/>' +
+  '<rect x="8" y="10.8" width="13" height="2.4" rx="0.4"/>' +
+  '<circle cx="4" cy="17.5" r="1.6"/>' +
+  '<rect x="8" y="16.3" width="13" height="2.4" rx="0.4"/>' +
+  '</svg>'
+
 function readVolume(): number {
   const stored = Number(localStorage.getItem(VOLUME_KEY))
   return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.8
@@ -24,8 +38,8 @@ export interface UseArtPlayerOptions {
   accent: string
   onEnded?: () => void
   onError?: (message: string) => void
-  /** 控制条里的「选集」：打开右侧剧集面板 */
-  onOpenEpisodes?: () => void
+  /** 控制条里的「选集」：开 / 关右侧剧集面板 */
+  onToggleEpisodes?: () => void
 }
 
 export interface ArtPlayerHandle {
@@ -45,7 +59,7 @@ export function useArtPlayer({
   accent,
   onEnded,
   onError,
-  onOpenEpisodes
+  onToggleEpisodes
 }: UseArtPlayerOptions): ArtPlayerHandle {
   const artRef = useRef<Artplayer | null>(null)
   const urlRef = useRef(url)
@@ -53,7 +67,7 @@ export function useArtPlayer({
   const accentRef = useRef(accent)
   const endedRef = useRef(onEnded)
   const errorRef = useRef(onError)
-  const episodesRef = useRef(onOpenEpisodes)
+  const episodesRef = useRef(onToggleEpisodes)
   /**
    * 已经交给播放器的地址。不能拿 art.url 比：hls.js 会把 video.src 换成 blob:，
    * 创建完那一刻 art.url 永远不等于 m3u8，直接比会把同一集再切一次。
@@ -70,7 +84,7 @@ export function useArtPlayer({
     accentRef.current = accent
     endedRef.current = onEnded
     errorRef.current = onError
-    episodesRef.current = onOpenEpisodes
+    episodesRef.current = onToggleEpisodes
   })
 
   useEffect(() => {
@@ -99,12 +113,17 @@ export function useArtPlayer({
       aspectRatio: true,
       screenshot: false,
       hotkey: true,
-      miniProgressBar: true,
+      // 控制条自动收起时不再在底部留一条细进度线
+      miniProgressBar: false,
       backdrop: true,
       playsInline: true,
       airplay: false,
       autoPlayback: true,
       moreVideoAttr: { preload: 'auto' },
+      // 自定义图标挂在 ArtPlayer 的 icons 上，取出来是带 .art-icon 的元素
+      icons: {
+        episodes: EPISODES_ICON
+      },
       cssVar: {
         '--art-control-height': '42px',
         '--art-control-icon-size': '24px',
@@ -163,10 +182,11 @@ export function useArtPlayer({
     artRef.current = instance
     appliedRef.current = firstUrl
 
-    // 控制条右侧的「选集」：剧集面板在窗口里，全屏时先退全屏再打开
-    instance.controls.add({
+    // 控制条右侧的「选集」：只放图标（走 ArtPlayer 的 .art-icon，和自带控件同一套
+    // 尺寸 / 悬停提亮 / 按压缩小）；点击是开 / 关剧集面板，全屏时先退全屏再切换
+    instance.controls.add((art) => ({
       name: 'cinebox-episodes',
-      html: '选集',
+      html: art.icons.episodes,
       position: 'right',
       index: 25,
       tooltip: '选集',
@@ -174,7 +194,7 @@ export function useArtPlayer({
         if (instance.fullscreen) instance.fullscreen = false
         episodesRef.current?.()
       }
-    })
+    }))
 
     instance.on('video:ended', () => endedRef.current?.())
     instance.on('video:volumechange', () => {
