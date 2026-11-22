@@ -600,7 +600,8 @@ function CategoriesPanel({
             <span>{bound}</span>
           </button>
         )}
-        {count > 0 && <span className="category-count">{count} 个子分类</span>}
+        {/* 绑定模式下左侧列窄，子分类数量会让片名和绑定数被挤掉；此时整棵树默认展开，数量也不重要 */}
+        {!bindingSite && count > 0 && <span className="category-count">{count} 个子分类</span>}
         <span
           className="category-actions"
           onClick={(event) => event.stopPropagation()}
