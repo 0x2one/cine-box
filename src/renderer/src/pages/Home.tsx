@@ -454,13 +454,24 @@ function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.E
   /** 跑马灯拖动切换：往左拖看下一部，往右拖回上一部 */
   const leadDrag = useRef<{ id: number; x: number; captured: boolean } | null>(null)
   const [leadDragging, setLeadDragging] = useState(false)
+  /** 这一次按下是否已经变成拖动：拖完松手的 click 不能顺手打开播放页 */
+  const leadMoved = useRef(false)
 
   const goLead = (target: number): void => {
     if (leadCount < 2) return
     setLeadIndex(((target % leadCount) + leadCount) % leadCount)
   }
 
+  /** 点整张卡打开当前这一部的播放页；拖动和圆点切换不算点击 */
+  const openLead = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    if (!activeLead) return
+    // 键盘回车 / 空格的 click detail 是 0，不该被上一次拖动留下的标记挡住
+    if (event.detail > 0 && leadMoved.current) return
+    void window.api.player.open({ videoId: activeLead.id, title: activeLead.name })
+  }
+
   const onLeadPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
+    leadMoved.current = false
     if (event.pointerType === 'mouse' && event.button !== 0) return
     if (leadCount < 2) return
     leadDrag.current = { id: event.pointerId, x: event.clientX, captured: false }
@@ -472,6 +483,7 @@ function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.E
     // 移动超过一点再捕获指针：圆点的 click 不会被抢走，单纯点一下也不会暂停轮播
     if (!state.captured && Math.abs(event.clientX - state.x) > 8) {
       state.captured = true
+      leadMoved.current = true
       setLeadDragging(true)
       event.currentTarget.setPointerCapture(event.pointerId)
     }
@@ -635,6 +647,14 @@ function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.E
                     </div>
                   )}
                 </div>
+                {/* 透明按钮铺满整张卡：点一下打开当前这一部的播放页，右上角的圆点在它上面 */}
+                <button
+                  type="button"
+                  className="home-latest-open"
+                  title={`播放《${activeLead.name}》`}
+                  aria-label={`播放 ${activeLead.name}`}
+                  onClick={openLead}
+                />
                 <div className="home-latest-copy" key={activeLead.id}>
                   <p className="home-latest-meta">{leadMeta}</p>
                   <h3 className="home-latest-title" title={activeLead.name}>
@@ -697,7 +717,7 @@ function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.E
 /**
  * 推荐页：海报叠层（宽图铺满、右侧露边、循环翻页）+ 按一级分类的推荐轨道，
  * 末尾是按更新时间倒序的整库列表（左上角第一格是最新 5 部的跑马灯）。
- * 暂时不做播放 / 详情页，卡片和海报只展示；分类标题和「全部」跳到视频列表页。
+ * 海报、卡片和跑马灯都直接打开独立播放窗口；分类标题和「全部」跳到视频列表页。
  */
 function HomeView({
   onOpenConsole,

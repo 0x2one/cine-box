@@ -617,7 +617,7 @@
   overflow: hidden;
   border-radius: 14px;
   background: var(--surface-muted);
-  cursor: grab;
+  cursor: pointer;
   touch-action: pan-y;
   user-select: none;
   grid-column: span 3;
@@ -626,6 +626,26 @@
 
 .home-latest-lead.is-dragging {
   cursor: grabbing;
+}
+
+/* 透明按钮铺满整张卡：点击打开当前这一部的播放页，拖动的 click 由 leadMoved 挡掉 */
+.home-latest-open {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.home-latest-lead.is-dragging .home-latest-open {
+  cursor: grabbing;
+}
+
+.home-latest-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
 }
 
 .home-latest-media {
@@ -710,7 +730,7 @@
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 2;
+  z-index: 4;
   display: flex;
   gap: 4px;
   align-items: center;
