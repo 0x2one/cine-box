@@ -155,21 +155,79 @@ export interface VideoSitePurgeResult {
   logs: number
 }
 
-/** 清洗 videos.pic 的进度（主进程推给控制台「预览」页） */
+/** 批量重写 videos.pic 的进度（主进程推给控制台「封面」页） */
 export interface PicCleanProgress {
   processed: number
   total: number
   changed: number
+  /** 有人工封面、只更新了基图、显示不会变的条数 */
+  skipped: number
   percent: number
 }
 
-/** 清洗 videos.pic 的结果 */
+/** 批量重写 videos.pic 的结果 */
 export interface PicCleanResult {
   ok: boolean
   error?: string
   total: number
   changed: number
+  /** 人工封面视频里，基图被顺带更新的条数（显示端不变） */
+  skipped: number
   cancelled: boolean
+}
+
+/** 最近一次同步的完整记录：重进页面时用它回显，而不是只剩一个 toast */
+export interface PicCleanOutcome extends PicCleanResult {
+  siteId: string
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+}
+
+/** 同步任务状态：渲染层重新进入页面时回填进度 / 取消中 / 上次结果 */
+export interface PicCleanStatus {
+  ok: boolean
+  running: boolean
+  cancelling: boolean
+  progress: PicCleanProgress | null
+  siteId: string
+  startedAt: string
+  lastResult: PicCleanOutcome | null
+}
+
+/** 每个站点能提供封面的视频数：控制台的来源选项直接展示覆盖率 */
+export interface PicSiteCoverage {
+  siteId: string
+  covered: number
+}
+
+/** 一部视频的封面预览：当前封面 vs 应用规则后的封面 */
+export interface PicSample {
+  videoId: number
+  name: string
+  currentPic: string
+  nextPic: string
+  changed: boolean
+  manual: boolean
+}
+
+/** 封面规则统计：来源覆盖率、待同步数、无封面数与抽样 */
+export interface PicCleanStats {
+  ok: boolean
+  error?: string
+  /** 本次统计采用的来源 id，空串 = 主来源优先 */
+  siteId: string
+  total: number
+  /** 该站点有非空封面、规则会取到它的视频数 */
+  covered: number
+  /** 非人工封面里，同步后会变的视频数 */
+  stale: number
+  /** 规则与人工封面都给不出图的视频数 */
+  empty: number
+  /** 有人工封面的视频数（同步不会改显示） */
+  manual: number
+  sites: PicSiteCoverage[]
+  samples: PicSample[]
 }
 
 export interface VideoCollectStartInput {

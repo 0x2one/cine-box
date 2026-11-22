@@ -841,21 +841,70 @@ interface VideoSitePurgeResult {
   logs: number
 }
 
-/** 清洗 videos.pic 的进度 */
+/** 批量重写 videos.pic 的进度 */
 interface PicCleanProgress {
   processed: number
   total: number
   changed: number
+  /** 人工封面视频里，基图被顺带更新的条数（显示端不变） */
+  skipped: number
   percent: number
 }
 
-/** 清洗 videos.pic 的结果 */
+/** 批量重写 videos.pic 的结果 */
 interface PicCleanResult {
   ok: boolean
   error?: string
   total: number
   changed: number
+  skipped: number
   cancelled: boolean
+}
+
+/** 最近一次同步的完整记录 */
+interface PicCleanOutcome extends PicCleanResult {
+  siteId: string
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+}
+
+/** 同步任务状态：重新进入页面时回填进度、取消中状态和上次结果 */
+interface PicCleanStatus {
+  ok: boolean
+  running: boolean
+  cancelling: boolean
+  progress: PicCleanProgress | null
+  siteId: string
+  startedAt: string
+  lastResult: PicCleanOutcome | null
+}
+
+interface PicSiteCoverage {
+  siteId: string
+  covered: number
+}
+
+interface PicSample {
+  videoId: number
+  name: string
+  currentPic: string
+  nextPic: string
+  changed: boolean
+  manual: boolean
+}
+
+interface PicCleanStats {
+  ok: boolean
+  error?: string
+  siteId: string
+  total: number
+  covered: number
+  stale: number
+  empty: number
+  manual: number
+  sites: PicSiteCoverage[]
+  samples: PicSample[]
 }
 
 interface VideoCacheClearResult {
@@ -881,10 +930,14 @@ interface VideosApi {
   /** 清掉没有任何来源的视频（容量页的手动修复入口） */
   clearOrphans: () => Promise<VideoOrphanPurgeResult>
   clearDetails: (options?: { siteId?: string }) => Promise<DetailClearResult>
-  /** 按默认 pic 来源一键清洗 videos.pic */
-  cleanPics: () => Promise<PicCleanResult>
+  /** 按选定来源批量重写 videos.pic */
+  cleanPics: (input?: { siteId?: string }) => Promise<PicCleanResult>
   cancelPicsClean: () => Promise<void>
   onPicsCleanProgress: (callback: (progress: PicCleanProgress) => void) => () => void
+  /** 同步任务状态：页面重新进入时回填进度与上次结果 */
+  picsCleanStatus: () => Promise<PicCleanStatus>
+  /** 封面规则统计 + 效果抽样；siteId 可以传未保存的候选来源 */
+  picsStats: (options?: { siteId?: string }) => Promise<PicCleanStats>
   /** 删除一个站点的全部缓存数据（来源 / 视频 / 详情 / 进度 / 日志） */
   purgeSite: (input: { siteId: string }) => Promise<VideoSitePurgeResult>
   progress: (siteId?: string) => Promise<VideoCollectProgress[]>

@@ -916,7 +916,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                 <span className="video-edit-label">封面</span>
                 {coverOptions.length <= 1 && (
                   <span className="video-edit-hint">
-                    这个视频只有主来源的预览图，接入更多站点后可以在这里换图
+                    这个视频只有主来源的封面，接入更多站点后可以在这里换图
                   </span>
                 )}
               </div>

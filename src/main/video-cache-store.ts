@@ -7,6 +7,9 @@ import { picCandidates, resolvePic, type PicSource } from './video-pic'
 import type {
   PicCleanProgress,
   PicCleanResult,
+  PicCleanStats,
+  PicSample,
+  PicSiteCoverage,
   CollectMode,
   CollectStatus,
   FetchRange,
@@ -114,6 +117,10 @@ export interface VideoCacheStore {
     onProgress: (progress: PicCleanProgress) => void,
     isCancelled: () => boolean
   ) => Promise<PicCleanResult>
+  /** 封面规则统计：覆盖率、待同步、无封面、人工封面与分站覆盖 */
+  picStats: (siteId: string) => Omit<PicCleanStats, 'ok' | 'error' | 'siteId' | 'samples'>
+  /** 封面效果抽样：当前封面 vs 应用规则后的封面，会变的排在前面 */
+  picSamples: (siteId: string) => PicSample[]
   writePage: (
     siteId: string,
     items: CollectedVideo[],
@@ -983,10 +990,11 @@ export function createVideoCacheStore(
     const total = num(counted?.n)
     let processed = 0
     let changed = 0
+    let skipped = 0
     let lastId = 0
     const batchSize = 500
     while (true) {
-      if (isCancelled()) return { ok: true, total, changed, cancelled: true }
+      if (isCancelled()) return { ok: true, total, changed, skipped, cancelled: true }
       const rows = connection
         .prepare('SELECT id, pic FROM videos WHERE id > ? ORDER BY id LIMIT ?')
         .all(lastId, batchSize) as Record<string, unknown>[]
@@ -1006,6 +1014,18 @@ export function createVideoCacheStore(
         group.push({ siteId: text(row.site_id), pic: text(row.pic) })
         grouped.set(videoId, group)
       }
+      // 人工封面改的是 video_edits.pic，显示端始终优先它；基图仍然跟着规则更新，
+      // 这样以后撤掉人工封面时不会留下旧图。这里只把它们从「显示会变」的计数里拆出去。
+      const manualIds = new Set(
+        (
+          connection
+            .prepare(
+              `SELECT video_id FROM video_edits
+               WHERE video_id IN (${placeholders}) AND pic IS NOT NULL AND pic <> ''`
+            )
+            .all(...ids) as Record<string, unknown>[]
+        ).map((row) => num(row.video_id))
+      )
       const wantedById = new Map<number, string>()
       for (const videoId of ids) {
         wantedById.set(videoId, resolvePic(grouped.get(videoId) ?? [], siteId))
@@ -1018,7 +1038,8 @@ export function createVideoCacheStore(
           const wanted = wantedById.get(videoId) ?? ''
           if (text(row.pic) !== wanted) {
             update.run(wanted, now, videoId)
-            changed += 1
+            if (manualIds.has(videoId)) skipped += 1
+            else changed += 1
           }
         }
       })
@@ -1028,11 +1049,109 @@ export function createVideoCacheStore(
         processed,
         total,
         changed,
+        skipped,
         percent: total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 100
       })
       await new Promise<void>((resolve) => setImmediate(resolve))
     }
-    return { ok: true, total, changed, cancelled: false }
+    return { ok: true, total, changed, skipped, cancelled: false }
+  }
+
+  /**
+   * 封面规则统计。规则本身（`resolvePic`）要按每条视频的来源顺序跑，SQL 里用三段
+   * COALESCE 子查询复现：优先站点 → 主来源 → 第一个非空来源。
+   * 本机 11 万部实测 260ms 上下，控制台按来源缓存 30s（见 index.ts），不用加字段。
+   */
+  function picStats(siteId: string): Omit<PicCleanStats, 'ok' | 'error' | 'siteId' | 'samples'> {
+    const connection = database()
+    const row = connection
+      .prepare(
+        `WITH resolved AS (
+           SELECT v.id,
+             COALESCE(e.pic, v.pic) AS current_pic,
+             COALESCE(
+               (SELECT s.pic FROM video_sources s
+                 WHERE s.video_id = v.id AND s.site_id = ? AND s.pic <> '' LIMIT 1),
+               (SELECT s.pic FROM video_sources s
+                 WHERE s.video_id = v.id ORDER BY s.source_ts DESC, s.id ASC LIMIT 1),
+               (SELECT s.pic FROM video_sources s
+                 WHERE s.video_id = v.id AND s.pic <> ''
+                 ORDER BY s.source_ts DESC, s.id ASC LIMIT 1),
+               ''
+             ) AS next_pic,
+             EXISTS(
+               SELECT 1 FROM video_sources s
+               WHERE s.video_id = v.id AND s.site_id = ? AND s.pic <> ''
+             ) AS hit,
+             CASE WHEN e.pic IS NOT NULL AND e.pic <> '' THEN 1 ELSE 0 END AS manual
+           FROM videos v LEFT JOIN video_edits e ON e.video_id = v.id
+         )
+         SELECT COUNT(*) AS total,
+                SUM(hit) AS covered,
+                SUM(CASE WHEN manual = 0 AND current_pic <> next_pic THEN 1 ELSE 0 END) AS stale,
+                SUM(CASE WHEN manual = 0 AND next_pic = '' THEN 1 ELSE 0 END) AS empty,
+                SUM(manual) AS manual
+         FROM resolved`
+      )
+      .get(siteId, siteId) as Record<string, unknown> | undefined
+    const coverage = connection
+      .prepare(
+        `SELECT site_id, COUNT(DISTINCT video_id) AS covered
+         FROM video_sources WHERE pic <> '' GROUP BY site_id`
+      )
+      .all() as Record<string, unknown>[]
+    return {
+      total: num(row?.total),
+      covered: num(row?.covered),
+      stale: num(row?.stale),
+      empty: num(row?.empty),
+      manual: num(row?.manual),
+      sites: coverage.map((item): PicSiteCoverage => ({
+        siteId: text(item.site_id),
+        covered: num(item.covered)
+      }))
+    }
+  }
+
+  /** 效果抽样：优先给会变的视频，数量不足时用最近的不变视频补齐；人工封面不参与 */
+  function picSamples(siteId: string): PicSample[] {
+    const rows = database()
+      .prepare(
+        `WITH resolved AS (
+           SELECT v.id, v.name, v.latest_ts,
+             COALESCE(e.pic, v.pic) AS current_pic,
+             COALESCE(
+               (SELECT s.pic FROM video_sources s
+                 WHERE s.video_id = v.id AND s.site_id = ? AND s.pic <> '' LIMIT 1),
+               (SELECT s.pic FROM video_sources s
+                 WHERE s.video_id = v.id ORDER BY s.source_ts DESC, s.id ASC LIMIT 1),
+               (SELECT s.pic FROM video_sources s
+                 WHERE s.video_id = v.id AND s.pic <> ''
+                 ORDER BY s.source_ts DESC, s.id ASC LIMIT 1),
+               ''
+             ) AS next_pic,
+             CASE WHEN e.pic IS NOT NULL AND e.pic <> '' THEN 1 ELSE 0 END AS manual
+           FROM videos v LEFT JOIN video_edits e ON e.video_id = v.id
+         )
+         SELECT id, name, current_pic, next_pic
+         FROM resolved
+         WHERE manual = 0
+         ORDER BY (current_pic <> next_pic) DESC, RANDOM()
+         LIMIT 8`
+      )
+      .all(siteId) as Record<string, unknown>[]
+    return rows.map((row) => {
+      const currentPic = text(row.current_pic)
+      const nextPic = text(row.next_pic)
+      return {
+        videoId: num(row.id),
+        name: text(row.name),
+        currentPic,
+        nextPic,
+        changed: currentPic !== nextPic,
+        manual: false
+      }
+    })
   }
 
   /**
@@ -1787,6 +1906,8 @@ export function createVideoCacheStore(
     removeSite,
     purgeOrphanVideos,
     cleanPics,
+    picStats,
+    picSamples,
     writePage,
     listStaleSources,
     deleteSources,

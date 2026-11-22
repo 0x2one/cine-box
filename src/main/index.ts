@@ -58,6 +58,10 @@ import { resolveWindowSize, WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from './window
 import type {
   CollectMode,
   FetchRange,
+  PicCleanOutcome,
+  PicCleanProgress,
+  PicCleanStats,
+  PicCleanStatus,
   VideoCollectStartInput,
   VideoListQuery,
   VideoScheduleInput,
@@ -228,9 +232,13 @@ function cacheUnavailable(): { ok: false; error: string } {
  */
 const DISPLAY_FEED_TTL = 60 * 1000
 let displayFeed: { at: number; feed: HomeFeed } | null = null
+/** 封面统计的短缓存：一次规则统计要扫全库（11 万部约 260ms），换一批只重算抽样 */
+type PicCounts = Omit<PicCleanStats, 'ok' | 'error' | 'siteId' | 'samples'>
+let picCountsCache: { key: string; at: number; counts: PicCounts } | null = null
 
 function invalidateHomeFeed(): void {
   displayFeed = null
+  picCountsCache = null
 }
 
 /**
@@ -825,24 +833,60 @@ ipcMain.handle('videos:details:clear', async (_event, options?: { siteId?: strin
 })
 
 /**
- * 控制台「预览」分区的一键清洗：按当前默认封面来源重写已有封面。
+ * 控制台「封面」分区的批量同步：把已有 videos.pic 按选定来源重写一遍。
  * 单次运行；进度推给发起的渲染进程（节流，完成那条不丢），取消在批次边界生效。
+ * 状态同时保存在主进程里，页面切走再回来可以回填，不会出现「按钮点不动」。
  */
 let picsCleanRunning = false
 let picsCleanCancelled = false
+let picsCleanSiteId = ''
+let picsCleanStartedAt = ''
+let picsCleanProgress: PicCleanProgress | null = null
+let picsCleanLast: PicCleanOutcome | null = null
 
-ipcMain.handle('videos:pics:clean', async (event) => {
-  if (!videoCacheReady) return { ...cacheUnavailable(), total: 0, changed: 0, cancelled: false }
-  if (picsCleanRunning) {
-    return { ok: false, error: 'ALREADY_RUNNING', total: 0, changed: 0, cancelled: false }
+/** 当前选中的来源：传了就用传的（页面可以先预览未保存的来源），失效 id 回落到主来源 */
+function resolvePicRuleSite(requested?: string): string {
+  const siteId = (requested ?? appSettingsStore.get().defaultPicSiteId).trim()
+  if (siteId && siteStore.list().some((site) => site.id === siteId)) return siteId
+  return ''
+}
+
+ipcMain.handle('videos:pics:clean', async (event, input?: { siteId?: string }) => {
+  if (!videoCacheReady) {
+    return {
+      ok: false,
+      error: 'CACHE_UNAVAILABLE',
+      total: 0,
+      changed: 0,
+      skipped: 0,
+      cancelled: false
+    }
   }
+  if (picsCleanRunning) {
+    return {
+      ok: false,
+      error: 'ALREADY_RUNNING',
+      total: 0,
+      changed: 0,
+      skipped: 0,
+      cancelled: false
+    }
+  }
+  const siteId = resolvePicRuleSite(input?.siteId)
+  const startedAt = new Date().toISOString()
+  const startedMs = Date.now()
   picsCleanRunning = true
   picsCleanCancelled = false
+  picsCleanSiteId = siteId
+  picsCleanStartedAt = startedAt
+  picsCleanProgress = { processed: 0, total: 0, changed: 0, skipped: 0, percent: 0 }
+  picsCleanLast = null
   let lastReport = 0
   try {
     const result = await videoStore.cleanPics(
-      appSettingsStore.get().defaultPicSiteId,
+      siteId,
       (progress) => {
+        picsCleanProgress = progress
         const now = Date.now()
         if (progress.percent < 100 && now - lastReport < 100) return
         lastReport = now
@@ -850,16 +894,82 @@ ipcMain.handle('videos:pics:clean', async (event) => {
       },
       () => picsCleanCancelled
     )
+    picsCleanLast = {
+      ...result,
+      siteId,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedMs
+    }
     if (result.changed > 0 || result.cancelled) invalidateHomeFeed()
     return result
+  } catch (error) {
+    console.error('同步封面失败', error)
+    return { ok: false, error: 'DB', total: 0, changed: 0, skipped: 0, cancelled: false }
   } finally {
     picsCleanRunning = false
     picsCleanCancelled = false
+    picsCleanProgress = null
+  }
+})
+
+ipcMain.handle('videos:pics:clean:status', (): PicCleanStatus => {
+  return {
+    ok: true,
+    running: picsCleanRunning,
+    cancelling: picsCleanCancelled,
+    progress: picsCleanProgress,
+    siteId: picsCleanSiteId,
+    startedAt: picsCleanStartedAt,
+    lastResult: picsCleanLast
   }
 })
 
 ipcMain.handle('videos:pics:clean:cancel', () => {
   picsCleanCancelled = true
+})
+
+/**
+ * 封面规则统计 + 效果抽样。规则统计扫全库（11 万部约 260ms），按来源缓存 30s；
+ * 抽样每次重算（随机换一批），所以「换一批」不需要再等一次全库统计。
+ */
+ipcMain.handle('videos:pics:stats', (_event, options?: { siteId?: string }): PicCleanStats => {
+  if (!videoCacheReady) {
+    return {
+      ok: false,
+      error: 'CACHE_UNAVAILABLE',
+      siteId: '',
+      total: 0,
+      covered: 0,
+      stale: 0,
+      empty: 0,
+      manual: 0,
+      sites: [],
+      samples: []
+    }
+  }
+  try {
+    const siteId = resolvePicRuleSite(options?.siteId)
+    const cache = picCountsCache
+    const hit = cache && cache.key === siteId && Date.now() - cache.at < 30_000 ? cache : null
+    const counts = hit ? hit.counts : videoStore.picStats(siteId)
+    if (!hit) picCountsCache = { key: siteId, at: Date.now(), counts }
+    return { ok: true, siteId, ...counts, samples: videoStore.picSamples(siteId) }
+  } catch (error) {
+    console.error('读取封面统计失败', error)
+    return {
+      ok: false,
+      error: 'DB',
+      siteId: '',
+      total: 0,
+      covered: 0,
+      stale: 0,
+      empty: 0,
+      manual: 0,
+      sites: [],
+      samples: []
+    }
+  }
 })
 
 /**

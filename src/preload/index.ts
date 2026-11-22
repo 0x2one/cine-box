@@ -183,8 +183,9 @@ const api = {
     clearOrphans: (): Promise<VideoOrphanPurgeResult> => ipcRenderer.invoke('videos:orphans:clear'),
     clearDetails: (options?: { siteId?: string }): Promise<DetailClearResult> =>
       ipcRenderer.invoke('videos:details:clear', options),
-    /** 按默认 pic 来源一键清洗 videos.pic */
-    cleanPics: (): Promise<PicCleanResult> => ipcRenderer.invoke('videos:pics:clean'),
+    /** 按选定来源批量重写 videos.pic */
+    cleanPics: (input?: { siteId?: string }): Promise<PicCleanResult> =>
+      ipcRenderer.invoke('videos:pics:clean', input),
     cancelPicsClean: (): Promise<void> => ipcRenderer.invoke('videos:pics:clean:cancel'),
     onPicsCleanProgress: (callback: (progress: PicCleanProgress) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, progress: PicCleanProgress): void =>
@@ -192,6 +193,11 @@ const api = {
       ipcRenderer.on('videos:pics:clean:progress', handler)
       return () => ipcRenderer.removeListener('videos:pics:clean:progress', handler)
     },
+    /** 同步任务状态：页面重新进入时回填进度与上次结果 */
+    picsCleanStatus: (): Promise<PicCleanStatus> => ipcRenderer.invoke('videos:pics:clean:status'),
+    /** 封面规则统计 + 效果抽样；siteId 可以传未保存的候选来源 */
+    picsStats: (options?: { siteId?: string }): Promise<PicCleanStats> =>
+      ipcRenderer.invoke('videos:pics:stats', options),
     /** 删除一个站点的全部缓存数据（来源 / 视频 / 详情 / 进度 / 日志） */
     purgeSite: (input: { siteId: string }): Promise<VideoSitePurgeResult> =>
       ipcRenderer.invoke('videos:site:purge', input),
