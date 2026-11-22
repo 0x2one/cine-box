@@ -91,6 +91,8 @@ interface AppSettings {
   startView: AppStartView
   /** 启动时主窗口的大小 */
   windowSize: AppWindowSize
+  /** 采集时优先使用哪个站点的 pic 填 videos.pic，空串表示不指定 */
+  defaultPicSiteId: string
 }
 
 interface SetShortcutResult {
@@ -111,6 +113,8 @@ interface SettingsApi {
   setStartView: (value: AppStartView) => Promise<AppSettings>
   /** 设置启动时的窗口大小，返回保存后的设置；下次启动生效 */
   setWindowSize: (value: AppWindowSize) => Promise<AppSettings>
+  /** 设置默认 pic 来源站点（空串 = 不指定），立即影响后续采集 */
+  setDefaultPicSite: (value: string) => Promise<AppSettings>
 }
 
 type SiteFormat = 'xml' | 'json'
@@ -668,6 +672,8 @@ interface VideoListItem {
   id: number
   name: string
   pic: string
+  /** 封面加载失败时可依次尝试的其它来源封面 */
+  picCandidates: string[]
   note: string
   introExcerpt: string
   introTruncated: boolean
@@ -785,6 +791,8 @@ interface VideoDetail {
   id: number
   name: string
   pic: string
+  /** 封面加载失败时可依次尝试的其它来源封面 */
+  picCandidates: string[]
   note: string
   introExcerpt: string
   introTruncated: boolean
@@ -833,6 +841,23 @@ interface VideoSitePurgeResult {
   logs: number
 }
 
+/** 清洗 videos.pic 的进度 */
+interface PicCleanProgress {
+  processed: number
+  total: number
+  changed: number
+  percent: number
+}
+
+/** 清洗 videos.pic 的结果 */
+interface PicCleanResult {
+  ok: boolean
+  error?: string
+  total: number
+  changed: number
+  cancelled: boolean
+}
+
 interface VideoCacheClearResult {
   ok: boolean
   freedBytes?: number
@@ -856,6 +881,10 @@ interface VideosApi {
   /** 清掉没有任何来源的视频（容量页的手动修复入口） */
   clearOrphans: () => Promise<VideoOrphanPurgeResult>
   clearDetails: (options?: { siteId?: string }) => Promise<DetailClearResult>
+  /** 按默认 pic 来源一键清洗 videos.pic */
+  cleanPics: () => Promise<PicCleanResult>
+  cancelPicsClean: () => Promise<void>
+  onPicsCleanProgress: (callback: (progress: PicCleanProgress) => void) => () => void
   /** 删除一个站点的全部缓存数据（来源 / 视频 / 详情 / 进度 / 日志） */
   purgeSite: (input: { siteId: string }) => Promise<VideoSitePurgeResult>
   progress: (siteId?: string) => Promise<VideoCollectProgress[]>
@@ -922,6 +951,8 @@ interface HomeItemView {
   actors: string
   intro: string
   pic: string
+  /** 当前 pic 加载失败时可依次尝试的其它来源封面 */
+  picCandidates: string[]
   crop: HomeCrop
   /** 是否自定义了图片（决定要不要按 crop 裁剪） */
   customPic: boolean

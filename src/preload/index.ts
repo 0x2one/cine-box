@@ -54,7 +54,9 @@ const api = {
     setStartView: (value: AppStartView): Promise<AppSettings> =>
       ipcRenderer.invoke('settings:setStartView', value),
     setWindowSize: (value: AppWindowSize): Promise<AppSettings> =>
-      ipcRenderer.invoke('settings:setWindowSize', value)
+      ipcRenderer.invoke('settings:setWindowSize', value),
+    setDefaultPicSite: (value: string): Promise<AppSettings> =>
+      ipcRenderer.invoke('settings:setDefaultPicSite', value)
   },
   sites: {
     list: (): Promise<Site[]> => ipcRenderer.invoke('sites:list'),
@@ -181,6 +183,15 @@ const api = {
     clearOrphans: (): Promise<VideoOrphanPurgeResult> => ipcRenderer.invoke('videos:orphans:clear'),
     clearDetails: (options?: { siteId?: string }): Promise<DetailClearResult> =>
       ipcRenderer.invoke('videos:details:clear', options),
+    /** 按默认 pic 来源一键清洗 videos.pic */
+    cleanPics: (): Promise<PicCleanResult> => ipcRenderer.invoke('videos:pics:clean'),
+    cancelPicsClean: (): Promise<void> => ipcRenderer.invoke('videos:pics:clean:cancel'),
+    onPicsCleanProgress: (callback: (progress: PicCleanProgress) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, progress: PicCleanProgress): void =>
+        callback(progress)
+      ipcRenderer.on('videos:pics:clean:progress', handler)
+      return () => ipcRenderer.removeListener('videos:pics:clean:progress', handler)
+    },
     /** 删除一个站点的全部缓存数据（来源 / 视频 / 详情 / 进度 / 日志） */
     purgeSite: (input: { siteId: string }): Promise<VideoSitePurgeResult> =>
       ipcRenderer.invoke('videos:site:purge', input),

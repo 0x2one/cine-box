@@ -90,7 +90,10 @@ const backupStore = createBackupStore(databaseFile, app.getVersion())
 // 视频缓存库与详情文件单独存放，可整体清理，不影响站点/分类/计划
 const videoCacheFile = join(app.getPath('userData'), 'Data', 'video-cache.db')
 const videoRoot = join(app.getPath('userData'), 'Data', 'videos')
-const videoStore = createVideoCacheStore(videoCacheFile)
+const videoStore = createVideoCacheStore(videoCacheFile, {
+  // 采集重算 pic 时读当前配置，改配置立即生效、不用重启
+  defaultPicSiteId: () => appSettingsStore.get().defaultPicSiteId
+})
 const scheduleStore = createCollectScheduleStore(databaseFile)
 const collectLogs = createCollectLogStore(
   () => videoStore.connection(),
@@ -619,6 +622,13 @@ ipcMain.handle('settings:setWindowSize', (_event, value: string) =>
   appSettingsStore.setWindowSize(value)
 )
 
+ipcMain.handle('settings:setDefaultPicSite', (_event, value: string) => {
+  // 站点可能刚被删掉：失效的 id 直接回落成「不指定」，不让配置指向悬空站点
+  const siteId = typeof value === 'string' ? value.trim() : ''
+  const valid = siteId && siteStore.list().some((site) => site.id === siteId) ? siteId : ''
+  return appSettingsStore.setDefaultPicSite(valid)
+})
+
 /* ── IPC：缓存管理 ── */
 
 ipcMain.handle('cache:scan', (event) =>
@@ -812,6 +822,44 @@ ipcMain.handle('videos:orphans:clear', () => {
 ipcMain.handle('videos:details:clear', async (_event, options?: { siteId?: string }) => {
   if (!videoCacheReady) return cacheUnavailable()
   return detailCache.clear(options?.siteId ? String(options.siteId) : undefined)
+})
+
+/**
+ * 控制台「预览」分区的一键清洗：按当前默认封面来源重写已有封面。
+ * 单次运行；进度推给发起的渲染进程（节流，完成那条不丢），取消在批次边界生效。
+ */
+let picsCleanRunning = false
+let picsCleanCancelled = false
+
+ipcMain.handle('videos:pics:clean', async (event) => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), total: 0, changed: 0, cancelled: false }
+  if (picsCleanRunning) {
+    return { ok: false, error: 'ALREADY_RUNNING', total: 0, changed: 0, cancelled: false }
+  }
+  picsCleanRunning = true
+  picsCleanCancelled = false
+  let lastReport = 0
+  try {
+    const result = await videoStore.cleanPics(
+      appSettingsStore.get().defaultPicSiteId,
+      (progress) => {
+        const now = Date.now()
+        if (progress.percent < 100 && now - lastReport < 100) return
+        lastReport = now
+        if (!event.sender.isDestroyed()) event.sender.send('videos:pics:clean:progress', progress)
+      },
+      () => picsCleanCancelled
+    )
+    if (result.changed > 0 || result.cancelled) invalidateHomeFeed()
+    return result
+  } finally {
+    picsCleanRunning = false
+    picsCleanCancelled = false
+  }
+})
+
+ipcMain.handle('videos:pics:clean:cancel', () => {
+  picsCleanCancelled = true
 })
 
 /**
@@ -1029,6 +1077,10 @@ ipcMain.handle('sites:remove', (_event, id: string) => {
     // 站点的绑定被级联删掉了，推荐要按剩下的绑定重算
     syncHomeRecommendations()
     invalidateHomeFeed()
+    // 默认 pic 来源指向这个站点时清掉配置，别留下悬空 id
+    if (appSettingsStore.get().defaultPicSiteId === siteId) {
+      appSettingsStore.setDefaultPicSite('')
+    }
     // 站点缓存与详情目录在后台清，几万条来源时不拖住删除操作
     void scheduleSiteCachePurge(siteId)
   }
@@ -1339,6 +1391,11 @@ ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
     // 恢复前先让后台清理收尾，避免它按旧站点 id 把刚恢复的数据删掉
     await waitSiteCachePurge()
     await reconcileVideoCache()
+    // 备份里可能是另一批站点 id，失效的默认 pic 来源配置直接清掉
+    const defaultPicSiteId = appSettingsStore.get().defaultPicSiteId
+    if (defaultPicSiteId && !siteStore.list().some((site) => site.id === defaultPicSiteId)) {
+      appSettingsStore.setDefaultPicSite('')
+    }
     // 分类 / 绑定被整体替换，推荐页那份缓存不再可信
     invalidateHomeFeed()
   }

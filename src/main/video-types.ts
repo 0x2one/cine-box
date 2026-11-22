@@ -155,6 +155,23 @@ export interface VideoSitePurgeResult {
   logs: number
 }
 
+/** 清洗 videos.pic 的进度（主进程推给控制台「预览」页） */
+export interface PicCleanProgress {
+  processed: number
+  total: number
+  changed: number
+  percent: number
+}
+
+/** 清洗 videos.pic 的结果 */
+export interface PicCleanResult {
+  ok: boolean
+  error?: string
+  total: number
+  changed: number
+  cancelled: boolean
+}
+
 export interface VideoCollectStartInput {
   siteId: string
   mode: CollectMode
@@ -198,6 +215,8 @@ export interface VideoListItem {
   id: number
   name: string
   pic: string
+  /** 封面加载失败时可依次尝试的其它来源封面（默认来源优先、去重） */
+  picCandidates: string[]
   note: string
   introExcerpt: string
   introTruncated: boolean
@@ -324,6 +343,8 @@ export interface VideoDetail {
   id: number
   name: string
   pic: string
+  /** 封面加载失败时可依次尝试的其它来源封面 */
+  picCandidates: string[]
   note: string
   introExcerpt: string
   introTruncated: boolean

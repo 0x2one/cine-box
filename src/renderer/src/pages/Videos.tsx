@@ -25,6 +25,7 @@ import {
   ReloadOutlined,
   RightOutlined
 } from '@ant-design/icons'
+import FallbackImage from '../components/FallbackImage'
 import { formatDateTime } from '../utils/format'
 import { isM3u8 } from '../player/player-data'
 
@@ -726,17 +727,12 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                 onClick={() => void openDetail(item)}
               >
                 <span className="video-cover-letter">{item.name.trim().slice(0, 1)}</span>
-                {item.pic && (
-                  <img
-                    src={item.pic}
-                    alt=""
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                    onError={(event) => {
-                      event.currentTarget.style.visibility = 'hidden'
-                    }}
-                  />
-                )}
+                <FallbackImage
+                  src={item.pic}
+                  candidates={item.picCandidates}
+                  alt=""
+                  loading="lazy"
+                />
               </button>
             }
             actions={[
@@ -1061,16 +1057,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
               <div className="video-detail-head">
                 <div className="video-detail-cover">
                   <span className="video-detail-letter">{detail.name.trim().slice(0, 1)}</span>
-                  {detail.pic && (
-                    <img
-                      src={detail.pic}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      onError={(event) => {
-                        event.currentTarget.style.visibility = 'hidden'
-                      }}
-                    />
-                  )}
+                  <FallbackImage src={detail.pic} candidates={detail.picCandidates} alt="" />
                 </div>
                 <div className="video-detail-info">
                   <h3 className="video-detail-name">{detail.name}</h3>

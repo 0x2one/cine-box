@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import FallbackImage from '../components/FallbackImage'
 import type { PlayerLine } from './player-data'
 
 interface PlayerInfoProps {
@@ -39,16 +40,7 @@ function PlayerInfo({ detail, line, lineLabel }: PlayerInfoProps): React.JSX.Ele
       <div className="player-info-hero">
         <div className="player-poster">
           <span className="player-poster-letter">{title.slice(0, 1) || '映'}</span>
-          {detail?.pic && (
-            <img
-              src={detail.pic}
-              alt=""
-              referrerPolicy="no-referrer"
-              onError={(event) => {
-                event.currentTarget.style.visibility = 'hidden'
-              }}
-            />
-          )}
+          <FallbackImage src={detail?.pic ?? ''} candidates={detail?.picCandidates ?? []} alt="" />
         </div>
 
         <div className="player-info-head">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Spin } from 'antd'
 import { ArrowUpOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons'
+import FallbackImage from '../components/FallbackImage'
 import HomePicture from '../components/HomePicture'
 import { visibleCategoryIds } from '../lib/category-tree'
 import { formatCount } from '../utils/format'
@@ -161,17 +162,7 @@ function SearchResultRow({
     <article className="search-result is-openable">
       <div className="search-result-cover">
         <span className="search-cover-letter">{item.name.trim().slice(0, 1) || '影'}</span>
-        {item.pic && (
-          <img
-            src={item.pic}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={(event) => {
-              event.currentTarget.style.visibility = 'hidden'
-            }}
-          />
-        )}
+        <FallbackImage src={item.pic} candidates={item.picCandidates} alt="" loading="lazy" />
         {/* 透明按钮铺满封面：整张图都能点开播放，键盘也能聚焦 */}
         <button
           type="button"

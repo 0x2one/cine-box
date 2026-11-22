@@ -480,6 +480,7 @@ function BrowseView({
                   videoId={item.id}
                   title={item.name}
                   pic={item.pic}
+                  picCandidates={item.picCandidates}
                   note={item.note}
                   intro={item.introExcerpt}
                   actors={item.vodActor}

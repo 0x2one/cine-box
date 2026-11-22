@@ -7,6 +7,8 @@ const FULL_CROP: HomeCrop = { x: 0, y: 0, w: 1, h: 1 }
 interface VideoCardProps {
   title: string
   pic: string
+  /** 当前封面加载失败时依次尝试的其它来源封面 */
+  picCandidates?: string[]
   note: string
   intro: string
   actors: string
@@ -28,6 +30,7 @@ interface VideoCardProps {
 function VideoCard({
   title,
   pic,
+  picCandidates,
   note,
   intro,
   actors,
@@ -51,7 +54,7 @@ function VideoCard({
       aria-hidden={ariaHidden || undefined}
     >
       <div className="home-item-poster">
-        <HomePicture item={{ pic, crop: crop ?? FULL_CROP, customPic, title }} />
+        <HomePicture item={{ pic, picCandidates, crop: crop ?? FULL_CROP, customPic, title }} />
         {/* 更新进度压在封面右下角，卡片下方只留片名和简介 */}
         {(note || latestTime) && (
           <span className="home-item-badge">{note || `更新 ${latestTime}`}</span>

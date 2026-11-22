@@ -22,6 +22,8 @@ export interface AppSettings {
   startView: AppStartView
   /** 启动时主窗口的大小：适中 / 大屏 / 超大 */
   windowSize: AppWindowSize
+  /** 采集时优先使用哪个站点的 pic 填充 videos.pic，空串表示不指定 */
+  defaultPicSiteId: string
 }
 
 interface StoreFile {
@@ -32,6 +34,7 @@ interface StoreFile {
   showShortcut?: string
   startView?: string
   windowSize?: string
+  defaultPicSiteId?: string
 }
 
 const DEFAULTS: AppSettings = {
@@ -40,7 +43,8 @@ const DEFAULTS: AppSettings = {
   autoDownload: true,
   showShortcut: DEFAULT_SHOW_SHORTCUT,
   startView: 'home',
-  windowSize: DEFAULT_WINDOW_SIZE
+  windowSize: DEFAULT_WINDOW_SIZE,
+  defaultPicSiteId: ''
 }
 
 export interface AppSettingsStore {
@@ -52,6 +56,7 @@ export interface AppSettingsStore {
   setShowShortcut: (value: string | null) => AppSettings
   setStartView: (value: string | null) => AppSettings
   setWindowSize: (value: string | null) => AppSettings
+  setDefaultPicSite: (value: string | null) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -94,7 +99,9 @@ export function createAppSettingsStore(): AppSettingsStore {
         showShortcut:
           typeof data?.showShortcut === 'string' ? data.showShortcut : DEFAULTS.showShortcut,
         startView: data?.startView === 'search' ? 'search' : 'home',
-        windowSize: isAppWindowSize(data?.windowSize) ? data.windowSize : DEFAULTS.windowSize
+        windowSize: isAppWindowSize(data?.windowSize) ? data.windowSize : DEFAULTS.windowSize,
+        defaultPicSiteId:
+          typeof data?.defaultPicSiteId === 'string' ? data.defaultPicSiteId.trim() : ''
       }
     } catch {
       settings = { ...DEFAULTS }
@@ -109,7 +116,8 @@ export function createAppSettingsStore(): AppSettingsStore {
       autoDownload: settings.autoDownload,
       showShortcut: settings.showShortcut,
       startView: settings.startView,
-      windowSize: settings.windowSize
+      windowSize: settings.windowSize,
+      defaultPicSiteId: settings.defaultPicSiteId
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -162,6 +170,14 @@ export function createAppSettingsStore(): AppSettingsStore {
       settings = {
         ...settings,
         windowSize: isAppWindowSize(value) ? value : DEFAULTS.windowSize
+      }
+      persist()
+      return snapshot()
+    },
+    setDefaultPicSite: (value: string | null) => {
+      settings = {
+        ...settings,
+        defaultPicSiteId: typeof value === 'string' ? value.trim() : ''
       }
       persist()
       return snapshot()

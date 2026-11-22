@@ -56,6 +56,7 @@ function toView(
     actors: item.actors || video?.vodActor || '',
     intro: item.intro || video?.introExcerpt || '',
     pic: item.pic || video?.pic || '',
+    picCandidates: video?.picCandidates ?? [],
     crop: item.crop,
     customPic: item.pic !== '',
     hidden: item.hidden,

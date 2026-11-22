@@ -318,13 +318,20 @@
 }
 
 .home-pager-btn {
+  position: relative;
   width: 32px;
   height: 32px;
   flex: none;
 }
 
+/* 图标铺满圆形按钮再居中：antd 图标自带的 vertical-align / line-height
+   会让箭头在圆钮里偏上偏左一点 */
 .home-pager-btn .anticon {
+  position: absolute;
+  display: grid;
+  inset: 0;
   font-size: 12px;
+  place-items: center;
 }
 
 /* 分类区块 */

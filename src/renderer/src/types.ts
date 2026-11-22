@@ -14,6 +14,7 @@ export type ConsoleSection =
   | 'collect'
   | 'progress'
   | 'videos'
+  | 'preview'
   | 'capacity'
   | 'backup'
   | 'logs'

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Spin } from 'antd'
 import { ArrowUpOutlined, CaretRightFilled, LeftOutlined, RightOutlined } from '@ant-design/icons'
+import FallbackImage from '../components/FallbackImage'
 import HomePicture from '../components/HomePicture'
 import VideoCard from '../components/VideoCard'
 import { formatCount } from '../utils/format'
@@ -285,6 +286,7 @@ function HomeRail({
             videoId={item.videoId}
             title={item.title}
             pic={item.pic}
+            picCandidates={item.picCandidates}
             crop={item.crop}
             customPic={item.customPic}
             note={item.note}
@@ -547,24 +549,20 @@ function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.E
                       }`}
                       aria-hidden={index !== leadIndex % leadCount}
                     >
-                      {item.pic && (
-                        <img
-                          className="home-latest-blur"
-                          src={item.pic}
-                          alt=""
-                          aria-hidden="true"
-                          draggable={false}
-                          loading={index === 0 ? 'eager' : 'lazy'}
-                          decoding="async"
-                          referrerPolicy="no-referrer"
-                          onError={(event) => {
-                            event.currentTarget.style.visibility = 'hidden'
-                          }}
-                        />
-                      )}
+                      <FallbackImage
+                        className="home-latest-blur"
+                        src={item.pic}
+                        candidates={item.picCandidates}
+                        alt=""
+                        aria-hidden="true"
+                        draggable={false}
+                        loading={index === 0 ? 'eager' : 'lazy'}
+                        decoding="async"
+                      />
                       <HomePicture
                         item={{
                           pic: item.pic,
+                          picCandidates: item.picCandidates,
                           crop: FULL_CROP,
                           customPic: false,
                           title: item.name
@@ -611,6 +609,7 @@ function HomeLatest({ onOpenBrowse }: { onOpenBrowse: () => void }): React.JSX.E
                 videoId={item.id}
                 title={item.name}
                 pic={item.pic}
+                picCandidates={item.picCandidates}
                 note={item.note}
                 intro={item.introExcerpt}
                 actors={item.vodActor}

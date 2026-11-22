@@ -108,6 +108,8 @@ export interface HomeItemView {
   intro: string
   /** 最终图片：自定义优先，其次视频封面；都为空时由界面画首字占位 */
   pic: string
+  /** 当前 pic 加载失败时可依次尝试的其它来源封面 */
+  picCandidates: string[]
   crop: HomeCrop
   /** 是否使用自定义图片（决定要不要按 crop 裁剪） */
   customPic: boolean

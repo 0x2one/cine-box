@@ -3,7 +3,10 @@ import type { DatabaseSync } from 'node:sqlite'
 import { closeDatabase, inTransaction, openDatabase } from './database'
 import type { CollectedVideo } from './video-collect-parser'
 import { makeExcerpt, makeFtsQuery, makeNameKey, makeSearchText, truncate } from './video-text'
+import { picCandidates, resolvePic, type PicSource } from './video-pic'
 import type {
+  PicCleanProgress,
+  PicCleanResult,
   CollectMode,
   CollectStatus,
   FetchRange,
@@ -105,6 +108,12 @@ export interface VideoCacheStore {
   removeSite: (siteId: string) => { sources: number; videos: number; shared: number }
   /** 清掉没有任何来源的视频与它们的人工编辑（容量页的手动修复入口） */
   purgeOrphanVideos: () => { videos: number; edits: number }
+  /** 按默认 pic 来源批量重写 videos.pic，分批让出主线程、可取消 */
+  cleanPics: (
+    siteId: string,
+    onProgress: (progress: PicCleanProgress) => void,
+    isCancelled: () => boolean
+  ) => Promise<PicCleanResult>
   writePage: (
     siteId: string,
     items: CollectedVideo[],
@@ -398,11 +407,12 @@ const VIDEO_ITEM_FROM = `
   JOIN video_sources s ON s.id = v.primary_source_id
   LEFT JOIN video_edits e ON e.video_id = v.id`
 
-function rowToVideoItem(raw: Record<string, unknown>): VideoListItem {
+function rowToVideoItem(raw: Record<string, unknown>, candidates: string[] = []): VideoListItem {
   return {
     id: num(raw.id),
     name: text(raw.name),
     pic: text(raw.pic),
+    picCandidates: candidates,
     note: text(raw.note),
     introExcerpt: text(raw.intro_excerpt),
     introTruncated: num(raw.intro_truncated) !== 0,
@@ -424,7 +434,43 @@ function rowToVideoItem(raw: Record<string, unknown>): VideoListItem {
  * 视频缓存库：列表、搜索、多站合并、进度、详情索引与容量统计。
  * 详情正文不在这里，只有 video_sources.detail_* 索引。
  */
-export function createVideoCacheStore(file: string): VideoCacheStore {
+export function createVideoCacheStore(
+  file: string,
+  options: { defaultPicSiteId?: () => string } = {}
+): VideoCacheStore {
+  const preferredPicSite = (): string => (options.defaultPicSiteId?.() ?? '').trim()
+
+  /** 缓存库行 -> 选图规则需要的最小结构 */
+  const asPicSources = (rows: Record<string, unknown>[]): PicSource[] =>
+    rows.map((row) => ({ siteId: text(row.site_id), pic: text(row.pic) }))
+
+  /**
+   * 一次查询取齐一批视频的所有来源 pic，按默认站点优先排成候选列表。
+   * 列表查询只多这一条 SELECT，不碰静态的 VIDEO_ITEM_SELECT / VIDEO_ITEM_FROM。
+   */
+  function candidatesFor(videoIds: number[]): Map<number, string[]> {
+    const result = new Map<number, string[]>()
+    const ids = [...new Set(videoIds.filter((id) => Number.isInteger(id) && id > 0))]
+    if (ids.length === 0) return result
+    const placeholders = ids.map(() => '?').join(', ')
+    const rows = database()
+      .prepare(
+        `SELECT video_id, site_id, pic FROM video_sources
+         WHERE video_id IN (${placeholders}) ORDER BY video_id, source_ts DESC, id ASC`
+      )
+      .all(...ids) as Record<string, unknown>[]
+    const grouped = new Map<number, PicSource[]>()
+    for (const row of rows) {
+      const videoId = num(row.video_id)
+      const group = grouped.get(videoId) ?? []
+      group.push({ siteId: text(row.site_id), pic: text(row.pic) })
+      grouped.set(videoId, group)
+    }
+    const preferred = preferredPicSite()
+    for (const [videoId, sources] of grouped) result.set(videoId, picCandidates(sources, preferred))
+    return result
+  }
+
   let db: DatabaseSync | null = null
 
   function database(): DatabaseSync {
@@ -514,7 +560,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       latestTime: text(pick('source_time')),
       primarySourceId: num(primary.id),
       sourceCount: sources.length,
-      pic: text(pick('pic')),
+      pic: resolvePic(asPicSources(sources), preferredPicSite()),
       note: text(noteSource ? noteSource.note : pick('note')),
       vodActor: text(pick('vod_actor')),
       vodClass: text(pick('vod_class')),
@@ -921,6 +967,75 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
   }
 
   /**
+   * 按默认封面来源批量重写已有封面（控制台「预览」里的「一键清洗」）。
+   * 游标分批 + 批间让出主线程，避免几万部视频把主进程卡死；取消在批次边界生效。
+   */
+  async function cleanPics(
+    siteId: string,
+    onProgress: (progress: PicCleanProgress) => void,
+    isCancelled: () => boolean
+  ): Promise<PicCleanResult> {
+    const connection = database()
+    const counted = connection.prepare('SELECT COUNT(*) AS n FROM videos').get() as Record<
+      string,
+      unknown
+    >
+    const total = num(counted?.n)
+    let processed = 0
+    let changed = 0
+    let lastId = 0
+    const batchSize = 500
+    while (true) {
+      if (isCancelled()) return { ok: true, total, changed, cancelled: true }
+      const rows = connection
+        .prepare('SELECT id, pic FROM videos WHERE id > ? ORDER BY id LIMIT ?')
+        .all(lastId, batchSize) as Record<string, unknown>[]
+      if (rows.length === 0) break
+      const ids = rows.map((row) => num(row.id))
+      const placeholders = ids.map(() => '?').join(', ')
+      const sourceRows = connection
+        .prepare(
+          `SELECT video_id, site_id, pic FROM video_sources
+           WHERE video_id IN (${placeholders}) ORDER BY video_id, source_ts DESC, id ASC`
+        )
+        .all(...ids) as Record<string, unknown>[]
+      const grouped = new Map<number, PicSource[]>()
+      for (const row of sourceRows) {
+        const videoId = num(row.video_id)
+        const group = grouped.get(videoId) ?? []
+        group.push({ siteId: text(row.site_id), pic: text(row.pic) })
+        grouped.set(videoId, group)
+      }
+      const wantedById = new Map<number, string>()
+      for (const videoId of ids) {
+        wantedById.set(videoId, resolvePic(grouped.get(videoId) ?? [], siteId))
+      }
+      const now = new Date().toISOString()
+      inTransaction(connection, (tx) => {
+        const update = tx.prepare('UPDATE videos SET pic = ?, updated_at = ? WHERE id = ?')
+        for (const row of rows) {
+          const videoId = num(row.id)
+          const wanted = wantedById.get(videoId) ?? ''
+          if (text(row.pic) !== wanted) {
+            update.run(wanted, now, videoId)
+            changed += 1
+          }
+        }
+      })
+      processed += rows.length
+      lastId = ids[ids.length - 1]
+      onProgress({
+        processed,
+        total,
+        changed,
+        percent: total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 100
+      })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+    return { ok: true, total, changed, cancelled: false }
+  }
+
+  /**
    * 列表总数的轻量算法：有分类过滤时直接数 `video_sources` 里命中的来源视频 id（去重），
    * 不扫整张 `videos` 表。`COUNT(*)` 那版每条过滤都要全表扫 + 逐行 EXISTS（十几万条时
    * 一条 200ms 上下，过滤条件越多越慢）；这里只碰命中的来源行——单个大类最慢 100ms，
@@ -1058,7 +1173,10 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       return { ok: false, items: [], total: 0, page, pageSize, error: 'DB' }
     }
 
-    const items: VideoListItem[] = rows.map(rowToVideoItem)
+    const candidates = candidatesFor(rows.map((row) => num(row.id)))
+    const items: VideoListItem[] = rows.map((row) =>
+      rowToVideoItem(row, candidates.get(num(row.id)) ?? [])
+    )
     return { ok: true, items, total, page, pageSize }
   }
 
@@ -1074,7 +1192,8 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       const rows = database()
         .prepare(`${VIDEO_ITEM_SELECT} ${VIDEO_ITEM_FROM} WHERE v.id IN (${placeholders})`)
         .all(...ids) as Record<string, unknown>[]
-      return rows.map(rowToVideoItem)
+      const candidates = candidatesFor(rows.map((row) => num(row.id)))
+      return rows.map((row) => rowToVideoItem(row, candidates.get(num(row.id)) ?? []))
     } catch {
       return []
     }
@@ -1499,6 +1618,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       id: num(video.id),
       name: text(video.name),
       pic: text(video.pic),
+      picCandidates: picCandidates(asPicSources(rows), preferredPicSite()),
       note: text(video.note),
       introExcerpt: text(video.intro_excerpt),
       introTruncated: num(video.intro_truncated) !== 0,
@@ -1666,6 +1786,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     listCacheSites,
     removeSite,
     purgeOrphanVideos,
+    cleanPics,
     writePage,
     listStaleSources,
     deleteSources,
