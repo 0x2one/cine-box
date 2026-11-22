@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Spin } from 'antd'
-import { ArrowUpOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, CloseOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons'
 import FallbackImage from '../components/FallbackImage'
 import HomePicture from '../components/HomePicture'
 import { visibleCategoryIds } from '../lib/category-tree'
@@ -385,6 +385,12 @@ function SearchView({
     setHistory([])
   }
 
+  /** 只删这一条：大小写不敏感，和历史去重时用的是同一套判断 */
+  const removeHistory = (term: string): void => {
+    const key = term.toLowerCase()
+    setHistory((previous) => previous.filter((item) => item.toLowerCase() !== key))
+  }
+
   /** 距离底部不到 LOAD_AHEAD 且还有下一页时继续取 */
   const maybeLoadMore = useCallback((): void => {
     const state = guard.current
@@ -583,19 +589,29 @@ function SearchView({
                   </div>
                   <div className="search-history">
                     {history.map((term) => (
-                      <button
-                        key={term}
-                        type="button"
-                        className="search-history-item"
-                        title={term}
-                        onClick={() => {
-                          setDraft(term)
-                          runSearch(term)
-                        }}
-                      >
-                        <HistoryOutlined />
-                        <span>{term}</span>
-                      </button>
+                      <div className="search-history-item" key={term}>
+                        <button
+                          type="button"
+                          className="search-history-run"
+                          title={term}
+                          onClick={() => {
+                            setDraft(term)
+                            runSearch(term)
+                          }}
+                        >
+                          <HistoryOutlined />
+                          <span>{term}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="search-history-remove"
+                          title={`删除「${term}」`}
+                          aria-label={`删除搜索记录：${term}`}
+                          onClick={() => removeHistory(term)}
+                        >
+                          <CloseOutlined />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
