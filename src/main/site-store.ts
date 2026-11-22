@@ -196,6 +196,19 @@ function isHttpAddress(value: string): boolean {
   }
 }
 
+/**
+ * 两个采集地址是不是同一个站点：只比 host（含端口）。
+ * 同一个域名下改路径、补结尾斜杠、切 http/https 通常只是笔误，缓存仍然可信；
+ * 解析不出来的地址一律当作换了站点，宁可多清一次。
+ */
+export function isSameSiteHost(left: string, right: string): boolean {
+  try {
+    return new URL(left).host === new URL(right).host
+  } catch {
+    return false
+  }
+}
+
 /** 兜底修补历史 / 手工改坏的数据，缺字段用默认值补齐 */
 function normalizeSite(value: unknown): Site | null {
   if (!value || typeof value !== 'object') return null

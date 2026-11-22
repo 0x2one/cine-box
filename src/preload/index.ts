@@ -177,6 +177,8 @@ const api = {
       ipcRenderer.invoke('videos:capacity', options),
     scanCapacity: (options?: { fixMissing?: boolean }): Promise<VideoCapacityScanResult> =>
       ipcRenderer.invoke('videos:capacity:scan', options),
+    /** 清掉没有任何来源的视频（容量页的手动修复入口） */
+    clearOrphans: (): Promise<VideoOrphanPurgeResult> => ipcRenderer.invoke('videos:orphans:clear'),
     clearDetails: (options?: { siteId?: string }): Promise<DetailClearResult> =>
       ipcRenderer.invoke('videos:details:clear', options),
     progress: (siteId?: string): Promise<VideoCollectProgress[]> =>

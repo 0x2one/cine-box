@@ -613,6 +613,8 @@ interface VideoCapacity {
   detailBytes: number
   logCount: number
   siteCount: number
+  /** 没有任何来源的视频；只有按站点统计那一档才数，概览恒为 0 */
+  orphanCount: number
   lastCollectedAt: string
   sites: VideoCapacitySite[]
 }
@@ -631,6 +633,14 @@ interface VideoCapacityDrift {
 
 interface VideoCapacityScanResult extends VideoCapacity {
   drift: VideoCapacityDrift | null
+}
+
+/** 容量页「清理无来源视频」的结果 */
+interface VideoOrphanPurgeResult {
+  ok: boolean
+  error?: string
+  videos: number
+  edits: number
 }
 
 interface VideoStats {
@@ -827,6 +837,8 @@ interface VideosApi {
   /** { sites: false } 跳过按站点分组的统计 */
   capacity: (options?: { sites?: boolean }) => Promise<VideoCapacity>
   scanCapacity: (options?: { fixMissing?: boolean }) => Promise<VideoCapacityScanResult>
+  /** 清掉没有任何来源的视频（容量页的手动修复入口） */
+  clearOrphans: () => Promise<VideoOrphanPurgeResult>
   clearDetails: (options?: { siteId?: string }) => Promise<DetailClearResult>
   progress: (siteId?: string) => Promise<VideoCollectProgress[]>
   collect: (input: VideoCollectStartInput) => Promise<VideoCollectStartResult>

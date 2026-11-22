@@ -45,6 +45,7 @@ import { fetchSiteCategories } from './site-categories'
 import { clampPageSize, probePageSize } from './video-collect-probe'
 import {
   createSiteStore,
+  isSameSiteHost,
   type CategoryUpdateMode,
   type SiteCategoryInput,
   type SiteInput
@@ -109,6 +110,8 @@ const collector = createVideoCollector({
   details: detailCache,
   logs: collectLogs,
   listSites: () => siteStore.list(),
+  // 站点缓存正在后台清理时，采集要等它删完再入队
+  waitForSite: (siteId) => waitSiteCachePurge(siteId),
   emitProgress: (progress) => {
     // 采集每落一页都会推一次进度：新片进来推荐页的轨道就该变，缓存作废
     invalidateHomeFeed()
@@ -150,11 +153,53 @@ async function reconcileVideoCache(): Promise<void> {
   const sites = new Map(siteStore.list().map((site) => [site.id, site]))
   for (const row of videoStore.listCacheSites()) {
     const site = sites.get(row.siteId)
-    if (!site || site.address !== row.address || site.format !== row.format) {
+    // 只按 host 比：同一个域名下改路径 / 补斜杠不算换站点，缓存继续用
+    if (!site || !isSameSiteHost(site.address, row.address) || site.format !== row.format) {
       videoStore.removeSite(row.siteId)
       await detailCache.removeSite(row.siteId)
     }
   }
+}
+
+/**
+ * 站点缓存的后台清理队列（key = 站点 id）。
+ *
+ * 改地址 / 删站点之后旧来源、旧视频和详情文件都要丢掉：5.5 万条来源的站点实测
+ * 1.4s 删库（SQLite 同步，会占满主进程）+ 4s 删 5.5 万个详情文件，全程十几秒。
+ * 所以它不堵在 IPC 的返回路径上——调用方立刻拿到结果，这里排队慢慢清；
+ * 同一站点连续触发时串行执行，第二次不会插到第一次中间。
+ */
+const siteCachePurges = new Map<string, Promise<void>>()
+
+async function purgeSiteCache(siteId: string): Promise<void> {
+  collector.cancel({ siteId })
+  // 先作废推荐页那份缓存：清理期间重建也不会再看到这个站点的视频
+  invalidateHomeFeed()
+  if (!videoCacheReady) return
+  try {
+    videoStore.removeSite(siteId)
+  } catch (error) {
+    console.error('清理站点视频缓存失败', error)
+    return
+  }
+  await detailCache.removeSite(siteId).catch(() => {})
+  invalidateHomeFeed()
+}
+
+function scheduleSiteCachePurge(siteId: string): void {
+  const next = (siteCachePurges.get(siteId) ?? Promise.resolve())
+    .catch(() => {})
+    .then(() => purgeSiteCache(siteId))
+    .finally(() => {
+      if (siteCachePurges.get(siteId) === next) siteCachePurges.delete(siteId)
+    })
+  siteCachePurges.set(siteId, next)
+}
+
+/** 采集 / 清空缓存 / 恢复备份前先等后台清理做完，否则刚写进去的数据会被它删掉 */
+function waitSiteCachePurge(siteId?: string): Promise<void> {
+  const pending = siteId ? [siteCachePurges.get(siteId)] : [...siteCachePurges.values()]
+  return Promise.all(pending.map((item) => item?.catch(() => {}))).then(() => undefined)
 }
 
 function cacheUnavailable(): { ok: false; error: string } {
@@ -726,6 +771,7 @@ ipcMain.handle('videos:capacity', (_event, options?: { sites?: boolean }) => {
       detailBytes: 0,
       logCount: 0,
       siteCount: 0,
+      orphanCount: 0,
       lastCollectedAt: '',
       sites: []
     }
@@ -739,6 +785,17 @@ ipcMain.handle('videos:capacity:scan', async (_event, options?: { fixMissing?: b
   if (!videoCacheReady) return { ...cacheUnavailable(), drift: null }
   const drift = await detailCache.scan(Boolean(options?.fixMissing))
   return { ...videoStore.capacity(siteNameMap()), drift }
+})
+
+/**
+ * 容量页的「清理无来源视频」：正常流程（删站点 / 全量替换 / 采集重算）都不会留下这种行，
+ * 只有旧版本、中断或手工改库才会出现。一次事务删完，数量很少，所以直接同步返回。
+ */
+ipcMain.handle('videos:orphans:clear', () => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), videos: 0, edits: 0 }
+  const result = videoStore.purgeOrphanVideos()
+  if (result.videos > 0) invalidateHomeFeed()
+  return { ok: true, ...result }
 })
 
 ipcMain.handle('videos:details:clear', async (_event, options?: { siteId?: string }) => {
@@ -859,6 +916,8 @@ ipcMain.handle('videos:clear', async () => {
   collector.suspend()
   scheduler.stop()
   await collector.cancelAll()
+  // 有站点正在后台清理时先等它删完，否则它会在重建之后再去删一遍详情目录
+  await waitSiteCachePurge()
   // 只为了算「释放了多少」，不需要按站点分组
   const before = videoStore.capacity(undefined, false)
   try {
@@ -885,44 +944,42 @@ ipcMain.handle('sites:list', () => siteStore.list())
 
 ipcMain.handle('sites:add', (_event, input: SiteInput) => siteStore.add(input))
 
-ipcMain.handle('sites:update', async (_event, id: string, input: SiteInput) => {
+ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
   const siteId = String(id)
   // 地址 / 格式可能变化，之前抓取的待确认结果随之作废
   pendingCategoryRefresh.delete(siteId)
   const existing = siteStore.list().find((item) => item.id === siteId) ?? null
   const result = siteStore.update(siteId, input)
-  if (
-    result.ok &&
-    existing &&
-    (existing.address !== result.site.address || existing.format !== result.site.format)
-  ) {
-    // 地址 / 格式变化后旧缓存不可信：取消采集并清空该站点缓存与详情目录
-    collector.cancel({ siteId })
-    if (videoCacheReady) {
-      videoStore.removeSite(siteId)
-      await detailCache.removeSite(siteId)
-    }
-    // 这个站点的视频没了，推荐页要重算
+  if (!result.ok || !existing) return result
+
+  const addressChanged = existing.address !== result.site.address
+  const formatChanged = existing.format !== result.site.format
+  // 地址一变，正在跑的那次采集就该停在断点：新地址返回的页混进同一次全量替换会缺页
+  if (addressChanged || formatChanged) collector.cancel({ siteId })
+  // 只有真的换了站点（域名 / 格式变了）旧缓存才不可信。同一个 domain 下改路径、补斜杠
+  // 通常只是笔误，为此把几万条来源和详情文件全清掉不值当；清理本身也放到后台，不堵保存。
+  if (formatChanged || !isSameSiteHost(existing.address, result.site.address)) {
+    // 先同步作废推荐页那份缓存：清理是异步的，别让接下来的 home:get 还拿到旧 feed
     invalidateHomeFeed()
+    scheduleSiteCachePurge(siteId)
   }
   return result
 })
 
-ipcMain.handle('sites:remove', async (_event, id: string) => {
+ipcMain.handle('sites:remove', (_event, id: string) => {
   const siteId = String(id)
   pendingCategoryRefresh.delete(siteId)
   const result = siteStore.remove(siteId)
   if (result.ok) {
+    // 先把正在跑的采集停在断点（同步），再让后台清理去删数据，避免多写进来一页
     collector.cancel({ siteId })
-    if (videoCacheReady) {
-      videoStore.removeSite(siteId)
-      await detailCache.removeSite(siteId)
-    }
     // collect_schedules 由业务库外键级联删除
     scheduleStore.remove(siteId)
     // 站点的绑定被级联删掉了，推荐要按剩下的绑定重算
     syncHomeRecommendations()
     invalidateHomeFeed()
+    // 站点缓存与详情目录在后台清，几万条来源时不拖住删除操作
+    scheduleSiteCachePurge(siteId)
   }
   return result
 })
@@ -1228,6 +1285,8 @@ ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
   if (result.ok) {
     pendingCategoryRefresh.clear()
     if (videoCacheReady) await collector.cancelAll()
+    // 恢复前先让后台清理收尾，避免它按旧站点 id 把刚恢复的数据删掉
+    await waitSiteCachePurge()
     await reconcileVideoCache()
     // 分类 / 绑定被整体替换，推荐页那份缓存不再可信
     invalidateHomeFeed()

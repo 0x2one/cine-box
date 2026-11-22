@@ -20,9 +20,10 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
   const [drift, setDrift] = useState<VideoCapacityDrift | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [clearAllOpen, setClearAllOpen] = useState(false)
+  const [orphanOpen, setOrphanOpen] = useState(false)
   const [scope, setScope] = useState<'all' | 'site'>('all')
   const [clearSiteId, setClearSiteId] = useState('')
-  const [clearing, setClearing] = useState<'details' | 'all' | null>(null)
+  const [clearing, setClearing] = useState<'details' | 'all' | 'orphans' | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -104,6 +105,27 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
       await load()
     } catch {
       message.error('清空缓存失败')
+    } finally {
+      setClearing(null)
+    }
+  }
+
+  /** 清理没有任何来源的视频：旧版本 / 异常中断才会留下的行，删完刷新容量 */
+  const clearOrphans = async (): Promise<void> => {
+    setClearing('orphans')
+    try {
+      const result = await window.api.videos.clearOrphans()
+      if (!result.ok) {
+        message.error('清理无来源视频失败')
+        return
+      }
+      message.success(
+        result.videos > 0 ? `已清理 ${result.videos} 个无来源视频` : '没有需要清理的无来源视频'
+      )
+      setOrphanOpen(false)
+      await load()
+    } catch {
+      message.error('清理无来源视频失败')
     } finally {
       setClearing(null)
     }
@@ -207,6 +229,19 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
             >
               扫描时清理“索引有、文件不存在”的行
             </Checkbox>
+            <Tooltip title="缓存库里已经没有来源的视频（正常流程不会产生，只有旧版本或异常中断才会留下）">
+              {/* 禁用状态的 antd 按钮不触发鼠标事件，包一层 span 才能看到提示 */}
+              <span>
+                <Button
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  disabled={!capacity || (capacity.orphanCount ?? 0) === 0}
+                  onClick={() => setOrphanOpen(true)}
+                >
+                  清理无来源视频（{capacity?.orphanCount ?? 0}）
+                </Button>
+              </span>
+            </Tooltip>
           </div>
 
           {drift && (
@@ -301,6 +336,28 @@ function CapacityPanel({ title, desc }: { title: string; desc: string }): React.
           <p className="capacity-warning">
             将删除对应的详情文件并重置详情索引，预计释放 {formatBytes(estimatedBytes)}。
             列表、搜索、采集进度、日志与定时计划都会保留；再次打开详情会重新抓取并回填。
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        title="清理无来源视频"
+        open={orphanOpen}
+        okText="清理"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        confirmLoading={clearing === 'orphans'}
+        onOk={() => void clearOrphans()}
+        onCancel={() => setOrphanOpen(false)}
+        width={480}
+      >
+        <div className="capacity-clear">
+          <p className="capacity-warning">
+            {`将删除 ${capacity?.orphanCount ?? 0} 个已经没有来源的视频，以及它们的人工编辑（备注、简介、封面等），搜索索引会同步更新。`}
+          </p>
+          <p className="capacity-warning">
+            站点、在线分类、本地分类、绑定关系与定时采集计划不受影响。正常的删除站点与全量替换都会顺手清掉这类行，
+            这里只是修复旧版本或异常中断留下的数据。
           </p>
         </div>
       </Modal>

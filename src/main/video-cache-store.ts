@@ -96,6 +96,8 @@ export interface VideoCacheStore {
   ensureSite: (site: { id: string; address: string; format: string }) => void
   listCacheSites: () => { siteId: string; address: string; format: string }[]
   removeSite: (siteId: string) => { sources: number; videos: number }
+  /** 清掉没有任何来源的视频与它们的人工编辑（容量页的手动修复入口） */
+  purgeOrphanVideos: () => { videos: number; edits: number }
   writePage: (
     siteId: string,
     items: CollectedVideo[],
@@ -793,23 +795,83 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     }))
   }
 
+  /**
+   * 清掉已经没有任何来源的视频，连同它们的人工编辑一起。
+   *
+   * 正常流程（`removeSite`、`deleteSources`、`writePage`）都不会留下这种行，所以这里只在
+   * 两处用到：删站点兜底，以及容量页那个手动修复入口。`videos_ad` 触发器会同步清 FTS 索引。
+   * 顺序不能反：`video_edits` 没有外键，视频删掉之后再找编辑就找不到 id 了。
+   */
+  function deleteOrphanVideos(connection: DatabaseSync): { videos: number; edits: number } {
+    const orphan = `SELECT v.id FROM videos v
+                    WHERE NOT EXISTS (SELECT 1 FROM video_sources s WHERE s.video_id = v.id)`
+    const edits = Number(
+      connection
+        .prepare(
+          `DELETE FROM video_edits
+            WHERE video_id NOT IN (SELECT id FROM videos) OR video_id IN (${orphan})`
+        )
+        .run().changes
+    )
+    const videos = Number(
+      connection.prepare(`DELETE FROM videos WHERE id IN (${orphan})`).run().changes
+    )
+    return { videos, edits }
+  }
+
+  /**
+   * 删掉一个站点的全部来源，并处理因此失去来源的视频。
+   *
+   * 早先的写法是对 `SELECT DISTINCT video_id` 出来的每一部视频都跑一次 `recomputeVideo`：
+   * 实测 5.5 万部要 6.2s，占整个清理的八成，但这些视频里绝大多数删完来源后一条来源都不剩
+   * （只有跨站同名合并的那几百部还有别的站点来源）。所以先把这批 video_id 记进临时表，
+   * 删完来源后只重算「还有来源」的那一部分，其余孤儿视频走 `deleteOrphanVideos` 整批删掉：
+   * 同一份数据 7.7s → 1.4s。
+   */
   function removeSite(siteId: string): { sources: number; videos: number } {
     const connection = database()
-    const videoIds = connection
-      .prepare('SELECT DISTINCT video_id FROM video_sources WHERE site_id = ?')
-      .all(siteId)
-      .map((row) => num((row as Record<string, unknown>).video_id))
     let sources = 0
+    let affected = 0
     inTransaction(connection, (tx) => {
+      // 临时表属于这个连接（不写进库文件），每次清理前清空
+      tx.exec('CREATE TEMP TABLE IF NOT EXISTS purge_videos (id INTEGER PRIMARY KEY)')
+      tx.exec('DELETE FROM purge_videos')
+      tx.prepare(
+        `INSERT OR IGNORE INTO purge_videos (id)
+         SELECT DISTINCT video_id FROM video_sources WHERE site_id = ?`
+      ).run(siteId)
+      const counted = tx.prepare('SELECT COUNT(*) AS n FROM purge_videos').get() as Record<
+        string,
+        unknown
+      >
+      affected = num(counted?.n)
       sources = Number(
         tx.prepare('DELETE FROM video_sources WHERE site_id = ?').run(siteId).changes
       )
       tx.prepare('DELETE FROM collect_progress WHERE site_id = ?').run(siteId)
       tx.prepare('DELETE FROM cache_sites WHERE site_id = ?').run(siteId)
+      // 还有别的站点来源的才需要重新挑主来源（片名、封面、简介都跟着变）
+      const survivors = tx
+        .prepare(
+          `SELECT DISTINCT s.video_id AS id
+             FROM video_sources s JOIN purge_videos p ON p.id = s.video_id`
+        )
+        .all() as Record<string, unknown>[]
       const now = new Date().toISOString()
-      for (const videoId of videoIds) recomputeVideo(tx, videoId, now)
+      for (const row of survivors) recomputeVideo(tx, num(row.id), now)
+      deleteOrphanVideos(tx)
     })
-    return { sources, videos: videoIds.length }
+    return { sources, videos: affected }
+  }
+
+  /** 容量页的手动修复：一次清掉库里所有没有来源的视频 */
+  function purgeOrphanVideos(): { videos: number; edits: number } {
+    const connection = database()
+    let result = { videos: 0, edits: 0 }
+    inTransaction(connection, (tx) => {
+      result = deleteOrphanVideos(tx)
+    })
+    return result
   }
 
   /**
@@ -1141,7 +1203,8 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       )
       .get() as Record<string, unknown>
 
-    // 「按站点分组」要扫全部来源行（十几万条时 100ms+），只有容量页需要
+    // 「按站点分组」要扫全部来源行（十几万条时 100ms+），只有容量页需要；
+    // 无来源视频同样只在这条路径上数（概览的 capacity({ sites: false }) 不付这个开销）
     const siteRows =
       withSites === false
         ? []
@@ -1157,6 +1220,19 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
                HAVING SUM(CASE WHEN detail_cached_at <> '' THEN 1 ELSE 0 END) > 0`
             )
             .all() as Record<string, unknown>[])
+    const orphanCount =
+      withSites === false
+        ? 0
+        : num(
+            (
+              connection
+                .prepare(
+                  `SELECT COUNT(*) AS n FROM videos v
+                    WHERE NOT EXISTS (SELECT 1 FROM video_sources s WHERE s.video_id = v.id)`
+                )
+                .get() as Record<string, unknown>
+            ).n
+          )
     const sites: VideoCapacitySite[] = siteRows.map((raw) => {
       const siteId = text(raw.site_id)
       return {
@@ -1187,6 +1263,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
       detailBytes: num(detail.bytes),
       logCount,
       siteCount,
+      orphanCount,
       lastCollectedAt: text(last.at),
       sites
     }
@@ -1528,6 +1605,7 @@ export function createVideoCacheStore(file: string): VideoCacheStore {
     ensureSite,
     listCacheSites,
     removeSite,
+    purgeOrphanVideos,
     writePage,
     listStaleSources,
     deleteSources,

@@ -89,8 +89,10 @@ export function createVideoCollector(options: {
   logs: CollectLogStore
   listSites: () => Site[]
   emitProgress: (progress: VideoCollectProgress) => void
+  /** 站点缓存正在后台清理时先等它删完：否则刚写进来的进度行 / 来源会被一起删掉 */
+  waitForSite?: (siteId: string) => Promise<void>
 }): VideoCollector {
-  const { store, details, logs, listSites, emitProgress } = options
+  const { store, details, logs, listSites, emitProgress, waitForSite } = options
   const queue: QueueItem[] = []
   let active: ActiveTask | null = null
   let activeDone: Promise<void> | null = null
@@ -142,6 +144,9 @@ export function createVideoCollector(options: {
     }
     const site = listSites().find((item) => item.id === siteId)
     if (!site) return { ok: false, error: 'NOT_FOUND' }
+    // 这个站点的旧缓存正在后台清理（改地址 / 删站点）：等它删完再建任务，
+    // 否则 prepareTask 刚写进去的进度行会被紧接着的删除一起带走
+    if (waitForSite) await waitForSite(siteId).catch(() => {})
     if (isQueuedOrActive(siteId, input.mode, input.fetchRange)) {
       return { ok: false, error: 'ALREADY_QUEUED' }
     }

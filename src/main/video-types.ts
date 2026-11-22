@@ -100,6 +100,8 @@ export interface VideoCapacity {
   detailBytes: number
   logCount: number
   siteCount: number
+  /** 没有任何来源的视频（正常流程不会留下）；只有按站点统计那一档才数，概览恒为 0 */
+  orphanCount: number
   /** 最近一次成功采集完成时间 */
   lastCollectedAt: string
   sites: VideoCapacitySite[]
@@ -123,6 +125,14 @@ export interface VideoCapacityDrift {
 
 export interface VideoCapacityScanResult extends VideoCapacity {
   drift: VideoCapacityDrift
+}
+
+/** 容量页「清理无来源视频」的结果 */
+export interface VideoOrphanPurgeResult {
+  /** 删掉的视频行 */
+  videos: number
+  /** 跟着一起删掉的人工编辑行 */
+  edits: number
 }
 
 export interface VideoCollectStartInput {
