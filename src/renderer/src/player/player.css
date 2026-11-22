@@ -110,12 +110,19 @@ button {
 }
 
 /*
- * 控制条整排抬离窗口底边：窗口是铺满的，默认那 0 底边距会让按钮贴着窗口下沿。
- * 选择器要多带一层 `.art-video-player`：ArtPlayer 的 `.art-video-player .art-bottom`
+ * 控制条按钮在「进度条细线 → 窗口下沿」之间垂直居中：ArtPlayer 的进度条盒子在细线下面
+ * 还留着 6px（5px 内边距 + 1px 偏移），所以按钮上沿天然离细线 6px；这里再补 3px 间距、
+ * 底边留 9px，上下就都是 9px（细线到窗口下沿一共 60px，按钮行 42px，正好对半分）。
+ * 两者相加等于原来的 12px，进度条细线的位置不会动，只有按钮整排下移 3px。
+ * 选择器要多带一层 `.art-video-player`：ArtPlayer 的 `.art-video-player .art-controls`
  * 在运行时注入，同权重时后者胜出，压不住它。
  */
 .player-stage .art-video-player .art-bottom {
-  padding-bottom: 12px;
+  padding-bottom: 9px;
+}
+
+.player-stage .art-video-player .art-controls {
+  margin-top: 3px;
 }
 
 /* ── 标题栏 ── */
