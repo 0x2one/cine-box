@@ -66,6 +66,17 @@ function progressId(siteId: string, mode: CollectMode, range: FetchRange): strin
   return `${siteId}:${mode}:${range}`
 }
 
+/**
+ * 站点没给 `pagecount` 时用 `recordcount / pagesize` 推总页数：
+ * 有总量就能翻到最后一页停，不用再多请求一页空数据去确认结束。
+ */
+function derivePageCount(page: CollectedPage, fallbackPageSize: number): number {
+  if (page.pageCount > 0) return page.pageCount
+  const size = page.pageSize > 0 ? page.pageSize : fallbackPageSize
+  if (size > 0 && page.recordCount > 0) return Math.ceil(page.recordCount / size)
+  return 0
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -334,14 +345,20 @@ export function createVideoCollector(options: {
     // 站点给了可靠总页数就翻到最后一页（全量任务本来就该翻完），否则按默认值兜底。
     // 之前按绝对页数比较，全量站点翻到默认 500 页暂停后，续采第 501 页立刻又撞上限，
     // 界面提示「已继续采集」但一页都没抓，任务永远停在 500 页。
+    // 目标还必须每页重算：清空缓存后的第一次全量，pageCount 要等第 1 页响应才带回来，
+    // 按任务开始时的 0 冻结成默认 500 页，8.5 万条的站点翻到第 500 页（5 万条）就会暂停，
+    // 用户只能从进度里手动续采；改成按当前 pageCount 重算后，翻页途中拿到的总页数立刻生效。
     const pageBudget = Math.min(
       Math.max(Number(item.maxPages) || DEFAULT_MAX_PAGES[item.mode], 1),
       MAX_PAGES_PER_RUN
     )
-    const runTarget =
-      progress.pageCount > 0
-        ? Math.min(progress.pageCount, MAX_PAGES_PER_RUN)
-        : progress.page + pageBudget
+    /** 拿不到站点总页数时，本轮最多再翻这么多页（从本任务开始的那一页算起） */
+    const budgetBase = progress.page
+    const resolveRunTarget = (current: VideoCollectProgress): number =>
+      current.pageCount > 0
+        ? Math.min(current.pageCount, MAX_PAGES_PER_RUN)
+        : Math.min(budgetBase + pageBudget, MAX_PAGES_PER_RUN)
+    let announcedFullRange = false
     let completed = false
     let paused = false
     let hitPageLimit = false
@@ -373,6 +390,7 @@ export function createVideoCollector(options: {
         break
       }
       const nextPage = progress.page + 1
+      const runTarget = resolveRunTarget(progress)
       if (nextPage > runTarget) {
         hitPageLimit = true
         paused = true
@@ -393,18 +411,19 @@ export function createVideoCollector(options: {
       const page = result.value
 
       if (page.items.length === 0) {
+        const pageCount = derivePageCount(page, progress.pageSize)
         if (
           item.mode === 'full' &&
           item.fetchRange === 'all' &&
-          page.pageCount > 0 &&
-          progress.page < page.pageCount
+          pageCount > 0 &&
+          progress.page < pageCount
         ) {
           await finishWithError(item, progress.id, 'INCOMPLETE_PAGE')
           return
         }
         progress =
           store.updateProgress(progress.id, {
-            pageCount: page.pageCount || progress.pageCount,
+            pageCount: pageCount || progress.pageCount,
             recordCount: page.recordCount || progress.recordCount,
             pageSize: page.pageSize || progress.pageSize
           }) ?? progress
@@ -427,20 +446,32 @@ export function createVideoCollector(options: {
         return
       }
       const writePageMs = Date.now() - writeStart
+      const pageCount = derivePageCount(page, progress.pageSize)
 
       progress =
         store.updateProgress(progress.id, {
           page: nextPage,
-          pageCount: page.pageCount,
+          pageCount: pageCount || progress.pageCount,
           // 有的站点只在第一页给 recordcount，后续页为 0 时保留已知总量
           recordCount: page.recordCount || progress.recordCount,
-          pageSize: page.pageSize,
+          // 同理，个别站点后续页不再回 pagesize，别把已知的每页条数清成 0
+          pageSize: page.pageSize || progress.pageSize,
           fetchedDelta: write.fetched,
           insertedDelta: write.inserted,
           updatedDelta: write.updated,
           failedDelta: write.failed
         }) ?? progress
       emit(progress)
+      // 站点总页数超过默认单轮上限时说明一句，否则「这次怎么翻了这么久」没有解释
+      if (!announcedFullRange && progress.pageCount > budgetBase + pageBudget) {
+        announcedFullRange = true
+        log(
+          'info',
+          item,
+          `站点共 ${progress.pageCount} 页`,
+          `超过本轮默认 ${pageBudget} 页上限，本次一次采完`
+        )
+      }
       if (nextPage % 10 === 0) {
         log(
           'info',
@@ -490,7 +521,7 @@ export function createVideoCollector(options: {
         `列表 ${formatMs(fetchPageMs)} · 写库 ${formatMs(writePageMs)}` +
           (detailQueued > 0 ? ` · 详情 ${detailQueued} 个转后台落盘` : '')
       )
-      if (page.pageCount > 0 && nextPage >= page.pageCount) {
+      if (pageCount > 0 && nextPage >= pageCount) {
         completed = true
         break
       }
@@ -511,13 +542,16 @@ export function createVideoCollector(options: {
       const pausedProgress =
         store.updateProgress(progress.id, { status: 'paused', error: '' }) ?? progress
       emit(pausedProgress)
+      const limitText = !hitPageLimit
+        ? ''
+        : pausedProgress.pageCount > 0
+          ? `站点共 ${pausedProgress.pageCount} 页，已达单轮 ${MAX_PAGES_PER_RUN} 页上限，`
+          : `站点未返回总页数，本轮 ${pageBudget} 页已翻完，`
       log(
         'warn',
         item,
         '采集已暂停',
-        `停在第 ${pausedProgress.page} 页，` +
-          (hitPageLimit ? `本轮已达 ${runTarget} 页上限，` : '') +
-          `下次继续 · ${phaseText}`
+        `停在第 ${pausedProgress.page} 页，${limitText}下次继续 · ${phaseText}`
       )
       return
     }
