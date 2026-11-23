@@ -186,6 +186,15 @@ export function useArtPlayer({
     artRef.current = instance
     appliedRef.current = firstUrl
 
+    // 右键菜单：ArtPlayer 会无条件加一条指向官网的版本项，这里摘掉，
+    // 只保留倍速 / 画面比例 / 统计信息 / 关闭
+    instance.contextmenu.remove('version')
+
+    // 统计信息面板固定渲染六行，前两行是播放器版本和视频地址（blob: 串），
+    // 播放页不需要；面板是 flex 纵向排列，删掉节点不会留下空位
+    const infoItems = instance.template.$infoPanel.querySelectorAll('.art-info-item')
+    for (let index = 0; index < 2; index += 1) infoItems[index]?.remove()
+
     // 控制条右侧的「选集」：只放图标（走 ArtPlayer 的 .art-icon，和自带控件同一套
     // 尺寸 / 悬停提亮 / 按压缩小）；全屏时先退全屏再打开面板（全屏下面板看不见，只开不关）
     instance.controls.add((art) => ({
