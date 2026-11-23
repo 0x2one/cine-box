@@ -9,6 +9,19 @@ export const DEFAULT_SHOW_SHORTCUT = 'Ctrl+Shift+Space'
 /** 启动时打开的页面：推荐页（首页）或搜索页 */
 export type AppStartView = 'home' | 'search'
 
+/** 同时采集的站点数：默认 2，最多 4 路（再高收益被网络和磁盘吃掉） */
+export const DEFAULT_COLLECT_CONCURRENCY = 2
+export const MIN_COLLECT_CONCURRENCY = 1
+export const MAX_COLLECT_CONCURRENCY = 4
+
+/** 把任意输入收敛到 1–4；缺失 / 空串 / 非法值回落到默认值 */
+export function clampCollectConcurrency(value: unknown): number {
+  if (value === null || value === undefined || value === '') return DEFAULT_COLLECT_CONCURRENCY
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_COLLECT_CONCURRENCY
+  return Math.min(Math.max(Math.floor(parsed), MIN_COLLECT_CONCURRENCY), MAX_COLLECT_CONCURRENCY)
+}
+
 export interface AppSettings {
   /** 开机自启（以操作系统登录项为准） */
   openAtLogin: boolean
@@ -24,6 +37,8 @@ export interface AppSettings {
   windowSize: AppWindowSize
   /** 采集时优先使用哪个站点的 pic 填充 videos.pic，空串表示不指定 */
   defaultPicSiteId: string
+  /** 同时采集的站点数（1–4）：跨站并行，同一站点始终串行 */
+  collectConcurrency: number
 }
 
 interface StoreFile {
@@ -35,6 +50,7 @@ interface StoreFile {
   startView?: string
   windowSize?: string
   defaultPicSiteId?: string
+  collectConcurrency?: number
 }
 
 const DEFAULTS: AppSettings = {
@@ -44,7 +60,8 @@ const DEFAULTS: AppSettings = {
   showShortcut: DEFAULT_SHOW_SHORTCUT,
   startView: 'home',
   windowSize: DEFAULT_WINDOW_SIZE,
-  defaultPicSiteId: ''
+  defaultPicSiteId: '',
+  collectConcurrency: DEFAULT_COLLECT_CONCURRENCY
 }
 
 export interface AppSettingsStore {
@@ -57,6 +74,8 @@ export interface AppSettingsStore {
   setStartView: (value: string | null) => AppSettings
   setWindowSize: (value: string | null) => AppSettings
   setDefaultPicSite: (value: string | null) => AppSettings
+  /** 同时采集的站点数；立即影响后续填槽，不打断正在采集的任务 */
+  setCollectConcurrency: (value: number | null) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -101,7 +120,8 @@ export function createAppSettingsStore(): AppSettingsStore {
         startView: data?.startView === 'search' ? 'search' : 'home',
         windowSize: isAppWindowSize(data?.windowSize) ? data.windowSize : DEFAULTS.windowSize,
         defaultPicSiteId:
-          typeof data?.defaultPicSiteId === 'string' ? data.defaultPicSiteId.trim() : ''
+          typeof data?.defaultPicSiteId === 'string' ? data.defaultPicSiteId.trim() : '',
+        collectConcurrency: clampCollectConcurrency(data?.collectConcurrency)
       }
     } catch {
       settings = { ...DEFAULTS }
@@ -117,7 +137,8 @@ export function createAppSettingsStore(): AppSettingsStore {
       showShortcut: settings.showShortcut,
       startView: settings.startView,
       windowSize: settings.windowSize,
-      defaultPicSiteId: settings.defaultPicSiteId
+      defaultPicSiteId: settings.defaultPicSiteId,
+      collectConcurrency: settings.collectConcurrency
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -179,6 +200,11 @@ export function createAppSettingsStore(): AppSettingsStore {
         ...settings,
         defaultPicSiteId: typeof value === 'string' ? value.trim() : ''
       }
+      persist()
+      return snapshot()
+    },
+    setCollectConcurrency: (value: number | null) => {
+      settings = { ...settings, collectConcurrency: clampCollectConcurrency(value) }
       persist()
       return snapshot()
     }

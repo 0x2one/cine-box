@@ -93,6 +93,8 @@ interface AppSettings {
   windowSize: AppWindowSize
   /** 采集时优先使用哪个站点的 pic 填 videos.pic，空串表示不指定 */
   defaultPicSiteId: string
+  /** 同时采集的站点数（1–4）：跨站并行，同一站点始终串行 */
+  collectConcurrency: number
 }
 
 interface SetShortcutResult {
@@ -115,6 +117,8 @@ interface SettingsApi {
   setWindowSize: (value: AppWindowSize) => Promise<AppSettings>
   /** 设置默认 pic 来源站点（空串 = 不指定），立即影响后续采集 */
   setDefaultPicSite: (value: string) => Promise<AppSettings>
+  /** 设置同时采集的站点数（1–4），返回保存后的设置；立即影响填槽，不打断在跑任务 */
+  setCollectConcurrency: (value: number) => Promise<AppSettings>
 }
 
 type SiteFormat = 'xml' | 'json'

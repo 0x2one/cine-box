@@ -56,7 +56,9 @@ const api = {
     setWindowSize: (value: AppWindowSize): Promise<AppSettings> =>
       ipcRenderer.invoke('settings:setWindowSize', value),
     setDefaultPicSite: (value: string): Promise<AppSettings> =>
-      ipcRenderer.invoke('settings:setDefaultPicSite', value)
+      ipcRenderer.invoke('settings:setDefaultPicSite', value),
+    setCollectConcurrency: (value: number): Promise<AppSettings> =>
+      ipcRenderer.invoke('settings:setCollectConcurrency', value)
   },
   sites: {
     list: (): Promise<Site[]> => ipcRenderer.invoke('sites:list'),

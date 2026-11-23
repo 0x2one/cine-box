@@ -120,6 +120,8 @@ const collector = createVideoCollector({
   listSites: () => siteStore.list(),
   // 站点缓存正在后台清理时，采集要等它删完再入队
   waitForSite: (siteId) => waitSiteCachePurge(siteId),
+  // 每次填槽都读一次设置：进度页调完并发立刻生效，不用重启
+  getConcurrency: () => appSettingsStore.get().collectConcurrency,
   emitProgress: (progress) => {
     // 采集每落一页都会推一次进度：新片进来推荐页的轨道就该变，缓存作废
     invalidateHomeFeed()
@@ -635,6 +637,17 @@ ipcMain.handle('settings:setDefaultPicSite', (_event, value: string) => {
   const siteId = typeof value === 'string' ? value.trim() : ''
   const valid = siteId && siteStore.list().some((site) => site.id === siteId) ? siteId : ''
   return appSettingsStore.setDefaultPicSite(valid)
+})
+
+ipcMain.handle('settings:setCollectConcurrency', (_event, value: number) => {
+  const settings = appSettingsStore.setCollectConcurrency(value)
+  // 调大后立刻把排队任务填进新槽位；调小不打断正在采集的任务
+  collector.wake()
+  collectLogs.append({
+    level: 'info',
+    message: `采集并发已调整为 ${settings.collectConcurrency} 路`
+  })
+  return settings
 })
 
 /* ── IPC：缓存管理 ── */

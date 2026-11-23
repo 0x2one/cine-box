@@ -2858,6 +2858,18 @@ body .collect-form .ant-form-item-extra {
 
 /* ── 控制台：采集进度 ── */
 
+.progress-concurrency {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.progress-concurrency-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .progress-list {
   display: flex;
   flex-direction: column;

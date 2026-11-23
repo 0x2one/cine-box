@@ -13,8 +13,8 @@ import {
 import { formatBytes, formatShortDateTime, formatUpcoming } from '../utils/format'
 import {
   COLLECT_STATUS_COLOR,
-  COLLECT_STATUS_ORDER,
   COLLECT_STATUS_TEXT,
+  compareCollectProgress,
   formatScheduleTiming,
   siteLabel
 } from '../utils/collect'
@@ -138,13 +138,7 @@ function OverviewPanel({
   const siteMap = useMemo(() => new Map((data?.sites ?? []).map((site) => [site.id, site])), [data])
 
   const recent = useMemo(() => {
-    return [...(data?.progress ?? [])]
-      .sort((left, right) => {
-        const byStatus = COLLECT_STATUS_ORDER[left.status] - COLLECT_STATUS_ORDER[right.status]
-        if (byStatus !== 0) return byStatus
-        return right.updatedAt.localeCompare(left.updatedAt)
-      })
-      .slice(0, 4)
+    return [...(data?.progress ?? [])].sort(compareCollectProgress).slice(0, 4)
   }, [data])
 
   const activeCount = useMemo(

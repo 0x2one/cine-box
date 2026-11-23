@@ -42,6 +42,32 @@ export const COLLECT_STATUS_ORDER: Record<CollectStatus, number> = {
   done: 6
 }
 
+/** 运行中与全量替换算同一档：进入替换阶段时卡片不换位置 */
+function progressWeight(status: CollectStatus): number {
+  return status === 'replacing' ? 0 : COLLECT_STATUS_ORDER[status]
+}
+
+/**
+ * 进度列表排序：运行中（含全量替换）最前，其次排队、出错、暂停、未采集、已完成。
+ *
+ * 同一状态内只有「非运行中」按更新时间倒序；运行中的任务按开始时间升序，不再随进度
+ * 事件变化——否则每落一页都会把那张卡片顶到最前面，多站点并行时列表会来回跳。
+ * 两个时间都相同时用 id 兜底，保证排序结果确定。
+ */
+export function compareCollectProgress(
+  left: VideoCollectProgress,
+  right: VideoCollectProgress
+): number {
+  const byStatus = progressWeight(left.status) - progressWeight(right.status)
+  if (byStatus !== 0) return byStatus
+  const leftActive = left.status === 'running' || left.status === 'replacing'
+  const rightActive = right.status === 'running' || right.status === 'replacing'
+  if (leftActive && rightActive) {
+    return left.startedAt.localeCompare(right.startedAt) || left.id.localeCompare(right.id)
+  }
+  return right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id)
+}
+
 /** 间隔的短说明：30 分钟 / 6 小时 / 1.5 小时 */
 export function formatInterval(minutes: number): string {
   if (minutes < 60) return `${minutes} 分钟`

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { App, Button, Popconfirm, Spin, Tag, Tooltip } from 'antd'
+import { App, Button, Popconfirm, Select, Spin, Tag, Tooltip } from 'antd'
 import {
   CloudDownloadOutlined,
   FileTextOutlined,
@@ -11,8 +11,8 @@ import { formatCount, formatDateTime } from '../utils/format'
 import {
   COLLECT_ERRORS,
   COLLECT_STATUS_COLOR,
-  COLLECT_STATUS_ORDER,
   COLLECT_STATUS_TEXT,
+  compareCollectProgress,
   isResumableStatus,
   manualCacheDetail,
   siteLabel
@@ -31,6 +31,9 @@ function progressText(item: VideoCollectProgress): string {
   }
   return '等待开始'
 }
+
+/** 「进度」页可调的并发档位：1–4 路，和主进程的 clamp 范围保持一致 */
+const CONCURRENCY_OPTIONS = [1, 2, 3, 4].map((value) => ({ value, label: `${value} 路` }))
 
 /** 控制台「进度」：按站点展示当前 / 最后一次采集，订阅事件实时更新 */
 function ProgressPanel({
@@ -51,15 +54,20 @@ function ProgressPanel({
   const [cancelling, setCancelling] = useState<string | null>(null)
   // 暂停 / 出错的记录可以直接续采或重采；用 `${id}:${动作}` 标记按钮加载态
   const [acting, setActing] = useState<string | null>(null)
+  /** 同时采集的站点数：默认 2，改动立即生效；主进程返回值是唯一权威 */
+  const [concurrency, setConcurrency] = useState(2)
+  const [savingConcurrency, setSavingConcurrency] = useState(false)
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const [siteRows, progressRows] = await Promise.all([
+      const [siteRows, progressRows, settings] = await Promise.all([
         window.api.sites.list(),
-        window.api.videos.progress()
+        window.api.videos.progress(),
+        window.api.settings.get()
       ])
       setSites(siteRows)
       setRows(progressRows)
+      setConcurrency(settings.collectConcurrency)
     } catch {
       message.error('读取采集进度失败')
     } finally {
@@ -85,12 +93,14 @@ function ProgressPanel({
   }, [load])
 
   const siteMap = useMemo(() => new Map(sites.map((site) => [site.id, site])), [sites])
+  /** 运行 / 排队数直接从进度行推导，跟着 onProgress 实时变；并发度本身以主进程返回值为准 */
+  const runningCount = rows.filter(
+    (item) => item.status === 'running' || item.status === 'replacing'
+  ).length
+  const queuedCount = rows.filter((item) => item.status === 'queued').length
   const ordered = useMemo(() => {
-    return [...rows].sort((left, right) => {
-      const byStatus = COLLECT_STATUS_ORDER[left.status] - COLLECT_STATUS_ORDER[right.status]
-      if (byStatus !== 0) return byStatus
-      return right.updatedAt.localeCompare(left.updatedAt)
-    })
+    // 运行中的卡片按开始时间固定顺序，不会被每页进度事件顶来顶去
+    return [...rows].sort(compareCollectProgress)
   }, [rows])
 
   const cancel = async (item: VideoCollectProgress): Promise<void> => {
@@ -110,6 +120,23 @@ function ProgressPanel({
       message.error('取消失败，请重试')
     } finally {
       setCancelling(null)
+    }
+  }
+
+  /**
+   * 调整同时采集的站点数：调大后主进程立刻把排队任务填进新槽位，
+   * 调小只影响后续填槽、不打断正在采集的任务。
+   */
+  const changeConcurrency = async (value: number): Promise<void> => {
+    setSavingConcurrency(true)
+    try {
+      const settings = await window.api.settings.setCollectConcurrency(value)
+      setConcurrency(settings.collectConcurrency)
+      message.success(`并发已调整为 ${settings.collectConcurrency} 路`)
+    } catch {
+      message.error('调整采集并发失败，请重试')
+    } finally {
+      setSavingConcurrency(false)
     }
   }
 
@@ -150,8 +177,24 @@ function ProgressPanel({
         <p className="settings-panel-desc">
           {desc}
           <span className="sites-count">共 {rows.length} 条采集记录</span>
+          {runningCount > 0 && <span className="sites-count">运行 {runningCount}</span>}
+          {queuedCount > 0 && <span className="sites-count">排队 {queuedCount}</span>}
         </p>
         <div className="settings-panel-actions">
+          <Tooltip title="同时采集的站点数（1–4）。调大后排队任务立即开始；调小不会打断正在采集的任务。">
+            <div className="progress-concurrency">
+              <span className="progress-concurrency-label">并发</span>
+              <Select
+                size="small"
+                style={{ width: 86 }}
+                value={concurrency}
+                disabled={savingConcurrency}
+                options={CONCURRENCY_OPTIONS}
+                onChange={(value) => void changeConcurrency(value)}
+                aria-label="同时采集的站点数"
+              />
+            </div>
+          </Tooltip>
           <Button icon={<CloudDownloadOutlined />} onClick={onOpenCollect}>
             发起采集
           </Button>

@@ -1,4 +1,5 @@
 import { fetchCollectText } from './collect-http'
+import { clampCollectConcurrency, DEFAULT_COLLECT_CONCURRENCY } from './app-settings'
 import type { CollectLogStore } from './collect-log-store'
 import type { Site } from './site-store'
 import { parseCollectPage, type CollectedPage } from './video-collect-parser'
@@ -32,6 +33,8 @@ export interface VideoCollector {
   /** 清空缓存期间暂停入队，避免重建数据库时又启动任务 */
   suspend: () => void
   resume: () => void
+  /** 按当前并发度重新填满槽位（调整并发度后调用，立即启动排队任务） */
+  wake: () => void
   /** 退出前调用：取消任务并禁止后续入队 */
   shutdown: () => void
 }
@@ -48,6 +51,12 @@ interface ActiveTask {
   item: QueueItem
   controller: AbortController
   cancelled: boolean
+}
+
+/** 一个槽位：任务本体 + 它真正退出时（含收尾）才 resolve 的 Promise */
+interface ActiveEntry {
+  task: ActiveTask
+  done: Promise<void>
 }
 
 const DEFAULT_MAX_PAGES: Record<CollectMode, number> = { full: 500, incremental: 100 }
@@ -97,6 +106,7 @@ function formatMs(ms: number): string {
 
 /**
  * 采集器：全局单队列，手动与定时共用；同一 (site, mode, range) 不重复入队。
+ * 队列按并发度填槽（默认 2）：跨站点并行，同一站点始终串行；
  * 每页一个事务写列表，进度落库后推事件；full + all 完整结束后才做全量替换。
  */
 export function createVideoCollector(options: {
@@ -107,14 +117,19 @@ export function createVideoCollector(options: {
   emitProgress: (progress: VideoCollectProgress) => void
   /** 站点缓存正在后台清理时先等它删完：否则刚写进来的进度行 / 来源会被一起删掉 */
   waitForSite?: (siteId: string) => Promise<void>
+  /** 当前允许同时采集的站点数；每次填槽时读取，改完设置立刻生效 */
+  getConcurrency?: () => number
 }): VideoCollector {
-  const { store, details, logs, listSites, emitProgress, waitForSite } = options
+  const { store, details, logs, listSites, emitProgress, waitForSite, getConcurrency } = options
   const queue: QueueItem[] = []
-  let active: ActiveTask | null = null
-  let activeDone: Promise<void> | null = null
-  let pumping = false
+  const active = new Map<string, ActiveEntry>()
   let disposed = false
   let suspended = false
+
+  /** 同时运行的站点任务数上限；settings 里的值非法时回落到默认值 */
+  function concurrency(): number {
+    return clampCollectConcurrency(getConcurrency?.() ?? DEFAULT_COLLECT_CONCURRENCY)
+  }
 
   function emit(progress: VideoCollectProgress | null): void {
     if (progress) emitProgress(progress)
@@ -138,9 +153,7 @@ export function createVideoCollector(options: {
 
   function isQueuedOrActive(siteId: string, mode: CollectMode, fetchRange: FetchRange): boolean {
     const id = progressId(siteId, mode, fetchRange)
-    if (active && progressId(active.item.siteId, active.item.mode, active.item.fetchRange) === id) {
-      return true
-    }
+    if (active.has(id)) return true
     return queue.some((item) => progressId(item.siteId, item.mode, item.fetchRange) === id)
   }
 
@@ -306,9 +319,8 @@ export function createVideoCollector(options: {
     return done ?? progress
   }
 
-  async function runTask(item: QueueItem): Promise<void> {
-    const task: ActiveTask = { item, controller: new AbortController(), cancelled: false }
-    active = task
+  async function runTask(task: ActiveTask): Promise<void> {
+    const item = task.item
     const signal = task.controller.signal
     const site = listSites().find((entry) => entry.id === item.siteId)
     let progress = store.getProgress(progressId(item.siteId, item.mode, item.fetchRange))
@@ -386,7 +398,9 @@ export function createVideoCollector(options: {
 
     const listStart = Date.now()
     while (true) {
-      if (signal.aborted || task.cancelled || disposed) {
+      // suspended 是「清空缓存」的第二道栅栏：suspend 之后即使清理队列超时，
+      // 也绝不能翻下一页往即将重建的库里写
+      if (signal.aborted || task.cancelled || disposed || suspended) {
         paused = true
         break
       }
@@ -648,40 +662,61 @@ export function createVideoCollector(options: {
     )
   }
 
-  async function pump(): Promise<void> {
-    if (pumping || disposed) return
-    const next = queue.shift()
-    if (!next) return
-    pumping = true
-    try {
-      activeDone = runTask(next)
-      await activeDone
-    } catch {
-      try {
-        const progress = store.getProgress(progressId(next.siteId, next.mode, next.fetchRange))
-        if (progress) {
-          const updated = store.updateProgress(progress.id, {
-            status: 'error',
-            error: 'UNKNOWN',
-            finishedAt: nowIso()
-          })
-          emit(updated)
-          log('error', next, '采集异常终止', 'UNKNOWN')
-        }
-      } catch {
-        // 缓存库已关闭（清空 / 退出），忽略收尾
+  /** 同站点互斥：一个站点已有任务在跑时，它的下一个任务（哪怕模式 / 范围不同）继续排队 */
+  function siteBusy(siteId: string): boolean {
+    for (const entry of active.values()) {
+      if (entry.task.item.siteId === siteId) return true
+    }
+    return false
+  }
+
+  /** 把排队任务填进空槽位：跨站点并行、同站点串行，队首被占用的站点会被跳过 */
+  function pump(): void {
+    if (disposed || suspended) return
+    // 一次只读一遍设置：中途改并发度由 settings handler 的 wake() 再触发
+    const limit = concurrency()
+    while (active.size < limit) {
+      const index = queue.findIndex((item) => !siteBusy(item.siteId))
+      if (index === -1) return
+      const [next] = queue.splice(index, 1)
+      const key = progressId(next.siteId, next.mode, next.fetchRange)
+      const task: ActiveTask = {
+        item: next,
+        controller: new AbortController(),
+        cancelled: false
       }
-    } finally {
-      active = null
-      activeDone = null
-      pumping = false
-      try {
-        store.connection().exec('PRAGMA wal_checkpoint(PASSIVE)')
-        store.connection().exec('PRAGMA shrink_memory')
-      } catch {
-        // 缓存库已关闭 / 正在清空
-      }
-      if (!disposed) void pump()
+      const done = runTask(task)
+        .catch(async () => {
+          // runTask 自己会收尾；走到这里说明抛出了未预期的异常，补一条 error 免得停在 running
+          try {
+            const progress = store.getProgress(key)
+            if (progress) {
+              const updated = store.updateProgress(progress.id, {
+                status: 'error',
+                error: 'UNKNOWN',
+                finishedAt: nowIso()
+              })
+              emit(updated)
+              log('error', next, '采集异常终止', 'UNKNOWN')
+            }
+          } catch {
+            // 缓存库已关闭（清空 / 退出），忽略收尾
+          }
+        })
+        .finally(() => {
+          active.delete(key)
+          // 所有槽位都空了再做 checkpoint：并行时每个任务结束都 checkpoint 会互相打架
+          if (active.size === 0) {
+            try {
+              store.connection().exec('PRAGMA wal_checkpoint(PASSIVE)')
+              store.connection().exec('PRAGMA shrink_memory')
+            } catch {
+              // 缓存库已关闭 / 正在清空
+            }
+          }
+          if (!disposed) pump()
+        })
+      active.set(key, { task, done })
     }
   }
 
@@ -695,12 +730,14 @@ export function createVideoCollector(options: {
       (!input.mode || item.mode === input.mode) &&
       (!input.fetchRange || item.fetchRange === input.fetchRange)
 
-    if (active && matches(active.item)) {
-      active.cancelled = true
-      active.controller.abort()
-      return { ok: true }
+    for (const entry of active.values()) {
+      if (!matches(entry.task.item)) continue
+      entry.task.cancelled = true
+      entry.task.controller.abort()
     }
 
+    // 取消活跃任务时也要把同一站点的排队项一起摘掉：否则队列在它退出后
+    // 又会为已删除 / 已改地址的站点起一个任务（删站点后重新写入一页）
     for (let index = queue.length - 1; index >= 0; index -= 1) {
       const item = queue[index]
       if (!matches(item)) continue
@@ -715,12 +752,14 @@ export function createVideoCollector(options: {
 
   async function stopAndWait(siteId: string): Promise<void> {
     cancel({ siteId })
-    const running = active && active.item.siteId === siteId ? activeDone : null
-    if (!running) return
+    const running = [...active.values()]
+      .filter((entry) => entry.task.item.siteId === siteId)
+      .map((entry) => entry.done)
+    if (running.length === 0) return
     // 任务会在当前这一页结束时退出；卡在请求上时最多等 15s，别把清理挂死
     let timer: ReturnType<typeof setTimeout> | undefined
     await Promise.race([
-      running.catch(() => {}),
+      Promise.all(running).catch(() => {}),
       new Promise<void>((resolve) => {
         timer = setTimeout(resolve, 15000)
       })
@@ -729,10 +768,10 @@ export function createVideoCollector(options: {
   }
 
   async function cancelAll(): Promise<void> {
-    if (active) {
-      active.cancelled = true
-      active.controller.abort()
-      const item = active.item
+    for (const entry of active.values()) {
+      entry.task.cancelled = true
+      entry.task.controller.abort()
+      const item = entry.task.item
       const progress = store.getProgress(progressId(item.siteId, item.mode, item.fetchRange))
       if (progress && (progress.status === 'running' || progress.status === 'replacing')) {
         store.updateProgress(progress.id, { status: 'paused' })
@@ -744,18 +783,19 @@ export function createVideoCollector(options: {
       if (progress && progress.status === 'queued') store.updateProgress(id, { status: 'idle' })
     }
     queue.length = 0
-    const running = activeDone
-    if (running) {
-      await Promise.race([running.catch(() => {}), delay(5000)])
+    const running = [...active.values()].map((entry) => entry.done)
+    if (running.length > 0) {
+      // 取消会让在途请求立刻 ABORT，正常情况下任务在页边界退出；15s 只是防呆上限
+      await Promise.race([Promise.all(running).catch(() => {}), delay(15000)])
     }
   }
 
   function shutdown(): void {
     disposed = true
-    if (active) {
-      active.cancelled = true
-      active.controller.abort()
-      const item = active.item
+    for (const entry of active.values()) {
+      entry.task.cancelled = true
+      entry.task.controller.abort()
+      const item = entry.task.item
       const progress = store.getProgress(progressId(item.siteId, item.mode, item.fetchRange))
       if (progress && (progress.status === 'running' || progress.status === 'replacing')) {
         store.updateProgress(progress.id, { status: 'paused' })
@@ -779,6 +819,10 @@ export function createVideoCollector(options: {
     },
     resume: () => {
       suspended = false
+      pump()
+    },
+    wake: () => {
+      pump()
     },
     shutdown
   }
