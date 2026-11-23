@@ -31,6 +31,14 @@ import { createCollectScheduler } from './collect-scheduler'
 import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
+import { createLanService } from './lan/lan-service'
+import { isHlsUrl, isHttpUrl } from './lan/lan-media-url'
+import type {
+  LanDetailPayload,
+  LanLatestPayload,
+  LanSearchPayload,
+  LanVideoCard
+} from './lan/lan-types'
 import { createPlayerWindowManager } from './player-window'
 import type {
   HomeFeed,
@@ -1180,78 +1188,223 @@ const ONLINE_RESULT_LIMIT = 200
  * 3. 过滤隐藏、按相关性排序后返回（最多 200 条）；
  * 4. 顺手把关键词追加到各站点的「检索」采集任务，后台继续把该词采完（每词最多 200 条）。
  */
-ipcMain.handle(
-  'videos:search:online',
-  async (_event, input?: { keyword?: string }): Promise<VideoOnlineSearchResult> => {
-    const keyword = String(input?.keyword ?? '')
-      .trim()
-      .slice(0, 60)
-    const empty: VideoOnlineSearchResult = {
-      ok: true,
-      keyword,
-      siteCount: 0,
-      items: [],
-      total: 0,
-      truncated: false,
-      sites: [],
-      queued: 0
-    }
-    if (!videoCacheReady) return { ...empty, ok: false, error: 'CACHE_UNAVAILABLE' }
-    if (!keyword) return empty
-    // 正在后台清理缓存的站点先跳过：刚写进去的来源会被清理一起删掉；禁用的站点也不问
-    const sites = siteStore
-      .list()
-      .filter((site) => site.onlineSearch && !site.disabled && !siteCachePurges.has(site.id))
-    if (sites.length === 0) return empty
+async function performOnlineSearch(input?: { keyword?: string }): Promise<VideoOnlineSearchResult> {
+  const keyword = String(input?.keyword ?? '')
+    .trim()
+    .slice(0, 60)
+  const empty: VideoOnlineSearchResult = {
+    ok: true,
+    keyword,
+    siteCount: 0,
+    items: [],
+    total: 0,
+    truncated: false,
+    sites: [],
+    queued: 0
+  }
+  if (!videoCacheReady) return { ...empty, ok: false, error: 'CACHE_UNAVAILABLE' }
+  if (!keyword) return empty
+  // 正在后台清理缓存的站点先跳过：刚写进去的来源会被清理一起删掉；禁用的站点也不问
+  const sites = siteStore
+    .list()
+    .filter((site) => site.onlineSearch && !site.disabled && !siteCachePurges.has(site.id))
+  if (sites.length === 0) return empty
 
-    const results = await Promise.all(sites.map((site) => searchOneSite(site, keyword)))
-    const videoIds: number[] = []
-    for (const result of results) videoIds.push(...result.videoIds)
-    const ids = [...new Set(videoIds)]
-    const merged =
-      ids.length > 0 ? videoStore.listVideosByIds(ids).filter((item) => !item.hidden) : []
-    // 相关性：精确 > 前缀 > 包含，其次多站合并（来源越多越可信）、片名更短、更新时间更新
-    merged.sort((left, right) => {
-      const byRank = nameMatchRank(left.name, keyword) - nameMatchRank(right.name, keyword)
-      if (byRank !== 0) return byRank
-      if (left.sourceCount !== right.sourceCount) return right.sourceCount - left.sourceCount
-      if (left.name.length !== right.name.length) return left.name.length - right.name.length
-      if (left.latestTs !== right.latestTs) return right.latestTs - left.latestTs
-      return left.id - right.id
-    })
-    const items = enrichVideoItems(merged.slice(0, ONLINE_RESULT_LIMIT))
+  const results = await Promise.all(sites.map((site) => searchOneSite(site, keyword)))
+  const videoIds: number[] = []
+  for (const result of results) videoIds.push(...result.videoIds)
+  const ids = [...new Set(videoIds)]
+  const merged =
+    ids.length > 0 ? videoStore.listVideosByIds(ids).filter((item) => !item.hidden) : []
+  // 相关性：精确 > 前缀 > 包含，其次多站合并（来源越多越可信）、片名更短、更新时间更新
+  merged.sort((left, right) => {
+    const byRank = nameMatchRank(left.name, keyword) - nameMatchRank(right.name, keyword)
+    if (byRank !== 0) return byRank
+    if (left.sourceCount !== right.sourceCount) return right.sourceCount - left.sourceCount
+    if (left.name.length !== right.name.length) return left.name.length - right.name.length
+    if (left.latestTs !== right.latestTs) return right.latestTs - left.latestTs
+    return left.id - right.id
+  })
+  const items = enrichVideoItems(merged.slice(0, ONLINE_RESULT_LIMIT))
 
-    // 后台检索任务：带上响应里的真实页大小，省掉一次探测请求
-    let queued = 0
-    for (const result of results) {
-      if (!result.summary.ok) continue
-      const enqueued = await collector.enqueue(
-        {
-          siteId: result.summary.siteId,
-          mode: 'search',
-          fetchRange: 'all',
-          words: [keyword],
-          cacheDetail: true,
-          pageSize: result.pageSize || undefined
-        },
-        'manual'
-      )
-      if (enqueued.ok) queued += 1
+  // 后台检索任务：带上响应里的真实页大小，省掉一次探测请求
+  let queued = 0
+  for (const result of results) {
+    if (!result.summary.ok) continue
+    const enqueued = await collector.enqueue(
+      {
+        siteId: result.summary.siteId,
+        mode: 'search',
+        fetchRange: 'all',
+        words: [keyword],
+        cacheDetail: true,
+        pageSize: result.pageSize || undefined
+      },
+      'manual'
+    )
+    if (enqueued.ok) queued += 1
+  }
+  // 在线检索会往库里写新视频，推荐页缓存作废
+  invalidateHomeFeed()
+  return {
+    ok: true,
+    keyword,
+    siteCount: sites.length,
+    items,
+    total: merged.length,
+    truncated: merged.length > items.length,
+    sites: results.map((result) => result.summary),
+    queued
+  }
+}
+
+ipcMain.handle('videos:search:online', (_event, input?: { keyword?: string }) =>
+  performOnlineSearch(input)
+)
+
+/* ── 局域网影院（网页端 + HTTP 服务） ── */
+
+/** 网页端只需要列表卡片字段，不要把控制台用的推荐 / 编辑状态一起带出去 */
+function toLanCard(item: VideoListItem): LanVideoCard {
+  return {
+    id: item.id,
+    name: item.name,
+    pic: item.pic,
+    picCandidates: item.picCandidates,
+    note: item.note,
+    intro: item.introExcerpt,
+    sourceCount: item.sourceCount,
+    vodClass: item.vodClass,
+    vodActor: item.vodActor,
+    latestTime: item.latestTime
+  }
+}
+
+function lanSearchLocal(keyword: string, page: number, pageSize: number): LanSearchPayload {
+  const base: LanSearchPayload = {
+    ok: true,
+    mode: 'local',
+    keyword,
+    items: [],
+    total: 0,
+    page,
+    pageSize
+  }
+  if (!videoCacheReady) return { ...base, ok: false, error: 'CACHE_UNAVAILABLE' }
+  const result = videoStore.listVideos({ keyword, page, pageSize, visibility: 'shown' })
+  return {
+    ...base,
+    ok: result.ok,
+    error: result.error,
+    items: result.items.map(toLanCard),
+    total: result.total,
+    page: result.page,
+    pageSize: result.pageSize
+  }
+}
+
+function lanLatest(page: number, pageSize: number): LanLatestPayload {
+  if (!videoCacheReady) {
+    return { ok: false, error: 'CACHE_UNAVAILABLE', items: [], page, pageSize }
+  }
+  const result = videoStore.listVideos({ page, pageSize, visibility: 'shown', withTotal: false })
+  return {
+    ok: result.ok,
+    error: result.error,
+    items: result.items.map(toLanCard),
+    page: result.page,
+    pageSize: result.pageSize
+  }
+}
+
+async function lanSearchOnline(keyword: string): Promise<LanSearchPayload> {
+  const result = await performOnlineSearch({ keyword })
+  const names = siteNameMap()
+  return {
+    ok: result.ok,
+    error: result.error,
+    mode: 'online',
+    keyword: result.keyword,
+    items: result.items.map(toLanCard),
+    total: result.total,
+    page: 1,
+    pageSize: result.items.length,
+    truncated: result.truncated,
+    siteCount: result.siteCount,
+    sites: result.sites.map((site) => ({
+      siteId: site.siteId,
+      siteName: names.get(site.siteId) ?? '',
+      ok: site.ok,
+      count: site.count,
+      recordCount: site.recordCount,
+      error: site.error
+    })),
+    queued: result.queued
+  }
+}
+
+/** 网页播放页的详情：只保留线路与展示字段，并标出 HLS / 直链，客户端据此选播放器 */
+async function lanVideoDetail(videoId: number): Promise<LanDetailPayload> {
+  if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
+  try {
+    const result = await detailCache.read(videoId, true)
+    if (!result.ok || !result.video) {
+      return { ok: false, error: result.error ?? 'NOT_FOUND' }
     }
-    // 在线检索会往库里写新视频，推荐页缓存作废
-    invalidateHomeFeed()
+    const video = result.video
+    const primary = video.sources.find((source) => source.detail)?.detail
+    const sources = video.sources
+      .map((source) => ({
+        id: source.id,
+        siteName: source.siteName,
+        lines: (source.detail?.playLines ?? [])
+          .map((line) => ({
+            flag: line.flag.trim(),
+            episodes: line.episodes
+              .map((episode) => ({ name: episode.name.trim(), url: episode.url.trim() }))
+              .filter((episode) => isHttpUrl(episode.url))
+              .map((episode) => ({
+                name: episode.name,
+                url: episode.url,
+                kind: isHlsUrl(episode.url) ? ('hls' as const) : ('file' as const)
+              }))
+          }))
+          .filter((line) => line.episodes.length > 0)
+      }))
+      .filter((source) => source.lines.length > 0)
     return {
       ok: true,
-      keyword,
-      siteCount: sites.length,
-      items,
-      total: merged.length,
-      truncated: merged.length > items.length,
-      sites: results.map((result) => result.summary),
-      queued
+      video: {
+        id: video.id,
+        name: video.name,
+        pic: video.pic,
+        picCandidates: video.picCandidates,
+        note: video.note,
+        intro: primary?.intro || video.introExcerpt,
+        vodActor: video.vodActor,
+        vodClass: video.vodClass,
+        year: primary?.year ?? '',
+        area: primary?.area ?? '',
+        sourceCount: video.sourceCount,
+        sources
+      }
     }
+  } catch {
+    return { ok: false, error: 'DETAIL_FAILED' }
   }
-)
+}
+
+const lanService = createLanService({
+  dataDir: join(app.getPath('userData'), 'Data'),
+  fetch: (url, init) => net.fetch(url, init),
+  deps: {
+    searchLocal: lanSearchLocal,
+    searchOnline: lanSearchOnline,
+    latest: lanLatest,
+    detail: lanVideoDetail,
+    onChange: (state) => sendToRenderer('lan:changed', state)
+  }
+})
 
 /**
  * 该站点历史任务已经确认过的真实每页条数：同模式 + 同采集方式优先，
@@ -1881,6 +2034,24 @@ ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
   return result
 })
 
+/* ── IPC：局域网服务 ── */
+
+ipcMain.handle('lan:state', () => lanService.state())
+
+ipcMain.handle('lan:start', (_event, input?: { host?: unknown; port?: unknown }) => {
+  const host = typeof input?.host === 'string' ? input.host : ''
+  return lanService.start({ host, port: Number(input?.port) })
+})
+
+ipcMain.handle('lan:stop', () => lanService.stop())
+
+ipcMain.handle('lan:open', async () => {
+  const state = lanService.state()
+  if (!state.running || state.urls.length === 0) return false
+  await shell.openExternal(state.urls[0])
+  return true
+})
+
 /* ── IPC：应用信息 ── */
 
 ipcMain.handle('app:info', () => ({
@@ -1996,6 +2167,8 @@ if (!gotTheLock) {
     destroyTray()
     scheduler.stop()
     collector.shutdown()
+    // 先关掉局域网监听，别让网页端在数据库关闭后还发请求进来
+    lanService.dispose()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护
     if (app.isReady()) globalShortcut.unregisterAll()
     // 日志是异步批量落库的：关库前把队列里剩下的同步写完

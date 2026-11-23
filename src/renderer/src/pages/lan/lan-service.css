@@ -1,0 +1,288 @@
+/* 控制台 · 局域网服务 */
+.lan-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.lan-page .settings-card {
+  margin-top: 0;
+}
+
+.lan-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+}
+
+.lan-alert {
+  margin-bottom: 0;
+}
+
+.lan-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding: 20px;
+  background:
+    radial-gradient(
+      520px 260px at 88% -20%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 70%
+    ),
+    var(--surface);
+}
+
+.lan-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.lan-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lan-status strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.lan-status-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-faint) 14%, transparent);
+}
+
+.lan-dot.is-on {
+  background: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.16);
+}
+
+.lan-url-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lan-url-label {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+}
+
+.lan-url {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--accent);
+  font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lan-alt-urls {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.lan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lan-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.lan-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 168px;
+}
+
+.lan-qr .ant-qrcode {
+  padding: 10px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgb(0 0 0 / 18%);
+}
+
+.lan-qr-tip {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.lan-qr-off {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 168px;
+  height: 168px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-muted) 55%, transparent);
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.lan-qr-off .anticon {
+  font-size: 26px;
+}
+
+.lan-form-head {
+  padding: 16px 18px 0;
+}
+
+.lan-form-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.lan-form-head p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.lan-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 18px;
+  padding: 15px 18px 18px;
+}
+
+.lan-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.lan-field > span {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.lan-field .ant-select,
+.lan-field .ant-input-number {
+  width: 100%;
+}
+
+.lan-field .ant-input-number {
+  max-width: 220px;
+}
+
+.lan-field small {
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.lan-note {
+  margin: 0;
+  padding: 0 18px 16px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.lan-features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  padding: 4px 0;
+}
+
+.lan-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  min-width: 0;
+}
+
+.lan-feature + .lan-feature {
+  border-left: 1px solid var(--border);
+}
+
+.lan-feature > .anticon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+  font-size: 18px;
+}
+
+.lan-feature > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lan-feature strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.lan-feature span {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+@media (max-width: 860px) {
+  .lan-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lan-qr {
+    align-items: flex-start;
+  }
+
+  .lan-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lan-features {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lan-feature + .lan-feature {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+}

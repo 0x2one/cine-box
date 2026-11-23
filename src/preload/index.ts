@@ -275,6 +275,21 @@ const api = {
       }
     }
   },
+  lan: {
+    state: (): Promise<LanServiceState> => ipcRenderer.invoke('lan:state'),
+    start: (input: { host: string; port: number }): Promise<LanStartResult> =>
+      ipcRenderer.invoke('lan:start', input),
+    stop: (): Promise<LanServiceState> => ipcRenderer.invoke('lan:stop'),
+    open: (): Promise<boolean> => ipcRenderer.invoke('lan:open'),
+    onChange: (callback: (state: LanServiceState) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: LanServiceState): void =>
+        callback(state)
+      ipcRenderer.on('lan:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('lan:changed', handler)
+      }
+    }
+  },
   windowControls: {
     minimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
     maximize: (): Promise<void> => ipcRenderer.invoke('window:maximize'),

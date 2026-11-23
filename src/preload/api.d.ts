@@ -1238,6 +1238,58 @@ interface HomeApi {
   pickImage: () => Promise<HomeImageResult>
 }
 
+/** 局域网服务可以绑定的一个网卡地址 */
+interface LanAddress {
+  /** 网卡名称，如「WLAN」「以太网」；回环地址叫「本机」 */
+  name: string
+  address: string
+  /** 回环地址只能本机访问，手机扫码扫不到 */
+  loopback: boolean
+}
+
+/**
+ * 局域网影院服务状态：控制台据此渲染开关、二维码与地址列表。
+ * 服务没启动时 host / port 是上次保存的配置，urls 是「启动后可用」的预览。
+ */
+interface LanServiceState {
+  running: boolean
+  /** `0.0.0.0` 表示监听全部网卡 */
+  host: string
+  port: number
+  /** 浏览器可访问的地址（第一项用于二维码） */
+  urls: string[]
+  addresses: LanAddress[]
+  /** 最近一次启动失败的原因码，成功启动后清空 */
+  error?: string
+  /** ISO 8601；服务没启动时为空串 */
+  startedAt: string
+}
+
+type LanStartError =
+  | 'INVALID_HOST'
+  | 'INVALID_PORT'
+  | 'PORT_IN_USE'
+  | 'ADDRESS_UNAVAILABLE'
+  | 'PERMISSION'
+  | 'START_FAILED'
+
+interface LanStartResult {
+  ok: boolean
+  error?: LanStartError
+  state: LanServiceState
+}
+
+interface LanApi {
+  state: () => Promise<LanServiceState>
+  /** 启动 / 换地址重启：成功后配置落盘 */
+  start: (input: { host: string; port: number }) => Promise<LanStartResult>
+  stop: () => Promise<LanServiceState>
+  /** 用系统默认浏览器打开当前访问地址 */
+  open: () => Promise<boolean>
+  /** 服务在别处启动 / 停止 / 意外退出时推送最新状态 */
+  onChange: (callback: (state: LanServiceState) => void) => () => void
+}
+
 type UpdaterState =
   'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
 
@@ -1277,6 +1329,7 @@ interface Api {
   videos: VideosApi
   cache: CacheApi
   updater: UpdaterApi
+  lan: LanApi
   windowControls: WindowControls
 }
 

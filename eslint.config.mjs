@@ -35,5 +35,14 @@ export default defineConfig(
       '@typescript-eslint/explicit-function-return-type': 'off'
     }
   },
+  {
+    // 局域网影院网页端是直接由主进程托管的纯浏览器 JS：没有 TS 类型层，
+    // 不要求返回类型；catch 里只用来兜底的变量也允许不引用。
+    files: ['src/lanweb/**/*.js'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', { caughtErrors: 'none' }]
+    }
+  },
   eslintConfigPrettier
 )

@@ -4,7 +4,13 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  main: {},
+  main: {
+    build: {
+      // 网页端需要把 hls.js 作为静态资源内联进主进程（?raw）；不排除的话
+      // electron-vite 会把它当运行时依赖 external 掉，打包后 require 不到。
+      externalizeDeps: { exclude: ['hls.js'] }
+    }
+  },
   preload: {},
   renderer: {
     resolve: {

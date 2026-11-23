@@ -11,13 +11,15 @@ import {
   GlobalOutlined,
   PictureOutlined,
   SaveOutlined,
-  VideoCameraOutlined
+  VideoCameraOutlined,
+  WifiOutlined
 } from '@ant-design/icons'
 import BackupPanel from './Backup'
 import CapacityPanel from './Capacity'
 import CategoriesPanel from './Categories'
 import CollectPanel from './Collect'
 import HomeSettingsPanel from './HomeSettings'
+import LanServicePanel from './lan/LanService'
 import LogsPanel from './Logs'
 import OverviewPanel from './Overview'
 import PreviewPanel from './Preview'
@@ -28,13 +30,14 @@ import type { ConsoleSection } from '../types'
 
 const NAV_ITEMS: { key: ConsoleSection; label: string; icon: typeof DashboardOutlined }[] = [
   { key: 'overview', label: '概览', icon: DashboardOutlined },
-  { key: 'home', label: '推荐', icon: CompassOutlined },
   { key: 'sites', label: '站点', icon: GlobalOutlined },
   { key: 'categories', label: '分类', icon: ApartmentOutlined },
   { key: 'collect', label: '采集', icon: CloudDownloadOutlined },
   { key: 'progress', label: '进度', icon: BarChartOutlined },
   { key: 'videos', label: '视频', icon: VideoCameraOutlined },
+  { key: 'home', label: '推荐', icon: CompassOutlined },
   { key: 'preview', label: '封面', icon: PictureOutlined },
+  { key: 'lan', label: '共享', icon: WifiOutlined },
   { key: 'capacity', label: '容量', icon: DatabaseOutlined },
   { key: 'backup', label: '备份', icon: SaveOutlined },
   { key: 'logs', label: '日志', icon: FileTextOutlined }
@@ -48,6 +51,7 @@ const SECTION_META: Record<ConsoleSection, { title: string; desc: string }> = {
   collect: { title: '采集', desc: '手动采集与定时计划' },
   progress: { title: '进度', desc: '按站点查看采集进度与计数' },
   videos: { title: '视频', desc: '已采集视频与详情' },
+  lan: { title: '共享', desc: '手机 / 电脑浏览器访问片库' },
   preview: { title: '封面', desc: '选来源、预览效果与同步已有封面' },
   capacity: { title: '容量', desc: '查看并清理缓存索引与详情文件' },
   backup: { title: '备份', desc: '导出与恢复站点、分类、绑定和计划' },
@@ -124,6 +128,8 @@ function Console({ onBack }: { onBack: () => void }): React.JSX.Element {
         )
       case 'videos':
         return <VideosPanel title={meta.title} desc={meta.desc} />
+      case 'lan':
+        return <LanServicePanel title={meta.title} desc={meta.desc} />
       case 'preview':
         return <PreviewPanel title={meta.title} desc={meta.desc} onNavigate={goSection} />
       case 'capacity':
