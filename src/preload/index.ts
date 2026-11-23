@@ -66,6 +66,9 @@ const api = {
     update: (id: string, input: SiteInput): Promise<UpdateSiteResult> =>
       ipcRenderer.invoke('sites:update', id, input),
     remove: (id: string): Promise<RemoveSiteResult> => ipcRenderer.invoke('sites:remove', id),
+    /** 在线检索自检：真实发一次 wd 请求，只解析不写缓存库 */
+    testSearch: (input: { siteId: string; keyword: string }): Promise<SiteSearchTestResult> =>
+      ipcRenderer.invoke('sites:search:test', input),
     categories: (id: string): Promise<SiteCategoriesResult> =>
       ipcRenderer.invoke('sites:categories', id),
     refreshCategories: (id: string): Promise<SiteCategoriesRefreshResult> =>
@@ -205,6 +208,12 @@ const api = {
       ipcRenderer.invoke('videos:site:purge', input),
     progress: (siteId?: string): Promise<VideoCollectProgress[]> =>
       ipcRenderer.invoke('videos:progress', siteId),
+    /** 一键清空采集进度（含检索关键词）；有任务在跑 / 排队时返回 BUSY */
+    clearProgress: (): Promise<{ ok: boolean; removed?: number; error?: string }> =>
+      ipcRenderer.invoke('videos:progress:clear'),
+    /** 展示端搜索页「在线」模式：只查开启在线检索的站点，每站 1 页 20 条，合并排序后返回 */
+    searchOnline: (input: { keyword: string }): Promise<VideoOnlineSearchResult> =>
+      ipcRenderer.invoke('videos:search:online', input),
     collect: (input: VideoCollectStartInput): Promise<VideoCollectStartResult> =>
       ipcRenderer.invoke('videos:collect:start', input),
     cancelCollect: (input: {

@@ -42,31 +42,42 @@ import type {
   HomeSectionPatch
 } from './home-types'
 import { fetchSiteCategories } from './site-categories'
-import { clampPageSize, probePageSize } from './video-collect-probe'
+import { fetchCollectText } from './collect-http'
+import { clampPageSize, DEFAULT_PAGE_SIZE, probePageSize } from './video-collect-probe'
+import { parseCollectPage } from './video-collect-parser'
+import type { CollectedPage } from './video-collect-parser'
+import { makeNameKey, nameMatchRank } from './video-text'
 import {
   createSiteStore,
   isSameSiteHost,
   type CategoryUpdateMode,
+  type Site,
   type SiteCategoryInput,
   type SiteInput
 } from './site-store'
 import { createUpdater } from './updater'
 import { createVideoCacheStore } from './video-cache-store'
+import type { DetailSourceRow } from './video-cache-store'
 import { createVideoCollector } from './video-collector'
 import { createVideoDetailCache } from './video-detail-cache'
 import { resolveWindowSize, WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH } from './window-size'
-import type {
-  CollectMode,
-  FetchRange,
-  PicCleanOutcome,
-  PicCleanProgress,
-  PicCleanStats,
-  PicCleanStatus,
-  VideoCollectStartInput,
-  VideoListQuery,
-  VideoScheduleInput,
-  VideoSitePurgeResult,
-  VideoUpdateInput
+import {
+  ONLINE_SEARCH_PAGE_SIZE,
+  type CollectMode,
+  type FetchRange,
+  type PicCleanOutcome,
+  type PicCleanProgress,
+  type PicCleanStats,
+  type PicCleanStatus,
+  type SiteSearchTestResult,
+  type VideoCollectStartInput,
+  type VideoListQuery,
+  type VideoListItem,
+  type VideoOnlineSearchResult,
+  type VideoOnlineSearchSite,
+  type VideoScheduleInput,
+  type VideoSitePurgeResult,
+  type VideoUpdateInput
 } from './video-types'
 
 const gotTheLock = app.requestSingleInstanceLock()
@@ -699,13 +710,13 @@ function resolveVideoFilters(query: VideoListQuery | undefined): {
   return { filters, empty: filters.length === 0 }
 }
 
-ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
-  if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
-  const { filters, empty } = resolveVideoFilters(query)
-  if (empty) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
-  const result = videoStore.listVideos(query ?? {}, filters)
-  if (!result.ok || result.items.length === 0) return result
-
+/**
+ * 给视频行补齐列表侧信息：绑定后的本地分类路径、可推荐的一级分类、
+ * 是否在首页海报 / 分类推荐 / 搜索推荐里。控制台「视频」页与搜索页在线结果共用。
+ * 都是按本页的 id 批量查，多查几条 SELECT，不影响主查询。
+ */
+function enrichVideoItems(items: VideoListItem[]): VideoListItem[] {
+  if (items.length === 0) return items
   // 列表要显示「绑定后类型」：把本页视频各来源的在线分类映射成本地分类路径
   const bindingPaths = new Map(
     bindingStore
@@ -713,7 +724,7 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
       .map((row) => [`${row.siteId}\u0000${row.sourceCategoryId}`, row.categoryPath])
   )
   const byVideo = new Map<number, string[]>()
-  for (const source of videoStore.listSourceCategories(result.items.map((item) => item.id))) {
+  for (const source of videoStore.listSourceCategories(items.map((item) => item.id))) {
     const path = bindingPaths.get(`${source.siteId}\u0000${source.categoryId}`)
     if (!path) continue
     const paths = byVideo.get(source.videoId) ?? []
@@ -724,7 +735,7 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   // 首页状态：已加进海报 / 已推荐到哪些分类，视频列表直接显示出来，不用再点开看
   const homeConfig = homeStore.get()
   // 推荐只能进视频绑定的大类，弹窗按这个列表给可选目标
-  const boundTops = boundTopCategoriesByVideo(result.items.map((item) => item.id))
+  const boundTops = boundTopCategoriesByVideo(items.map((item) => item.id))
   const posterIds = new Set(homeConfig.posters.map((poster) => poster.videoId))
   // 搜索页底部的推荐位没有分类，人工加进来的单独标一下
   const searchRecommendIds = new Set(
@@ -749,19 +760,25 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
     }
   }
 
-  return {
-    ...result,
-    items: result.items.map((item) => ({
-      ...item,
-      localCategoryPaths: (byVideo.get(item.id) ?? []).sort((left, right) =>
-        left.localeCompare(right, 'zh-Hans-CN')
-      ),
-      boundCategoryIds: boundTops.get(item.id) ?? [],
-      inPoster: posterIds.has(item.id),
-      homeSections: sectionsByVideo.get(item.id) ?? [],
-      inSearch: searchRecommendIds.has(item.id)
-    }))
-  }
+  return items.map((item) => ({
+    ...item,
+    localCategoryPaths: (byVideo.get(item.id) ?? []).sort((left, right) =>
+      left.localeCompare(right, 'zh-Hans-CN')
+    ),
+    boundCategoryIds: boundTops.get(item.id) ?? [],
+    inPoster: posterIds.has(item.id),
+    homeSections: sectionsByVideo.get(item.id) ?? [],
+    inSearch: searchRecommendIds.has(item.id)
+  }))
+}
+
+ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
+  if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
+  const { filters, empty } = resolveVideoFilters(query)
+  if (empty) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
+  const result = videoStore.listVideos(query ?? {}, filters)
+  if (!result.ok || result.items.length === 0) return result
+  return { ...result, items: enrichVideoItems(result.items) }
 })
 
 ipcMain.handle('videos:count', (_event, query: VideoListQuery) => {
@@ -1028,6 +1045,195 @@ ipcMain.handle('videos:progress', (_event, siteId?: string) => {
 })
 
 /**
+ * 一键清空采集进度：只在没有任务在跑 / 排队时允许。
+ * 检索关键词跟着进度一起清，已采集的视频、详情、日志都不动。
+ */
+ipcMain.handle('videos:progress:clear', () => {
+  if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
+  const busy = videoStore
+    .listProgress()
+    .some(
+      (row) => row.status === 'queued' || row.status === 'running' || row.status === 'replacing'
+    )
+  if (busy) return { ok: false, error: 'BUSY' }
+  return { ok: true, removed: videoStore.clearProgress() }
+})
+
+/* ── 在线检索（展示端搜索页的「在线」模式） ── */
+
+/**
+ * 在线检索的请求地址：`ac=detail&wd=<词>&pg=N&pagesize=N`。
+ * 站点地址里残留的 ids / h 会让结果跑偏，这里一并去掉。
+ */
+function buildOnlineSearchUrl(site: Site, keyword: string, page: number, pageSize: number): string {
+  const url = new URL(site.address)
+  url.searchParams.set('ac', 'detail')
+  url.searchParams.set('wd', keyword)
+  url.searchParams.set('pg', String(page))
+  url.searchParams.set('pagesize', String(Math.min(Math.max(pageSize, 1), 100)))
+  url.searchParams.delete('ids')
+  url.searchParams.delete('h')
+  if (site.format === 'xml') url.searchParams.set('at', 'xml')
+  else url.searchParams.delete('at')
+  return url.toString()
+}
+
+/** 单站点的在线检索请求：交互式检索最多等 12s、重试 1 次，别让慢站点拖住整页结果 */
+async function fetchOnlineSearchPage(
+  site: Site,
+  keyword: string
+): Promise<{ ok: true; page: CollectedPage } | { ok: false; error: string }> {
+  const response = await fetchCollectText(
+    buildOnlineSearchUrl(site, keyword, 1, ONLINE_SEARCH_PAGE_SIZE),
+    undefined,
+    { timeoutMs: 12000, retries: 1 }
+  )
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: response.error === 'HTTP' ? `HTTP_${response.status ?? 0}` : 'NETWORK'
+    }
+  }
+  try {
+    return { ok: true, page: parseCollectPage(response.text, site.format) }
+  } catch (error) {
+    return { ok: false, error: String((error as { code?: string })?.code ?? 'PARSE') }
+  }
+}
+
+/** 一个站点的在线检索结果：写入缓存（合并靠 writePage 的 name_key）并落详情文件 */
+async function searchOneSite(
+  site: Site,
+  keyword: string
+): Promise<{ summary: VideoOnlineSearchSite; videoIds: number[]; pageSize: number }> {
+  const fetched = await fetchOnlineSearchPage(site, keyword)
+  if (!fetched.ok) {
+    return {
+      summary: {
+        siteId: site.id,
+        ok: false,
+        count: 0,
+        recordCount: 0,
+        error: fetched.error
+      },
+      videoIds: [],
+      pageSize: 0
+    }
+  }
+  const page = fetched.page
+  try {
+    const write = videoStore.writePage(site.id, page.items, '', false)
+    if (write.sourceIds.length > 0) {
+      // 整页就是 ac=detail：简介 / 播放线路直接落成详情文件，点开播放页不用再等一次请求
+      const itemsById = new Map(page.items.map((entry) => [entry.sourceVideoId, entry]))
+      const sources = write.sourceIds
+        .map((id) => videoStore.getDetailSource(id))
+        .filter((row): row is DetailSourceRow => row !== null)
+      await detailCache.warmFromPage(sources, itemsById).catch(() => {})
+    }
+    return {
+      summary: {
+        siteId: site.id,
+        ok: true,
+        count: write.fetched,
+        recordCount: page.recordCount
+      },
+      videoIds: write.videoIds,
+      pageSize: page.pageSize
+    }
+  } catch {
+    return {
+      summary: { siteId: site.id, ok: false, count: 0, recordCount: 0, error: 'DB' },
+      videoIds: [],
+      pageSize: 0
+    }
+  }
+}
+
+/** 在线结果最多展示这么多条（每站 20 条，站点多时也得限一下） */
+const ONLINE_RESULT_LIMIT = 200
+
+/**
+ * 展示端搜索页「在线」模式：
+ * 1. 只向开启了「支持在线检索」的站点发 `wd` 检索，每个站点取第 1 页（20 条）；
+ * 2. 写进缓存库（writePage 按 name_key 合并跨站同名视频），再回读合并后的行；
+ * 3. 过滤隐藏、按相关性排序后返回（最多 200 条）；
+ * 4. 顺手把关键词追加到各站点的「检索」采集任务，后台继续把该词采完（每词最多 200 条）。
+ */
+ipcMain.handle(
+  'videos:search:online',
+  async (_event, input?: { keyword?: string }): Promise<VideoOnlineSearchResult> => {
+    const keyword = String(input?.keyword ?? '')
+      .trim()
+      .slice(0, 60)
+    const empty: VideoOnlineSearchResult = {
+      ok: true,
+      keyword,
+      siteCount: 0,
+      items: [],
+      total: 0,
+      truncated: false,
+      sites: [],
+      queued: 0
+    }
+    if (!videoCacheReady) return { ...empty, ok: false, error: 'CACHE_UNAVAILABLE' }
+    if (!keyword) return empty
+    // 正在后台清理缓存的站点先跳过：刚写进去的来源会被清理一起删掉
+    const sites = siteStore
+      .list()
+      .filter((site) => site.onlineSearch && !siteCachePurges.has(site.id))
+    if (sites.length === 0) return empty
+
+    const results = await Promise.all(sites.map((site) => searchOneSite(site, keyword)))
+    const videoIds: number[] = []
+    for (const result of results) videoIds.push(...result.videoIds)
+    const ids = [...new Set(videoIds)]
+    const merged =
+      ids.length > 0 ? videoStore.listVideosByIds(ids).filter((item) => !item.hidden) : []
+    // 相关性：精确 > 前缀 > 包含，其次多站合并（来源越多越可信）、片名更短、更新时间更新
+    merged.sort((left, right) => {
+      const byRank = nameMatchRank(left.name, keyword) - nameMatchRank(right.name, keyword)
+      if (byRank !== 0) return byRank
+      if (left.sourceCount !== right.sourceCount) return right.sourceCount - left.sourceCount
+      if (left.name.length !== right.name.length) return left.name.length - right.name.length
+      if (left.latestTs !== right.latestTs) return right.latestTs - left.latestTs
+      return left.id - right.id
+    })
+    const items = enrichVideoItems(merged.slice(0, ONLINE_RESULT_LIMIT))
+
+    // 后台检索任务：带上响应里的真实页大小，省掉一次探测请求
+    let queued = 0
+    for (const result of results) {
+      if (!result.summary.ok) continue
+      const enqueued = await collector.enqueue(
+        {
+          siteId: result.summary.siteId,
+          mode: 'search',
+          fetchRange: 'all',
+          words: [keyword],
+          cacheDetail: true,
+          pageSize: result.pageSize || undefined
+        },
+        'manual'
+      )
+      if (enqueued.ok) queued += 1
+    }
+    // 在线检索会往库里写新视频，推荐页缓存作废
+    invalidateHomeFeed()
+    return {
+      ok: true,
+      keyword,
+      siteCount: sites.length,
+      items,
+      total: merged.length,
+      truncated: merged.length > items.length,
+      sites: results.map((result) => result.summary),
+      queued
+    }
+  }
+)
+
+/**
  * 该站点历史任务已经确认过的真实每页条数：同模式 + 同采集方式优先，
  * 其次取最近一条有值的记录（listProgress 已按 updated_at 倒序）。
  * 有历史值就不再联网探测；清空缓存会连带清掉进度，之后才会重新探测。
@@ -1045,8 +1251,9 @@ function knownPageSize(siteId: string, mode?: CollectMode, fetchRange?: FetchRan
 ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartInput) => {
   if (!videoCacheReady) return cacheUnavailable()
   const siteId = String(input?.siteId ?? '').trim()
-  // 同一模式与方式已经在跑 / 排队时不用探测，enqueue 会直接回 ALREADY_QUEUED
-  const range = input?.mode === 'full' ? 'all' : input?.fetchRange
+  const isSearch = input?.mode === 'search'
+  // 同一模式与方式已经在跑 / 排队时不用探测；检索走的是追加关键词，也不探测
+  const range = input?.mode === 'full' || isSearch ? 'all' : input?.fetchRange
   const live = videoStore
     .listProgress(siteId)
     .some(
@@ -1056,7 +1263,7 @@ ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartIn
         (row.status === 'queued' || row.status === 'running' || row.status === 'replacing')
     )
   let pageSize = clampPageSize(input?.pageSize)
-  if (!pageSize && !live) {
+  if (!pageSize && !live && !isSearch) {
     // 历史任务用过真实页大小就直接复用，只有完全没记录时才试抓一页
     pageSize = knownPageSize(siteId, input?.mode, range)
     if (!pageSize) {
@@ -1064,6 +1271,8 @@ ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartIn
       if (site) pageSize = (await probePageSize(site)).pageSize
     }
   }
+  // 检索：历史值优先，没有就按默认 100；首屏响应里的 pagesize 会自愈，不必联网探测
+  if (isSearch && !pageSize) pageSize = knownPageSize(siteId, 'search', 'all') || DEFAULT_PAGE_SIZE
   return collector.enqueue({ ...input, pageSize: pageSize || undefined }, 'manual')
 })
 
@@ -1178,6 +1387,10 @@ ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
   const formatChanged = existing.format !== result.site.format
   // 地址一变，正在跑的那次采集就该停在断点：新地址返回的页混进同一次全量替换会缺页
   if (addressChanged || formatChanged) collector.cancel({ siteId })
+  // 关掉「支持在线检索」就不再跑这个站点的检索任务（已经采到的视频和关键词记录保留）
+  if (existing.onlineSearch && !result.site.onlineSearch) {
+    collector.cancel({ siteId, mode: 'search' })
+  }
   // 只有真的换了站点（域名 / 格式变了）旧缓存才不可信。同一个 domain 下改路径、补斜杠
   // 通常只是笔误，为此把几万条来源和详情文件全清掉不值当；清理本身也放到后台，不堵保存。
   if (formatChanged || !isSameSiteHost(existing.address, result.site.address)) {
@@ -1209,6 +1422,117 @@ ipcMain.handle('sites:remove', (_event, id: string) => {
   }
   return result
 })
+
+/**
+ * 站点在线检索自检（控制台「站点」卡片上的搜索图标）：真实发一次 `wd` 请求，
+ * 只解析、**不写缓存库**，用来判断这个站点的采集接口到底支不支持按片名检索。
+ * 老部署会静默忽略 `wd` 仍返回整页数据，所以除了「有没有结果」，还要看结果里
+ * 有没有片名真的包含关键词：一条都没有基本就是参数没生效。
+ */
+ipcMain.handle(
+  'sites:search:test',
+  async (_event, input?: { siteId?: string; keyword?: string }): Promise<SiteSearchTestResult> => {
+    const site = siteStore.list().find((row) => row.id === String(input?.siteId ?? '').trim())
+    const keyword = String(input?.keyword ?? '')
+      .trim()
+      .slice(0, 60)
+    const base: SiteSearchTestResult = {
+      ok: false,
+      siteId: site?.id ?? '',
+      keyword,
+      url: '',
+      elapsedMs: 0,
+      status: 0,
+      recordCount: 0,
+      pageCount: 0,
+      pageSize: 0,
+      count: 0,
+      matched: 0,
+      items: [],
+      verdict: 'failed',
+      message: ''
+    }
+    if (!site) return { ...base, error: 'NOT_FOUND', message: '站点不存在，可能已被删除' }
+    if (!keyword) return { ...base, error: 'INVALID_INPUT', message: '请先填写要测试的片名' }
+
+    const url = buildOnlineSearchUrl(site, keyword, 1, ONLINE_SEARCH_PAGE_SIZE)
+    const startedAt = Date.now()
+    const response = await fetchCollectText(url, undefined, { timeoutMs: 12000, retries: 1 })
+    const elapsedMs = Date.now() - startedAt
+    if (!response.ok) {
+      const error = response.error === 'HTTP' ? `HTTP_${response.status ?? 0}` : 'NETWORK'
+      return {
+        ...base,
+        siteId: site.id,
+        url,
+        elapsedMs,
+        status: response.status ?? 0,
+        error,
+        message:
+          error === 'NETWORK'
+            ? '请求失败：连不上站点（网络 / 地址不可达）'
+            : `请求失败：站点返回 ${error}`
+      }
+    }
+
+    let page: CollectedPage
+    try {
+      page = parseCollectPage(response.text, site.format)
+    } catch (error) {
+      const code = String((error as { code?: string })?.code ?? 'PARSE')
+      const message =
+        code === 'CLOSED'
+          ? '站点采集接口已关闭（返回 closed）'
+          : code === 'AUTH'
+            ? '站点要求鉴权（多半是 IP 白名单）'
+            : '返回内容无法解析，确认采集格式是否选对'
+      return {
+        ...base,
+        siteId: site.id,
+        url,
+        elapsedMs,
+        status: response.status,
+        error: code,
+        message
+      }
+    }
+
+    const key = makeNameKey(keyword)
+    const count = page.items.length
+    const matched = key
+      ? page.items.filter((item) => makeNameKey(item.name).includes(key)).length
+      : 0
+    const verdict: SiteSearchTestResult['verdict'] =
+      count === 0 ? 'empty' : matched > 0 ? 'supported' : 'ignored'
+    const message =
+      verdict === 'supported'
+        ? `接口支持按片名检索：本页 ${count} 条里有 ${matched} 条片名包含「${keyword}」`
+        : verdict === 'ignored'
+          ? `接口似乎忽略了关键词：返回 ${count} 条，但没有一条片名包含「${keyword}」（多半是不支持检索的老部署）`
+          : '本页 0 条：换个更常见的片名再试；如果一直 0 条，接口可能不支持检索'
+    return {
+      ok: true,
+      siteId: site.id,
+      keyword,
+      url,
+      elapsedMs,
+      status: response.status,
+      recordCount: page.recordCount,
+      pageCount: page.pageCount,
+      pageSize: page.pageSize,
+      count,
+      matched,
+      items: page.items.slice(0, 10).map((item) => ({
+        sourceVideoId: item.sourceVideoId,
+        name: item.name,
+        note: item.note,
+        sourceTime: item.sourceTime
+      })),
+      verdict,
+      message
+    }
+  }
+)
 
 ipcMain.handle('sites:categories', async (_event, id: string) => {
   const site = siteStore.list().find((item) => item.id === String(id))

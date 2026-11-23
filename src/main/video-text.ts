@@ -82,6 +82,20 @@ export function makeFtsQuery(keyword: string): string {
   return terms.join(' ')
 }
 
+/**
+ * 在线检索的相关性分档（越小越靠前）：0 片名完全等于关键词、1 以关键词开头、
+ * 2 包含关键词、3 其它（站点用 `wd` 模糊匹配，正常不会出现）。
+ * 归一化用合并键同一套规则，大小写 / 全半角 / 空格差异不影响分档。
+ */
+export function nameMatchRank(name: string, keyword: string): number {
+  const key = makeNameKey(keyword)
+  if (!key) return 3
+  const target = makeNameKey(name)
+  if (target === key) return 0
+  if (target.startsWith(key)) return 1
+  return target.includes(key) ? 2 : 3
+}
+
 const ENTITIES: Record<string, string> = {
   '&lt;': '<',
   '&gt;': '>',

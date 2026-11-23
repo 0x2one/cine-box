@@ -877,12 +877,6 @@
   white-space: nowrap;
 }
 
-.site-card-format {
-  margin-inline-end: 0;
-  font-size: 11px;
-  line-height: 18px;
-}
-
 .site-card-alias,
 .site-card-remark,
 .site-card-meta {
@@ -911,6 +905,129 @@
 
 .site-card-meta {
   font-variant-numeric: tabular-nums;
+}
+
+/* 支持在线检索的站点：名称 / 格式后面跟一颗强调色地球图标，悬停才有说明，不加底色 */
+.site-card-online {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--accent);
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+/* ── 站点弹窗：在线检索自检（发一次真实请求看支不支持） ── */
+
+.site-search-test-hint {
+  margin: 0 0 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 结果区固定占位：没搜 / 没命中时也留出高度，弹窗不会随结果条数忽大忽小 */
+.site-search-test-slot {
+  min-height: 200px;
+  margin-top: 14px;
+}
+
+.site-search-test {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.site-search-test-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.site-search-test-head .ant-tag {
+  margin-inline-end: 0;
+}
+
+.site-search-test-meta {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.site-search-test-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 命中的前 10 条：片名吃剩余宽度，备注 / 时间靠右且不换行 */
+.site-search-test-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.site-search-test-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.site-search-test-name {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-search-test-note,
+.site-search-test-time {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.site-search-test-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 底部动作行：提示吃剩余宽度，按钮固定靠右 */
+.site-search-test-action {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+/* 提示只占一行：内容够短，别在弹窗里折行 */
+.site-search-test-tip {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 还没测出「支持」时这行只是说明，不用强调色 */
+.site-search-test-tip.is-muted {
+  color: var(--text-faint);
 }
 
 /* ── 控制台：备份 ── */
@@ -2845,6 +2962,14 @@ body .collect-form .ant-form-item-extra {
   line-height: 1.65;
 }
 
+/* 站点弹窗：说明再小一号，半宽列里不跟下拉框抢眼，也不把「备注」推太远 */
+body .site-form .ant-form-item-extra {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
 /* 定时采集弹窗：两列排布 + 收紧行距，别高过窗口 */
 .schedule-form .ant-form-item {
   margin-bottom: 14px;
@@ -3078,6 +3203,69 @@ body .collect-form .ant-form-item-extra {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── 进度卡片：检索模式的关键词（一条进度绑定多个 wd） ── */
+
+.progress-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.progress-word {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  max-width: 180px;
+  padding: 1px 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态只换字色和描边底色，不换字号，避免胶囊宽度跟着状态跳 */
+.progress-word.is-done {
+  color: #2f9e44;
+  border-color: color-mix(in srgb, #2f9e44 40%, var(--border));
+}
+
+.progress-word.is-running {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.progress-word.is-error {
+  color: #d64545;
+  border-color: color-mix(in srgb, #d64545 40%, var(--border));
+}
+
+.progress-word.is-pending {
+  color: var(--text-faint);
+}
+
+.progress-word.is-more {
+  border-style: dashed;
+  color: var(--text-faint);
+}
+
+.progress-word-flag {
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #c77c02 18%, transparent);
+  color: #c77c02;
+  font-size: 10px;
+}
+
+/* 「清空进度」外面包的 span：让禁用状态的 Tooltip 也能触发 */
+.progress-clear-wrap {
+  display: inline-flex;
 }
 
 /* ── 控制台：容量 ── */

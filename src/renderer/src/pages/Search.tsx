@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Input, Spin } from 'antd'
+import { Button, Input, Spin, Switch, Tooltip } from 'antd'
 import { ArrowUpOutlined, CloseOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons'
 import FallbackImage from '../components/FallbackImage'
 import HomePicture from '../components/HomePicture'
@@ -16,6 +16,16 @@ const BACK_TOP_AT = 600
 /** 搜索历史：存在 localStorage，最近的排最前面，最多 10 条 */
 const HISTORY_KEY = 'search-history'
 const HISTORY_LIMIT = 10
+/** 搜索模式（本地 / 在线），记忆在 localStorage */
+const MODE_KEY = 'search-mode'
+/** 在线模式每站返回 20 条，主进程最多合并 200 条，这里只用于文案 */
+const ONLINE_SITE_PAGE_SIZE = 20
+
+type SearchMode = 'local' | 'online'
+
+function readSearchMode(): SearchMode {
+  return localStorage.getItem(MODE_KEY) === 'online' ? 'online' : 'local'
+}
 
 /** 滚动回调要读的可变状态：放在 ref 里，避免闭包拿到过期的 page / loading */
 interface SearchGuard {
@@ -136,6 +146,37 @@ function SearchBar({
   )
 }
 
+/** 搜索模式开关：本地 = 查已入库的片库，在线 = 向开启了在线检索的站点按片名检索 */
+function SearchModeSwitch({
+  mode,
+  disabled,
+  onChange
+}: {
+  mode: SearchMode
+  /** 没有站点开启在线检索时禁用（在线模式本身也会被回落到本地） */
+  disabled: boolean
+  onChange: (next: SearchMode) => void
+}): React.JSX.Element {
+  return (
+    <div className="search-mode">
+      <span className="search-mode-label">搜索模式</span>
+      {/* Tooltip 包一层 span：禁用的开关不派发鼠标事件，直接包它提示不会出现 */}
+      <Tooltip title={disabled ? '还没有站点开启「支持在线检索」，去控制台 › 站点 编辑开启' : ''}>
+        <span className="search-mode-switch">
+          <Switch
+            checked={mode === 'online'}
+            checkedChildren="在线"
+            unCheckedChildren="本地"
+            disabled={disabled}
+            onChange={(checked) => onChange(checked ? 'online' : 'local')}
+            aria-label="搜索模式：在线或本地"
+          />
+        </span>
+      </Tooltip>
+    </div>
+  )
+}
+
 /** 单条搜索结果：沿用控制台「视频」预览行的信息顺序，左侧是 3:4 封面 */
 function SearchResultRow({
   item,
@@ -247,6 +288,22 @@ function SearchView({
   /** 吸顶头部滚过一点后加描边，内容从下面穿过去时有个边界 */
   const [elevated, setElevated] = useState(false)
   const [showBackTop, setShowBackTop] = useState(false)
+  /** 搜索模式：本地查片库，在线向支持在线检索的站点按片名检索 */
+  const [modeState, setModeState] = useState<SearchMode>(readSearchMode)
+  /** 站点列表只为「在线」开关服务：哪些站点开了在线检索 */
+  const [sites, setSites] = useState<Site[]>([])
+  const [sitesLoaded, setSitesLoaded] = useState(false)
+  /** 在线模式最近一次检索的结果：站点分布、后台任务数、是否截断 */
+  const [online, setOnline] = useState<VideoOnlineSearchResult | null>(null)
+
+  const onlineSites = useMemo(() => sites.filter((site) => site.onlineSearch), [sites])
+  const onlineReady = onlineSites.length > 0
+  /**
+   * 上次停在在线模式、但已经没有站点支持在线检索时回落到本地：
+   * 用派生值而不是 effect 里 setState，免得一次多余的渲染。
+   */
+  const mode: SearchMode =
+    modeState === 'online' && sitesLoaded && !onlineReady ? 'local' : modeState
 
   const guard = useRef<SearchGuard>({
     generation: 0,
@@ -306,12 +363,56 @@ function SearchView({
   )
 
   /**
+   * 在线检索：主进程只问开启在线检索的站点，每站取第 1 页 20 条，
+   * 按 name_key 合并（跨站同名合成一条）并按相关性排序后返回；
+   * 同时会把这些关键词追加到各站点的「检索」采集任务，后台继续采。
+   */
+  const runOnline = useCallback(async (query: string): Promise<void> => {
+    const token = guard.current.generation
+    guard.current.loading = true
+    guard.current.failed = false
+    setLoading(true)
+    setFailed(false)
+    setOnline(null)
+    try {
+      const result = await window.api.videos.searchOnline({ keyword: query })
+      // 换过关键词：这次结果已经没用了
+      if (token !== guard.current.generation) return
+      if (!result.ok) {
+        guard.current.failed = true
+        setFailed(true)
+        return
+      }
+      setItems(result.items)
+      setTotal(result.total)
+      setOnline(result)
+      // 在线结果是一次性快照（每站 20 条），不做滚动分页
+      guard.current.page = 1
+      guard.current.exhausted = true
+      setExhausted(true)
+    } catch {
+      if (token === guard.current.generation) {
+        guard.current.failed = true
+        setFailed(true)
+      }
+    } finally {
+      if (token === guard.current.generation) {
+        guard.current.loading = false
+        setLoading(false)
+      }
+    }
+  }, [])
+
+  /**
    * 提交关键词：作废旧请求、清空结果、回到第一页并滚回顶部。
    * 空串等于退回初始态（落地页），同时把输入框清空。
+   * modeOverride 用于「切换搜索模式后用同一个词重查」：状态更新是异步的，
+   * 这里必须显式传入新模式，否则会拿切换前的那份闭包。
    */
   const startSearch = useCallback(
-    (raw: string): void => {
+    (raw: string, modeOverride?: SearchMode): void => {
       const next = raw.trim()
+      const targetMode = modeOverride ?? mode
       keywordRef.current = next
       setKeyword(next)
       onKeywordChange?.(next)
@@ -321,6 +422,7 @@ function SearchView({
       setExhausted(false)
       setElevated(false)
       setShowBackTop(false)
+      setOnline(null)
       guard.current = {
         generation: guard.current.generation + 1,
         page: 1,
@@ -336,10 +438,23 @@ function SearchView({
         return
       }
       setLoading(true)
-      void loadPage(1, next, true)
+      if (targetMode === 'online') void runOnline(next)
+      else void loadPage(1, next, true)
     },
-    [loadPage, onKeywordChange]
+    [loadPage, runOnline, mode, onKeywordChange]
   )
+
+  /** 切模式：写 localStorage；已经有提交过的关键词就用同一个词在新模式下重查 */
+  const changeMode = (next: SearchMode): void => {
+    if (next === mode) return
+    setModeState(next)
+    try {
+      window.localStorage.setItem(MODE_KEY, next)
+    } catch {
+      // 隐私模式 / 配额不足时只在本次会话里保留
+    }
+    if (keywordRef.current) startSearch(keywordRef.current, next)
+  }
 
   // 从控制台 / 设置返回时恢复上次的搜索结果：只在挂载时跑一次，不重复记历史。
   // 恢复现场要在挂载后补一次请求（先进入加载态），规则按调用点误报，这里显式关闭
@@ -391,8 +506,9 @@ function SearchView({
     setHistory((previous) => previous.filter((item) => item.toLowerCase() !== key))
   }
 
-  /** 距离底部不到 LOAD_AHEAD 且还有下一页时继续取 */
+  /** 距离底部不到 LOAD_AHEAD 且还有下一页时继续取（在线模式一次性返回，不分页） */
   const maybeLoadMore = useCallback((): void => {
+    if (mode !== 'local') return
     const state = guard.current
     const query = keywordRef.current
     if (!query || state.loading || state.failed || state.exhausted) return
@@ -400,7 +516,7 @@ function SearchView({
     if (!page) return
     if (page.scrollHeight - page.scrollTop - page.clientHeight > LOAD_AHEAD) return
     void loadPage(state.page, query, false)
-  }, [loadPage])
+  }, [loadPage, mode])
 
   // 一页填不满窗口时接着取，否则要等用户再滚一下才会触发
   useEffect(() => {
@@ -432,7 +548,7 @@ function SearchView({
     }
   }, [maybeLoadMore])
 
-  // 初始态需要分类名、片库规模和底部推荐：任何一块读失败都只是少显示一块，不影响搜索
+  // 初始态需要分类名、片库规模、站点（在线开关）和底部推荐：任何一块读失败都只是少显示一块
   useEffect(() => {
     let cancelled = false
     window.api.categories
@@ -442,6 +558,17 @@ function SearchView({
       })
       .catch(() => {
         // 分类读不到时初始态只剩搜索和历史
+      })
+    // 站点列表：决定「在线」能不能切（没有站点开启在线检索时开关禁用并回落到本地）
+    window.api.sites
+      .list()
+      .then((rows) => {
+        if (cancelled) return
+        setSites(rows)
+        setSitesLoaded(true)
+      })
+      .catch(() => {
+        if (!cancelled) setSitesLoaded(true)
       })
     window.api.videos
       .stats()
@@ -464,6 +591,12 @@ function SearchView({
       cancelled = true
     }
   }, [])
+
+  /** 在线结果里的站点名：只用于失败提示，站点已被删除时退化到 id 前缀 */
+  const siteLabelOf = (siteId: string): string => {
+    const site = sites.find((row) => row.id === siteId)
+    return site ? site.display || site.name : siteId.slice(0, 8)
+  }
 
   /** 初始态的分类快捷入口：和列表页一样只取可见的一级分类 */
   const tops = useMemo(() => {
@@ -489,7 +622,9 @@ function SearchView({
     if (!query || state.loading) return
     state.failed = false
     setFailed(false)
-    void loadPage(state.page, query, items.length === 0)
+    // 在线模式重试整次检索（结果是快照），本地模式重试当前这一页
+    if (mode === 'online') void runOnline(query)
+    else void loadPage(state.page, query, items.length === 0)
   }
 
   /** 回到顶部：搜索页的滚动容器是 .page，不是 window */
@@ -508,6 +643,11 @@ function SearchView({
     tokens.sort((left, right) => right.length - left.length)
     return new RegExp(`(${tokens.map(escapeRegExp).join('|')})`, 'gi')
   }, [keyword])
+
+  /** 在线检索时所有站点都失败了：空状态要按「失败」而不是「没有找到」展示 */
+  const onlineAllFailed = Boolean(
+    online && online.sites.length > 0 && online.sites.every((site) => !site.ok)
+  )
 
   return (
     <div className="search-view" ref={rootRef}>
@@ -532,15 +672,24 @@ function SearchView({
                 startSearch('')
               }}
             />
-            <span className="search-count" aria-live="polite">
-              {total !== null ? (
-                <>
-                  共 <b>{formatCount(total)}</b> 部相关视频
-                </>
-              ) : loading ? (
-                '正在搜索…'
-              ) : null}
-            </span>
+            <div className="search-head-side">
+              <span className="search-count" aria-live="polite">
+                {online ? (
+                  total !== null ? (
+                    <>
+                      共 <b>{formatCount(total)}</b> 部 · {online.siteCount} 个站点
+                    </>
+                  ) : null
+                ) : total !== null ? (
+                  <>
+                    共 <b>{formatCount(total)}</b> 部相关视频
+                  </>
+                ) : loading ? (
+                  '正在搜索…'
+                ) : null}
+              </span>
+              <SearchModeSwitch mode={mode} disabled={!onlineReady} onChange={changeMode} />
+            </div>
           </div>
         </header>
       )}
@@ -548,10 +697,15 @@ function SearchView({
       <div className={`search-body${keyword ? '' : ' is-intro'}`}>
         {!keyword ? (
           <div className="search-intro">
+            <div className="search-intro-mode">
+              <SearchModeSwitch mode={mode} disabled={!onlineReady} onChange={changeMode} />
+            </div>
             <div className="search-intro-main">
               <h2 className="search-intro-title">搜索片库</h2>
               <p className="search-intro-desc">
-                输入片名，按回车或点「搜索」；也可以从下面的分类进入。
+                {mode === 'online'
+                  ? '输入片名，向支持在线检索的站点检索，命中会合并入库。'
+                  : '输入片名，按回车或点「搜索」；也可以从下面的分类进入。'}
               </p>
 
               <SearchBar
@@ -564,7 +718,19 @@ function SearchView({
               />
 
               <p className="search-intro-meta">
-                {stats && stats.videoCount > 0 ? (
+                {mode === 'online' ? (
+                  onlineReady ? (
+                    <>
+                      在线检索 <b>{onlineSites.length}</b> 个站点
+                      <span className="search-meta-dot" />
+                      每站前 {ONLINE_SITE_PAGE_SIZE} 条
+                      <span className="search-meta-dot" />
+                      命中会合并入库
+                    </>
+                  ) : (
+                    '还没有站点开启在线检索，先在控制台 › 站点 编辑里打开「支持在线检索」'
+                  )
+                ) : stats && stats.videoCount > 0 ? (
                   <>
                     片库共 <b>{formatCount(stats.videoCount)}</b> 部视频
                     <span className="search-meta-dot" />
@@ -676,8 +842,17 @@ function SearchView({
         ) : failed && items.length === 0 ? (
           <div className="search-empty">
             <p className="search-empty-title">搜索失败</p>
-            <p className="search-empty-desc">视频缓存库可能正在初始化，稍后再试一次</p>
+            <p className="search-empty-desc">
+              {mode === 'online'
+                ? '在线站点都没有返回结果，检查网络或站点是否可用，也可以改用本地搜索'
+                : '视频缓存库可能正在初始化，稍后再试一次'}
+            </p>
             <Button onClick={retry}>重新搜索</Button>
+            {mode === 'online' && (
+              <Button type="link" onClick={() => changeMode('local')}>
+                改用本地搜索
+              </Button>
+            )}
           </div>
         ) : loading && items.length === 0 ? (
           <div className="search-loading">
@@ -685,9 +860,30 @@ function SearchView({
           </div>
         ) : items.length === 0 ? (
           <div className="search-empty">
-            <p className="search-empty-title">没有找到「{keyword}」</p>
-            <p className="search-empty-desc">换个关键词试试，或者按分类浏览片库</p>
-            <Button onClick={() => onOpenBrowse(null)}>按分类浏览</Button>
+            <p className="search-empty-title">
+              {onlineAllFailed
+                ? '在线检索失败'
+                : `${mode === 'online' ? '在线检索没有找到' : '没有找到'}「${keyword}」`}
+            </p>
+            <p className="search-empty-desc">
+              {onlineAllFailed
+                ? `站点都没返回结果（${online?.sites
+                    .filter((site) => !site.ok)
+                    .map((site) => site.error ?? '失败')
+                    .join('、')}），检查网络或站点是否可用，也可以改用本地搜索`
+                : mode === 'online'
+                  ? onlineReady
+                    ? `${onlineSites.length} 个站点都没有命中这个词，换个关键词，或者改用本地搜索`
+                    : '还没有站点开启在线检索，先去控制台 › 站点 编辑里打开'
+                  : '换个关键词试试，或者按分类浏览片库'}
+            </p>
+            {mode === 'online' && onlineReady ? (
+              <Button type="link" onClick={() => changeMode('local')}>
+                改用本地搜索
+              </Button>
+            ) : (
+              <Button onClick={() => onOpenBrowse(null)}>按分类浏览</Button>
+            )}
           </div>
         ) : (
           <>
@@ -698,7 +894,35 @@ function SearchView({
             </section>
 
             <div className="search-footer">
-              {failed ? (
+              {mode === 'online' && online ? (
+                <>
+                  <span>
+                    {online.siteCount} 个站点参与 · {online.sites.filter((site) => site.ok).length}{' '}
+                    个成功
+                    {online.sites.some((site) => !site.ok) && (
+                      <>
+                        {' · '}
+                        <Tooltip
+                          title={online.sites
+                            .filter((site) => !site.ok)
+                            .map((site) => `${siteLabelOf(site.siteId)}（${site.error ?? '失败'}）`)
+                            .join('、')}
+                        >
+                          <span className="search-online-failed">
+                            {online.sites.filter((site) => !site.ok).length} 个失败
+                          </span>
+                        </Tooltip>
+                      </>
+                    )}
+                    {online.queued > 0 ? ` · 已触发 ${online.queued} 个检索采集任务` : ''}
+                  </span>
+                  {online.truncated ? (
+                    <span>结果较多，只显示前 {items.length} 条</span>
+                  ) : online.sites.some((site) => site.ok && site.recordCount > site.count) ? (
+                    <span>站点还有更多命中，后台正在继续采集，完成后可切到「本地」查看全部</span>
+                  ) : null}
+                </>
+              ) : failed ? (
                 <Button type="link" onClick={retry}>
                   加载失败，点击重试
                 </Button>

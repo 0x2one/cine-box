@@ -1,14 +1,37 @@
 /** 视频缓存相关的主进程类型：IPC、采集器、缓存库与渲染层类型声明共用同一套语义 */
 
-export type CollectMode = 'incremental' | 'full'
+/**
+ * 采集模式：增量 / 全量按页翻列表，检索按片名（`wd`）在线检索。
+ * 检索是「按关键词补充入库」，不做全量替换，同一站点只保留一条进度记录。
+ */
+export type CollectMode = 'incremental' | 'full' | 'search'
+/** 定时计划只支持按列表翻页的两种：检索需要关键词，不能定时 */
+export type ScheduleMode = 'incremental' | 'full'
 export type FetchRange = 'all' | '24h' | '48h'
 export type CollectStatus =
   'idle' | 'queued' | 'running' | 'paused' | 'replacing' | 'done' | 'error'
 export type CollectOrigin = 'manual' | 'schedule'
 export type LogLevel = 'info' | 'warn' | 'error'
 
-export const COLLECT_MODES: CollectMode[] = ['incremental', 'full']
+export const COLLECT_MODES: CollectMode[] = ['incremental', 'full', 'search']
 export const FETCH_RANGES: FetchRange[] = ['all', '24h', '48h']
+
+/** 在线检索交互页每站请求的页大小（搜索页等不了太久，一页就够展示） */
+export const ONLINE_SEARCH_PAGE_SIZE = 20
+/** 检索采集任务每个关键词、每个站点最多入库的条数 */
+export const SEARCH_MAX_ITEMS = 200
+
+/** 检索进度上绑定的一个关键词及其采集状态 */
+export type SearchWordStatus = 'pending' | 'running' | 'done' | 'error'
+
+export interface CollectSearchWord {
+  word: string
+  status: SearchWordStatus
+  /** 这个词已经抓到的条数（达到上限时停在上限） */
+  fetched: number
+  error: string
+  updatedAt: string
+}
 
 export interface VideoCollectProgress {
   /** `${siteId}:${mode}:${fetchRange}` */
@@ -30,6 +53,8 @@ export interface VideoCollectProgress {
   startedAt: string
   finishedAt: string
   updatedAt: string
+  /** 只有 mode = search 的行才带：这条进度绑定的关键词（去重后按最近改动排序） */
+  words?: CollectSearchWord[]
 }
 
 /** 定时方式：按间隔，或每天固定时间点 */
@@ -37,7 +62,7 @@ export type ScheduleTiming = 'interval' | 'daily'
 
 export interface VideoSchedule {
   siteId: string
-  mode: CollectMode
+  mode: ScheduleMode
   fetchRange: FetchRange
   timing: ScheduleTiming
   intervalMinutes: number
@@ -60,7 +85,7 @@ export interface VideoScheduleInput {
   timing: ScheduleTiming
   intervalMinutes: number
   dailyTime: string
-  mode: CollectMode
+  mode: ScheduleMode
   fetchRange: FetchRange
   cacheDetail?: boolean
   /** 探测结果由主进程写入，渲染层不传 */
@@ -241,6 +266,11 @@ export interface VideoCollectStartInput {
   cacheDetail?: boolean
   /** 探测到的真实每页条数；省略时主进程会先探测，探测失败按默认 100 */
   pageSize?: number
+  /**
+   * 检索模式要采集的关键词：同一个站点只有一条检索进度，多次提交会累积成
+   * 一份去重列表（已经存在的关键词重置为待检索，重新采一次）。
+   */
+  words?: string[]
 }
 
 export interface VideoCollectStartResult {
@@ -310,11 +340,79 @@ export interface VideoListResult {
   error?: string
 }
 
+/** 在线检索自检里的一条命中：只给界面看，不写缓存库 */
+export interface SiteSearchTestItem {
+  sourceVideoId: string
+  name: string
+  note: string
+  sourceTime: string
+}
+
+/**
+ * 站点「在线检索」自检结果：发一次真实的 `wd` 请求，只看返回、不写库。
+ * 老部署会静默忽略 `wd` 仍返回整页数据，所以除了条数，还要看结果里
+ * 有没有片名真的包含关键词（`matched`）才能判断接口到底支不支持。
+ */
+export interface SiteSearchTestResult {
+  /** 请求 + 解析是否成功（verdict 为 empty / ignored 时也是 true） */
+  ok: boolean
+  /** NOT_FOUND / INVALID_INPUT / NETWORK / HTTP_xxx / PARSE / CLOSED / AUTH */
+  error?: string
+  siteId: string
+  keyword: string
+  /** 实际请求的地址，排查时直接复制 */
+  url: string
+  elapsedMs: number
+  /** HTTP 状态码，网络失败时为 0 */
+  status: number
+  /** 站点报告的总命中数，0 = 未知 */
+  recordCount: number
+  pageCount: number
+  pageSize: number
+  /** 本页解析出的条数 */
+  count: number
+  /** 本页片名包含关键词的条数 */
+  matched: number
+  /** 前几条命中，最多 10 条 */
+  items: SiteSearchTestItem[]
+  verdict: 'supported' | 'ignored' | 'empty' | 'failed'
+  message: string
+}
+
 /** 只问数量时的结果（不取行）：控制台概览的「隐藏了多少」用它 */
 export interface VideoCountResult {
   ok: boolean
   total: number
   error?: string
+}
+
+/** 在线检索里单个站点的结果 */
+export interface VideoOnlineSearchSite {
+  siteId: string
+  ok: boolean
+  /** 该站点本次返回的条数（≤ ONLINE_SEARCH_PAGE_SIZE） */
+  count: number
+  /** 站点报告的总命中数，0 = 未知；大于 count 时说明后台还会继续采 */
+  recordCount: number
+  /** NETWORK / HTTP_xxx / PARSE / CLOSED / AUTH */
+  error?: string
+}
+
+/** 展示端搜索页「在线」模式的一次检索结果 */
+export interface VideoOnlineSearchResult {
+  ok: boolean
+  /** CACHE_UNAVAILABLE / INVALID_INPUT */
+  error?: string
+  keyword: string
+  /** 参与检索的站点数（支持在线检索、且没有正在清理缓存） */
+  siteCount: number
+  items: VideoListItem[]
+  /** 合并后的命中总数（items 可能被截断） */
+  total: number
+  truncated: boolean
+  sites: VideoOnlineSearchSite[]
+  /** 成功入队的检索采集任务数 */
+  queued: number
 }
 
 /** 只允许改这些字段：名称是合并键，不提供修改入口 */

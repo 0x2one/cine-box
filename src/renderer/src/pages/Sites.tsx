@@ -11,6 +11,7 @@ import {
   Select,
   Space,
   Spin,
+  Switch,
   Tag,
   Tooltip
 } from 'antd'
@@ -18,13 +19,15 @@ import {
   CloseOutlined,
   DeleteOutlined,
   EditOutlined,
+  GlobalOutlined,
   LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SearchOutlined,
   TagsOutlined
 } from '@ant-design/icons'
 import { splitCategoryPath } from '../lib/category-tree'
-import { formatDateTime } from '../utils/format'
+import { formatCount, formatDateTime } from '../utils/format'
 
 interface SiteFormValues {
   name: string
@@ -32,6 +35,7 @@ interface SiteFormValues {
   address: string
   format: SiteFormat
   remark?: string
+  onlineSearch: boolean
 }
 
 const SITE_ERRORS: Record<string, string> = {
@@ -57,6 +61,17 @@ const FORMAT_OPTIONS: { value: SiteFormat; label: string }[] = [
   { value: 'xml', label: 'XML' },
   { value: 'json', label: 'JSON' }
 ]
+
+/** 在线检索自检的结论：支持 / 疑似忽略关键词 / 没命中 / 请求失败 */
+const SEARCH_TEST_VERDICT: Record<
+  SiteSearchTestResult['verdict'],
+  { text: string; color: string }
+> = {
+  supported: { text: '支持检索', color: 'success' },
+  ignored: { text: '疑似不支持', color: 'warning' },
+  empty: { text: '没有命中', color: 'default' },
+  failed: { text: '请求失败', color: 'error' }
+}
 
 /** 卡片标题：优先显示显示名 */
 function siteLabel(site: Site): string {
@@ -107,6 +122,15 @@ function SitesPanel({
   const [applying, setApplying] = useState<'incremental' | 'full' | null>(null)
   /** 只认最后一次请求，避免快速切换站点时旧响应覆盖新结果 */
   const categoryRequest = useRef(0)
+  /** 在线检索自检弹窗：输入片名发一次真实请求，判断站点支不支持按片名检索 */
+  const [testSite, setTestSite] = useState<Site | null>(null)
+  const [testKeyword, setTestKeyword] = useState('')
+  const [testing, setTesting] = useState(false)
+  /** 自检弹窗里直接打开「在线检索」的请求中状态 */
+  const [enablingSearch, setEnablingSearch] = useState(false)
+  const [testResult, setTestResult] = useState<SiteSearchTestResult | null>(null)
+  /** 只认最后一次自检请求：关弹窗 / 换站点后旧结果直接丢弃 */
+  const testRequest = useRef(0)
 
   useEffect(() => {
     let alive = true
@@ -135,7 +159,8 @@ function SitesPanel({
         display: editing.display,
         address: editing.address,
         format: editing.format,
-        remark: editing.remark
+        remark: editing.remark,
+        onlineSearch: editing.onlineSearch
       })
     } else {
       form.resetFields()
@@ -361,6 +386,77 @@ function SitesPanel({
       .catch(() => message.error('读取站点分类失败，请重试'))
   }
 
+  const openSearchTest = (site: Site): void => {
+    // 关掉 / 换站点时作废上一次还在路上的请求，别把结果贴到另一个站点上
+    testRequest.current += 1
+    setTestSite(site)
+    setTestKeyword('')
+    setTestResult(null)
+  }
+
+  const closeSearchTest = (): void => {
+    testRequest.current += 1
+    setTestSite(null)
+    setTestResult(null)
+    setTesting(false)
+  }
+
+  /** 发一次真实请求；结果只展示，不写缓存库，所以随时可以放心试 */
+  const runSearchTest = async (): Promise<void> => {
+    if (!testSite) return
+    const keyword = testKeyword.trim()
+    if (!keyword) {
+      message.warning('请先填写要测试的片名')
+      return
+    }
+    const token = (testRequest.current += 1)
+    setTesting(true)
+    try {
+      const result = await window.api.sites.testSearch({ siteId: testSite.id, keyword })
+      if (testRequest.current !== token) return
+      setTestResult(result)
+    } catch {
+      if (testRequest.current === token) message.error('测试失败，请重试')
+    } finally {
+      if (testRequest.current === token) setTesting(false)
+    }
+  }
+
+  /** 自检确认真能按片名搜，就在这个弹窗里直接打开「在线检索」，省得再去编辑弹窗 */
+  const enableOnlineSearch = async (): Promise<void> => {
+    if (!testSite || testSite.onlineSearch) return
+    const targetId = testSite.id
+    setEnablingSearch(true)
+    try {
+      const result = await window.api.sites.update(targetId, {
+        name: testSite.name,
+        display: testSite.display,
+        address: testSite.address,
+        format: testSite.format,
+        remark: testSite.remark,
+        onlineSearch: true
+      })
+      if (!result.ok) {
+        message.error(SITE_ERRORS[result.error ?? ''] ?? '开启失败，请重试')
+        return
+      }
+      // 先就地改卡片再关弹窗：列表刷新是本地库读取，晚一拍不影响，也不会让弹窗多挂一会儿
+      setSites((previous) =>
+        previous.map((site) => (site.id === targetId ? { ...site, onlineSearch: true } : site))
+      )
+      message.success('已开启在线检索')
+      closeSearchTest()
+      void window.api.sites
+        .list()
+        .then(setSites)
+        .catch(() => {})
+    } catch {
+      message.error('开启失败，请重试')
+    } finally {
+      setEnablingSearch(false)
+    }
+  }
+
   return (
     <>
       <div className="settings-panel-head has-actions">
@@ -399,14 +495,24 @@ function SitesPanel({
               <div className="site-card-head">
                 <div className="site-card-title">
                   <span className="site-card-name">{siteLabel(site)}</span>
-                  <Tag
-                    className="site-card-format"
-                    color={site.format === 'xml' ? 'blue' : 'green'}
-                  >
-                    {site.format.toUpperCase()}
-                  </Tag>
+                  {site.onlineSearch && (
+                    <Tooltip title="支持在线检索：搜索页可切到「在线」，采集里多出「检索」方式">
+                      <span className="site-card-online" aria-label="支持在线检索">
+                        <GlobalOutlined />
+                      </span>
+                    </Tooltip>
+                  )}
                 </div>
                 <div className="site-card-actions">
+                  <Tooltip title="测试在线检索（只发请求，不写入缓存）">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<SearchOutlined />}
+                      onClick={() => openSearchTest(site)}
+                      aria-label={`测试 ${siteLabel(site)} 的在线检索`}
+                    />
+                  </Tooltip>
                   <Tooltip title="获取分类">
                     <Button
                       type="text"
@@ -476,13 +582,13 @@ function SitesPanel({
         confirmLoading={saving}
         onOk={() => void submit()}
         onCancel={closeForm}
-        width={480}
+        width={600}
       >
         <Form
           form={form}
           layout="vertical"
           requiredMark={false}
-          initialValues={{ format: 'xml' }}
+          initialValues={{ format: 'xml', onlineSearch: false }}
           className="site-form"
         >
           <Row gutter={12}>
@@ -516,13 +622,27 @@ function SitesPanel({
           >
             <Input placeholder="https://example.com/api.php/provide/vod" allowClear />
           </Form.Item>
-          <Form.Item
-            name="format"
-            label="格式"
-            rules={[{ required: true, message: '请选择采集格式' }]}
-          >
-            <Select options={FORMAT_OPTIONS} />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="onlineSearch"
+                label="在线检索"
+                valuePropName="checked"
+                extra="开启后搜索页可切到「在线」，采集里多出「检索」方式；站点不支持按片名检索时请勿开启。"
+              >
+                <Switch checkedChildren="支持" unCheckedChildren="不支持" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="format"
+                label="格式"
+                rules={[{ required: true, message: '请选择采集格式' }]}
+              >
+                <Select options={FORMAT_OPTIONS} />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="remark" label="备注">
             <Input.TextArea
               rows={3}
@@ -533,6 +653,95 @@ function SitesPanel({
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={testSite ? `测试在线检索「${siteLabel(testSite)}」` : '测试在线检索'}
+        open={Boolean(testSite)}
+        onCancel={closeSearchTest}
+        footer={null}
+        width={560}
+      >
+        <p className="site-search-test-hint">
+          输入片名后点右侧搜索（或回车），会真的向站点搜一次，结果不会入库；片名里找不到你搜的词，就说明它不支持按片名搜索。
+        </p>
+        <Space.Compact style={{ width: '100%' }}>
+          <Input
+            value={testKeyword}
+            onChange={(event) => setTestKeyword(event.target.value)}
+            onPressEnter={() => void runSearchTest()}
+            placeholder="输入片名，如：名侦探柯南"
+            maxLength={60}
+            allowClear
+          />
+          <Button
+            type="primary"
+            icon={<SearchOutlined />}
+            loading={testing}
+            onClick={() => void runSearchTest()}
+            aria-label="测试"
+            title="测试"
+          />
+        </Space.Compact>
+        {/* 结果区固定占位：没搜 / 没命中时也保留高度，弹窗不会随条数忽大忽小 */}
+        <div className="site-search-test-slot">
+          {testResult && (
+            <div className={`site-search-test is-${testResult.verdict}`}>
+              <div className="site-search-test-head">
+                <Tag color={SEARCH_TEST_VERDICT[testResult.verdict].color}>
+                  {SEARCH_TEST_VERDICT[testResult.verdict].text}
+                </Tag>
+                <span className="site-search-test-meta">
+                  {testResult.elapsedMs} ms
+                  {testResult.status > 0 ? ` · HTTP ${testResult.status}` : ''}
+                  {` · 本页 ${testResult.count} 条`}
+                  {testResult.recordCount > 0
+                    ? ` · 共 ${formatCount(testResult.recordCount)} 条`
+                    : ''}
+                  {testResult.pageSize > 0 ? ` · 每页 ${testResult.pageSize} 条` : ''}
+                </span>
+              </div>
+              <p className="site-search-test-message">{testResult.message}</p>
+              {testResult.items.length > 0 && (
+                <ul className="site-search-test-list">
+                  {testResult.items.map((item, index) => (
+                    <li key={`${item.sourceVideoId}-${index}`}>
+                      <span className="site-search-test-name" title={item.name}>
+                        {item.name}
+                      </span>
+                      {item.note && <span className="site-search-test-note">{item.note}</span>}
+                      {item.sourceTime && (
+                        <span className="site-search-test-time">{item.sourceTime}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+        {/* 站点还没开启在线检索时，测完可以直接在这里打开，不用再进编辑弹窗 */}
+        {testSite && !testSite.onlineSearch && (
+          <div className="site-search-test-action">
+            <span
+              className={`site-search-test-tip${
+                testResult?.verdict === 'supported' ? '' : ' is-muted'
+              }`}
+            >
+              {testResult?.verdict === 'supported'
+                ? '能按片名搜索，直接开启就好。'
+                : '开启后「采集」多出「检索」方式，搜索页也能切到「在线」。'}
+            </span>
+            <Button
+              type="primary"
+              size="small"
+              loading={enablingSearch}
+              onClick={() => void enableOnlineSearch()}
+            >
+              开启在线检索
+            </Button>
+          </div>
+        )}
       </Modal>
 
       <Modal

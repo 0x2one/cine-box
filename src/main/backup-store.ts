@@ -58,6 +58,8 @@ interface SiteRow {
   address: string
   format: 'xml' | 'json'
   remark: string
+  /** 是否支持在线检索；旧备份没有该字段时按关闭处理 */
+  onlineSearch: boolean
   createdAt: string
   updatedAt: string
 }
@@ -195,7 +197,7 @@ export interface BackupStore {
 }
 
 const SELECT_SITES = `
-SELECT id, name, display, address, format, remark, created_at, updated_at
+SELECT id, name, display, address, format, remark, online_search, created_at, updated_at
 FROM sites
 ORDER BY created_at ASC, rowid ASC
 `
@@ -226,8 +228,9 @@ ORDER BY created_at ASC, rowid ASC
 `
 
 const INSERT_SITE = `
-INSERT INTO sites (id, name, display, address, format, remark, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO sites
+  (id, name, display, address, format, remark, online_search, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_SITE_CATEGORY = `
@@ -318,6 +321,8 @@ function parseSites(value: unknown): SiteRow[] | null {
       address,
       format,
       remark: optionalText(item.remark),
+      // 旧备份没有这个字段：按「不支持在线检索」恢复
+      onlineSearch: item.onlineSearch === true,
       createdAt,
       updatedAt: timestamp(item.updatedAt, createdAt)
     })
@@ -546,6 +551,7 @@ function readState(database: DatabaseSync): BackupData {
         address: String(raw.address ?? ''),
         format: raw.format === 'json' ? ('json' as const) : ('xml' as const),
         remark: String(raw.remark ?? ''),
+        onlineSearch: Number(raw.online_search ?? 0) !== 0,
         createdAt,
         updatedAt: timestamp(raw.updated_at, createdAt)
       }
@@ -665,6 +671,7 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.address,
         row.format,
         row.remark,
+        row.onlineSearch ? 1 : 0,
         row.createdAt,
         row.updatedAt
       )

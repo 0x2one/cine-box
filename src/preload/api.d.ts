@@ -135,6 +135,11 @@ interface Site {
   format: SiteFormat
   /** 备注 */
   remark: string
+  /**
+   * 是否支持在线检索：开启后搜索页可以切到「在线」，
+   * 控制台「采集」里也多出「检索」这种采集方式。
+   */
+  onlineSearch: boolean
   /** ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -146,6 +151,7 @@ interface SiteInput {
   address: string
   format?: SiteFormat
   remark?: string
+  onlineSearch?: boolean
 }
 
 interface AddSiteResult {
@@ -166,6 +172,43 @@ interface RemoveSiteResult {
   ok: boolean
   /** 删除后剩余的站点列表 */
   sites: Site[]
+}
+
+/** 在线检索自检里的一条命中（只给界面看，不写缓存库） */
+interface SiteSearchTestItem {
+  sourceVideoId: string
+  name: string
+  note: string
+  sourceTime: string
+}
+
+/**
+ * 站点「在线检索」自检结果：发一次真实的 wd 请求，只看返回。
+ * 老部署会忽略 wd 仍返回整页数据，所以要看结果里有没有片名真的包含关键词。
+ */
+interface SiteSearchTestResult {
+  /** 请求 + 解析是否成功（verdict 为 empty / ignored 时也是 true） */
+  ok: boolean
+  /** NOT_FOUND / INVALID_INPUT / NETWORK / HTTP_xxx / PARSE / CLOSED / AUTH */
+  error?: string
+  siteId: string
+  keyword: string
+  /** 实际请求地址，可复制出来排查 */
+  url: string
+  elapsedMs: number
+  /** HTTP 状态码，网络失败时为 0 */
+  status: number
+  recordCount: number
+  pageCount: number
+  pageSize: number
+  /** 本页解析出的条数 */
+  count: number
+  /** 本页片名包含关键词的条数 */
+  matched: number
+  /** 前几条命中，最多 10 条 */
+  items: SiteSearchTestItem[]
+  verdict: 'supported' | 'ignored' | 'empty' | 'failed'
+  message: string
 }
 
 interface SiteCategory {
@@ -236,6 +279,8 @@ interface SitesApi {
   add: (input: SiteInput) => Promise<AddSiteResult>
   update: (id: string, input: SiteInput) => Promise<UpdateSiteResult>
   remove: (id: string) => Promise<RemoveSiteResult>
+  /** 在线检索自检：真实发一次 wd 请求，只解析不写缓存库，用来确认站点支不支持按片名检索 */
+  testSearch: (input: { siteId: string; keyword: string }) => Promise<SiteSearchTestResult>
   /** 已入库就直接读库；库里没有时抓取 ac=list 并全量入库 */
   categories: (id: string) => Promise<SiteCategoriesResult>
   /** 重新抓取并与库内对比，只返回差异，不写库 */
@@ -480,12 +525,26 @@ interface CacheApi {
   onProgress: (callback: (progress: CacheProgress) => void) => () => void
 }
 
-type CollectMode = 'incremental' | 'full'
+/** 采集模式：增量 / 全量按列表翻页，检索按片名（wd）在线检索 */
+type CollectMode = 'incremental' | 'full' | 'search'
+/** 定时计划只支持按列表翻页的两种 */
+type ScheduleMode = 'incremental' | 'full'
 type FetchRange = 'all' | '24h' | '48h'
 type ScheduleTiming = 'interval' | 'daily'
 type CollectStatus = 'idle' | 'queued' | 'running' | 'paused' | 'replacing' | 'done' | 'error'
 type CollectOrigin = 'manual' | 'schedule'
 type LogLevel = 'info' | 'warn' | 'error'
+type SearchWordStatus = 'pending' | 'running' | 'done' | 'error'
+
+/** 检索进度里绑定的一个关键词及其采集状态 */
+interface CollectSearchWord {
+  word: string
+  status: SearchWordStatus
+  /** 已经抓到的条数（达到上限时停在上限） */
+  fetched: number
+  error: string
+  updatedAt: string
+}
 
 interface VideoCollectProgress {
   /** `${siteId}:${mode}:${fetchRange}` */
@@ -507,6 +566,8 @@ interface VideoCollectProgress {
   startedAt: string
   finishedAt: string
   updatedAt: string
+  /** 只有 mode = search 才有：这条进度绑定的关键词与各自的采集状态 */
+  words?: CollectSearchWord[]
 }
 
 interface VideoCollectStartInput {
@@ -520,6 +581,8 @@ interface VideoCollectStartInput {
   cacheDetail?: boolean
   /** 探测到的真实每页条数；省略时主进程先探测，失败按默认 100 */
   pageSize?: number
+  /** 检索模式要采集的关键词：同一站点一条进度，多次提交累积成去重列表 */
+  words?: string[]
 }
 
 interface VideoCollectStartResult {
@@ -532,7 +595,7 @@ interface VideoCollectStartResult {
 
 interface VideoSchedule {
   siteId: string
-  mode: CollectMode
+  mode: ScheduleMode
   fetchRange: FetchRange
   timing: ScheduleTiming
   intervalMinutes: number
@@ -555,7 +618,7 @@ interface VideoScheduleInput {
   timing: ScheduleTiming
   intervalMinutes: number
   dailyTime: string
-  mode: CollectMode
+  mode: ScheduleMode
   fetchRange: FetchRange
   cacheDetail?: boolean
   /** 探测结果由主进程写入，渲染层不传 */
@@ -718,6 +781,35 @@ interface VideoCountResult {
   ok: boolean
   total: number
   error?: string
+}
+
+/** 在线检索里单个站点的情况 */
+interface VideoOnlineSearchSite {
+  siteId: string
+  ok: boolean
+  /** 该站点本次返回的条数（≤ 20） */
+  count: number
+  /** 站点报告的总命中数，0 = 未知；大于 count 说明后台还会继续采 */
+  recordCount: number
+  /** NETWORK / HTTP_xxx / PARSE / CLOSED / AUTH / DB */
+  error?: string
+}
+
+/** 展示端搜索页「在线」模式的一次检索结果 */
+interface VideoOnlineSearchResult {
+  ok: boolean
+  /** CACHE_UNAVAILABLE / INVALID_INPUT */
+  error?: string
+  keyword: string
+  /** 参与检索的站点数 */
+  siteCount: number
+  items: VideoListItem[]
+  /** 合并后的命中总数（items 可能被截断） */
+  total: number
+  truncated: boolean
+  sites: VideoOnlineSearchSite[]
+  /** 成功入队的检索采集任务数 */
+  queued: number
 }
 
 interface VideoUpdateInput {
@@ -945,6 +1037,10 @@ interface VideosApi {
   /** 删除一个站点的全部缓存数据（来源 / 视频 / 详情 / 进度 / 日志） */
   purgeSite: (input: { siteId: string }) => Promise<VideoSitePurgeResult>
   progress: (siteId?: string) => Promise<VideoCollectProgress[]>
+  /** 一键清空采集进度（含检索关键词）；有任务在跑 / 排队时返回 BUSY */
+  clearProgress: () => Promise<{ ok: boolean; removed?: number; error?: string }>
+  /** 展示端搜索页「在线」模式：只查开启在线检索的站点，每站 1 页 20 条，合并排序后返回 */
+  searchOnline: (input: { keyword: string }) => Promise<VideoOnlineSearchResult>
   collect: (input: VideoCollectStartInput) => Promise<VideoCollectStartResult>
   cancelCollect: (input: {
     siteId: string

@@ -14,6 +14,7 @@ import { formatBytes, formatShortDateTime, formatUpcoming } from '../utils/forma
 import {
   COLLECT_STATUS_COLOR,
   COLLECT_STATUS_TEXT,
+  collectModeText,
   compareCollectProgress,
   formatScheduleTiming,
   siteLabel
@@ -55,6 +56,13 @@ function clockTime(iso: string): string {
 /** 采集进度百分比：已完成一律 100%，其余按页数推算 */
 function progressPercent(item: VideoCollectProgress): number {
   if (item.status === 'done') return 100
+  // 检索进度按「已处理的关键词 / 全部关键词」算
+  if (item.mode === 'search' && item.words && item.words.length > 0) {
+    const processed = item.words.filter(
+      (word) => word.status === 'done' || word.status === 'error'
+    ).length
+    return Math.min(100, Math.round((processed / item.words.length) * 100))
+  }
   if (item.pageCount <= 0) return 0
   return Math.min(100, Math.round((item.page / item.pageCount) * 100))
 }
@@ -329,10 +337,14 @@ function OverviewPanel({
                             {COLLECT_STATUS_TEXT[item.status]}
                           </Tag>
                           <span className="overview-row-meta">
-                            {item.mode === 'full' ? '全量' : '增量'} ·{' '}
-                            {item.pageCount > 0
-                              ? `第 ${item.page} / ${item.pageCount} 页 · ${percent}%`
-                              : '等待开始'}
+                            {collectModeText(item.mode)} ·{' '}
+                            {item.mode === 'search'
+                              ? item.words && item.words.length > 0
+                                ? `${item.words.filter((word) => word.status === 'done').length} / ${item.words.length} 个关键词`
+                                : '等待关键词'
+                              : item.pageCount > 0
+                                ? `第 ${item.page} / ${item.pageCount} 页 · ${percent}%`
+                                : '等待开始'}
                           </span>
                           <span className="overview-row-meta overview-row-end">
                             {formatShortDateTime(item.updatedAt)}
@@ -380,8 +392,7 @@ function OverviewPanel({
                           {siteLabel(siteMap.get(schedule.siteId), schedule.siteId)}
                         </span>
                         <span className="overview-row-meta">
-                          {formatScheduleTiming(schedule)} ·{' '}
-                          {schedule.mode === 'full' ? '全量' : '增量'}
+                          {formatScheduleTiming(schedule)} · {collectModeText(schedule.mode)}
                           {schedule.cacheDetail ? ' · 含详情' : ''}
                         </span>
                         <span

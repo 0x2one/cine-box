@@ -11,6 +11,21 @@ export const COLLECT_STATUS_TEXT: Record<CollectStatus, string> = {
   error: '出错'
 }
 
+/** 采集模式文案：全量 / 增量 / 检索（进度、采集、概览、日志共用一份） */
+export function collectModeText(mode: string): string {
+  if (mode === 'full') return '全量'
+  if (mode === 'search') return '检索'
+  return '增量'
+}
+
+/** 检索关键词状态文案：进度卡片上的词条用 */
+export const SEARCH_WORD_TEXT: Record<SearchWordStatus, string> = {
+  pending: '待检索',
+  running: '检索中',
+  done: '已采集',
+  error: '失败'
+}
+
 /** 发起采集失败时的错误文案：采集、进度两处共用 */
 export const COLLECT_ERRORS: Record<string, string> = {
   ALREADY_QUEUED: '同一模式与采集方式已在队列中，请稍后查看进度',

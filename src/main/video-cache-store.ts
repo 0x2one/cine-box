@@ -11,8 +11,10 @@ import type {
   PicSample,
   PicSiteCoverage,
   CollectMode,
+  CollectSearchWord,
   CollectStatus,
   FetchRange,
+  SearchWordStatus,
   VideoCapacity,
   VideoCapacitySite,
   VideoCollectProgress,
@@ -34,6 +36,13 @@ export interface PageWriteResult {
   failed: number
   /** 本页写入（新增或更新）的来源 id，供采集时预热详情缓存 */
   sourceIds: number[]
+  /** 本页涉及的全部视频 id（含内容没有变化的行）：在线检索要按它回读合并后的结果 */
+  videoIds: number[]
+}
+
+/** 检索关键词在库里的结构：比对外展示的多一个归一化去重键 */
+export interface SearchWordRow extends CollectSearchWord {
+  wordKey: string
 }
 
 export interface ProgressPatch {
@@ -131,6 +140,8 @@ export interface VideoCacheStore {
     siteId: string,
     runToken: string,
     runStartTs: number,
+    /** 本轮开始的 ISO 时间：开始之后被别处更新过的来源不算旧（在线检索并发写入保护） */
+    runStartedAt: string,
     limit: number
   ) => StaleSource[]
   deleteSources: (ids: number[]) => number
@@ -166,6 +177,23 @@ export interface VideoCacheStore {
   }) => VideoCollectProgress
   updateProgress: (id: string, patch: ProgressPatch) => VideoCollectProgress | null
   resetInterrupted: () => void
+  /* ── 检索（search 模式）的关键词队列：同一站点一条进度、多个 wd ── */
+  /** 追加关键词：已存在的（去重键相同）重置为 pending 并清空计数，即「重新初始化状态」 */
+  addSearchWords: (siteId: string, words: string[]) => { added: number; total: number }
+  listSearchWords: (siteId: string) => SearchWordRow[]
+  listPendingSearchWords: (siteId: string) => SearchWordRow[]
+  markSearchWord: (
+    siteId: string,
+    wordKey: string,
+    status: SearchWordStatus,
+    fetched: number,
+    error?: string
+  ) => void
+  /** 全部关键词退回待检索（进度卡片「重新采集」用） */
+  resetSearchWords: (siteId: string) => void
+  clearSearchWords: (siteId?: string) => number
+  /** 清空全部采集进度与检索关键词（一键清空进度；不动视频数据） */
+  clearProgress: () => number
   getVideoDetail: (videoId: number) => VideoDetail | null
   getDetailSource: (sourceId: number) => DetailSourceRow | null
   setDetailIndex: (sourceId: number, patch: DetailIndexPatch) => void
@@ -270,7 +298,7 @@ CREATE TABLE IF NOT EXISTS cache_sites (
 CREATE TABLE IF NOT EXISTS collect_progress (
   id TEXT PRIMARY KEY,
   site_id TEXT NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('incremental', 'full')),
+  mode TEXT NOT NULL CHECK (mode IN ('incremental', 'full', 'search')),
   fetch_range TEXT NOT NULL DEFAULT 'all' CHECK (fetch_range IN ('all', '24h', '48h')),
   status TEXT NOT NULL DEFAULT 'idle'
     CHECK (status IN ('idle', 'queued', 'running', 'paused', 'replacing', 'done', 'error')),
@@ -291,6 +319,20 @@ CREATE TABLE IF NOT EXISTS collect_progress (
 );
 CREATE INDEX IF NOT EXISTS idx_collect_progress_site
   ON collect_progress (site_id, updated_at DESC);
+
+-- 检索模式的关键词队列：同一个站点只有一条检索进度（site:search:all），
+-- 多个 wd 累积在这张表里，word_key 是归一化后的去重键，已存在的词重置为待检索
+CREATE TABLE IF NOT EXISTS collect_search_words (
+  site_id TEXT NOT NULL,
+  word TEXT NOT NULL,
+  word_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'running', 'done', 'error')),
+  fetched INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (site_id, word_key)
+);
 
 CREATE TABLE IF NOT EXISTS collect_logs (
   id INTEGER PRIMARY KEY,
@@ -344,7 +386,7 @@ function rowToProgress(row: Record<string, unknown> | undefined): VideoCollectPr
   return {
     id: text(row.id),
     siteId: text(row.site_id),
-    mode: row.mode === 'full' ? 'full' : 'incremental',
+    mode: row.mode === 'full' ? 'full' : row.mode === 'search' ? 'search' : 'incremental',
     fetchRange: row.fetch_range === '24h' || row.fetch_range === '48h' ? row.fetch_range : 'all',
     status: text(row.status, 'idle') as CollectStatus,
     page: num(row.page),
@@ -485,9 +527,61 @@ export function createVideoCacheStore(
     return db
   }
 
+  /**
+   * `collect_progress.mode` 的 CHECK 是建表时写死的，后来新增的 `search` 模式
+   * 在 SQLite 里没法用 ALTER 改，只能重建一次表（行数很少，几毫秒）。
+   * 迁移幂等：建表语句里已经包含 search 就跳过。
+   */
+  function migrateProgressMode(connection: DatabaseSync): void {
+    const row = connection
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'collect_progress'")
+      .get() as Record<string, unknown> | undefined
+    const sql = text(row?.sql)
+    if (!sql || sql.includes("'search'")) return
+    inTransaction(connection, (tx) => {
+      tx.exec('DROP TABLE IF EXISTS collect_progress_next')
+      tx.exec(`
+CREATE TABLE collect_progress_next (
+  id TEXT PRIMARY KEY,
+  site_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('incremental', 'full', 'search')),
+  fetch_range TEXT NOT NULL DEFAULT 'all' CHECK (fetch_range IN ('all', '24h', '48h')),
+  status TEXT NOT NULL DEFAULT 'idle'
+    CHECK (status IN ('idle', 'queued', 'running', 'paused', 'replacing', 'done', 'error')),
+  page INTEGER NOT NULL DEFAULT 0,
+  page_count INTEGER NOT NULL DEFAULT 0,
+  record_count INTEGER NOT NULL DEFAULT 0,
+  page_size INTEGER NOT NULL DEFAULT 0,
+  fetched INTEGER NOT NULL DEFAULT 0,
+  inserted INTEGER NOT NULL DEFAULT 0,
+  updated INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL DEFAULT '',
+  finished_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  UNIQUE (site_id, mode, fetch_range)
+)`)
+      tx.exec(`
+INSERT INTO collect_progress_next
+  (id, site_id, mode, fetch_range, status, page, page_count, record_count, page_size,
+   fetched, inserted, updated, failed, deleted, error, started_at, finished_at, updated_at)
+SELECT id, site_id, mode, fetch_range, status, page, page_count, record_count, page_size,
+       fetched, inserted, updated, failed, deleted, error, started_at, finished_at, updated_at
+FROM collect_progress`)
+      tx.exec('DROP TABLE collect_progress')
+      tx.exec('ALTER TABLE collect_progress_next RENAME TO collect_progress')
+      tx.exec(
+        'CREATE INDEX IF NOT EXISTS idx_collect_progress_site ON collect_progress (site_id, updated_at DESC)'
+      )
+    })
+  }
+
   function initSchema(connection: DatabaseSync): void {
     connection.exec(PRAGMAS)
     connection.exec(CREATE_SCHEMA)
+    migrateProgressMode(connection)
     // 后加列：老库补上（新库建表时已经有了），保持迁移幂等
     const columns = new Set(
       (
@@ -662,7 +756,8 @@ export function createVideoCacheStore(
       inserted: 0,
       updated: 0,
       failed: 0,
-      sourceIds: []
+      sourceIds: [],
+      videoIds: []
     }
     const affected = new Set<number>()
 
@@ -717,6 +812,8 @@ export function createVideoCacheStore(
           const inserted = insertVideo.run(name, nameKey, makeSearchText(name), now, now)
           videoId = num(inserted.lastInsertRowid)
         }
+        // 在线检索要按本页涉及的视频回读合并结果：内容没变化也算
+        result.videoIds.push(videoId)
 
         const intro = makeExcerpt(item.intro ?? '')
         const sourceTime = truncate(String(item.sourceTime ?? '').trim(), 40)
@@ -832,23 +929,31 @@ export function createVideoCacheStore(
       for (const id of affected) recomputeVideo(tx, id, now)
     })
 
+    result.videoIds = [...new Set(result.videoIds)]
     return result
   }
 
+  /**
+   * 全量替换时要删掉的旧来源。
+   * `runStartedAt` 多一道保护：在线检索可能在本次全量跑到一半时写入来源，这些行的
+   * `source_ts` 往往是站点给的旧时间，只看它会被收尾替换当成「本次未返回」误删。
+   * 本任务开始之后才被别处更新过的行一律不算旧（下一轮全量再收拾）。
+   */
   function listStaleSources(
     siteId: string,
     runToken: string,
     runStartTs: number,
+    runStartedAt: string,
     limit: number
   ): StaleSource[] {
     return database()
       .prepare(
         `SELECT id, source_video_id, video_id
          FROM video_sources
-         WHERE site_id = ? AND last_full_run <> ? AND source_ts <= ?
+         WHERE site_id = ? AND last_full_run <> ? AND source_ts <= ? AND updated_at <= ?
          LIMIT ?`
       )
-      .all(siteId, runToken, runStartTs, limit)
+      .all(siteId, runToken, runStartTs, runStartedAt, limit)
       .map((row) => {
         const raw = row as Record<string, unknown>
         return {
@@ -947,6 +1052,7 @@ export function createVideoCacheStore(
         tx.prepare('DELETE FROM video_sources WHERE site_id = ?').run(siteId).changes
       )
       tx.prepare('DELETE FROM collect_progress WHERE site_id = ?').run(siteId)
+      tx.prepare('DELETE FROM collect_search_words WHERE site_id = ?').run(siteId)
       tx.prepare('DELETE FROM cache_sites WHERE site_id = ?').run(siteId)
       // 还有别的站点来源的才需要重新挑主来源（片名、封面、简介都跟着变）
       const survivors = tx
@@ -1555,10 +1661,14 @@ export function createVideoCacheStore(
   }
 
   function getProgress(id: string): VideoCollectProgress | null {
-    return rowToProgress(
+    const progress = rowToProgress(
       database().prepare('SELECT * FROM collect_progress WHERE id = ?').get(id) as
         Record<string, unknown> | undefined
     )
+    if (!progress) return null
+    // 检索进度要带上关键词列表：界面按每个词的状态展示，事件推送也靠它
+    if (progress.mode === 'search') progress.words = listSearchWords(progress.siteId)
+    return progress
   }
 
   function listProgress(siteId?: string): VideoCollectProgress[] {
@@ -1571,6 +1681,142 @@ export function createVideoCacheStore(
     return rows
       .map((row) => rowToProgress(row as Record<string, unknown>))
       .filter((row): row is VideoCollectProgress => row !== null)
+      .map((row) => (row.mode === 'search' ? { ...row, words: listSearchWords(row.siteId) } : row))
+  }
+
+  /* ── 检索关键词队列 ── */
+
+  /** 归一化去重键：NFKC + 小写 + 去空白；纯标点等归一化后为空的退回原串 */
+  function wordKeyOf(word: string): string {
+    return makeNameKey(word) || word.trim().toLowerCase()
+  }
+
+  function addSearchWords(siteId: string, words: string[]): { added: number; total: number } {
+    const connection = database()
+    const now = new Date().toISOString()
+    const unique = new Map<string, string>()
+    for (const item of words) {
+      const word = truncate(String(item ?? '').trim(), 60)
+      if (!word) continue
+      const key = wordKeyOf(word)
+      if (!key || unique.has(key)) continue
+      unique.set(key, word)
+    }
+    if (unique.size === 0) return { added: 0, total: countSearchWords(siteId) }
+    let added = 0
+    inTransaction(connection, (tx) => {
+      const exists = tx.prepare(
+        'SELECT 1 AS n FROM collect_search_words WHERE site_id = ? AND word_key = ?'
+      )
+      const upsert = tx.prepare(
+        `INSERT INTO collect_search_words (site_id, word, word_key, status, fetched, error, updated_at)
+         VALUES (?, ?, ?, 'pending', 0, '', ?)
+         ON CONFLICT (site_id, word_key) DO UPDATE SET
+           word = excluded.word,
+           status = 'pending',
+           fetched = 0,
+           error = '',
+           updated_at = excluded.updated_at`
+      )
+      for (const [key, word] of unique) {
+        if (!exists.get(siteId, key)) added += 1
+        upsert.run(siteId, word, key, now)
+      }
+    })
+    return { added, total: countSearchWords(siteId) }
+  }
+
+  function countSearchWords(siteId: string): number {
+    const row = database()
+      .prepare('SELECT COUNT(*) AS n FROM collect_search_words WHERE site_id = ?')
+      .get(siteId) as Record<string, unknown> | undefined
+    return num(row?.n)
+  }
+
+  function rowToSearchWord(row: Record<string, unknown>): SearchWordRow {
+    return {
+      word: text(row.word),
+      wordKey: text(row.word_key),
+      status:
+        row.status === 'running' || row.status === 'done' || row.status === 'error'
+          ? row.status
+          : 'pending',
+      fetched: num(row.fetched),
+      error: text(row.error),
+      updatedAt: text(row.updated_at)
+    }
+  }
+
+  function listSearchWords(siteId: string): SearchWordRow[] {
+    return (
+      database()
+        .prepare(
+          'SELECT * FROM collect_search_words WHERE site_id = ? ORDER BY updated_at ASC, word ASC'
+        )
+        .all(siteId) as Record<string, unknown>[]
+    ).map(rowToSearchWord)
+  }
+
+  function listPendingSearchWords(siteId: string): SearchWordRow[] {
+    return (
+      database()
+        .prepare(
+          `SELECT * FROM collect_search_words
+           WHERE site_id = ? AND status IN ('pending', 'running')
+           ORDER BY updated_at ASC, word ASC`
+        )
+        .all(siteId) as Record<string, unknown>[]
+    ).map(rowToSearchWord)
+  }
+
+  function markSearchWord(
+    siteId: string,
+    wordKey: string,
+    status: SearchWordStatus,
+    fetched: number,
+    error = ''
+  ): void {
+    database()
+      .prepare(
+        `UPDATE collect_search_words SET status = ?, fetched = ?, error = ?, updated_at = ?
+         WHERE site_id = ? AND word_key = ?`
+      )
+      .run(
+        status,
+        Math.max(0, Math.floor(fetched)),
+        truncate(error, 200),
+        new Date().toISOString(),
+        siteId,
+        wordKey
+      )
+  }
+
+  function resetSearchWords(siteId: string): void {
+    database()
+      .prepare(
+        `UPDATE collect_search_words SET status = 'pending', fetched = 0, error = '', updated_at = ?
+         WHERE site_id = ?`
+      )
+      .run(new Date().toISOString(), siteId)
+  }
+
+  function clearSearchWords(siteId?: string): number {
+    const connection = database()
+    const result = siteId
+      ? connection.prepare('DELETE FROM collect_search_words WHERE site_id = ?').run(siteId)
+      : connection.prepare('DELETE FROM collect_search_words').run()
+    return Number(result.changes)
+  }
+
+  /** 一键清空进度：进度行与检索关键词一起清掉，视频 / 详情 / 日志都不动 */
+  function clearProgress(): number {
+    const connection = database()
+    let removed = 0
+    inTransaction(connection, (tx) => {
+      removed += Number(tx.prepare('DELETE FROM collect_progress').run().changes)
+      removed += Number(tx.prepare('DELETE FROM collect_search_words').run().changes)
+    })
+    return removed
   }
 
   function prepareTask(input: {
@@ -1586,6 +1832,7 @@ export function createVideoCacheStore(
     const now = new Date().toISOString()
     const pageSize = Math.max(0, Math.floor(Number(input.pageSize) || 0))
     const existing = getProgress(id)
+    const isSearch = input.mode === 'search'
     if (!existing) {
       connection
         .prepare(
@@ -1595,7 +1842,18 @@ export function createVideoCacheStore(
            VALUES (?, ?, ?, ?, 'queued', 0, 0, 0, ?, 0, 0, 0, 0, 0, '', ?, '', ?)`
         )
         .run(id, input.siteId, input.mode, input.fetchRange, pageSize, now, now)
+    } else if (isSearch && !input.restart) {
+      // 检索是「一条进度 + 多个关键词」：再次检索只是往队列里追加，累计计数不能清零
+      connection
+        .prepare(
+          `UPDATE collect_progress SET status = 'queued', error = '', finished_at = '',
+             page_size = CASE WHEN ? > 0 THEN ? ELSE page_size END, updated_at = ?
+           WHERE id = ?`
+        )
+        .run(pageSize, pageSize, now, id)
     } else if (input.restart || existing.status === 'done' || existing.status === 'idle') {
+      // 重新采集：检索模式连关键词状态一起重置，全部重新检索
+      if (isSearch) resetSearchWords(input.siteId)
       connection
         .prepare(
           `UPDATE collect_progress SET
@@ -1677,6 +1935,12 @@ export function createVideoCacheStore(
            error = CASE WHEN error = '' THEN 'INTERRUPTED' ELSE error END,
            updated_at = ?
          WHERE status = 'running'`
+      )
+      .run(now)
+    // 上次退出时正在检索的词退回待检索，下次接着跑
+    connection
+      .prepare(
+        "UPDATE collect_search_words SET status = 'pending', updated_at = ? WHERE status = 'running'"
       )
       .run(now)
   }
@@ -1924,6 +2188,13 @@ export function createVideoCacheStore(
     prepareTask,
     updateProgress,
     resetInterrupted,
+    addSearchWords,
+    listSearchWords,
+    listPendingSearchWords,
+    markSearchWord,
+    resetSearchWords,
+    clearSearchWords,
+    clearProgress,
     getVideoDetail,
     getDetailSource,
     setDetailIndex,

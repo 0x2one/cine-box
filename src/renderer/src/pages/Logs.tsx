@@ -7,6 +7,7 @@ import {
   VerticalAlignTopOutlined
 } from '@ant-design/icons'
 import { formatDateTime, formatLogTime } from '../utils/format'
+import { collectModeText } from '../utils/collect'
 
 const LEVEL_TEXT: Record<LogLevel, string> = {
   info: '信息',
@@ -273,8 +274,8 @@ function LogsPanel({
                 <span className="log-mode">
                   {log.mode && (
                     <>
-                      {log.mode === 'full' ? '全量' : '增量'}
-                      {log.fetchRange
+                      {collectModeText(log.mode)}
+                      {log.fetchRange && log.mode !== 'search'
                         ? `·${log.fetchRange === 'all' ? '全部' : log.fetchRange}`
                         : ''}
                     </>

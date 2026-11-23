@@ -42,7 +42,11 @@
 }
 
 .search-form.is-header {
-  width: min(100%, 560px);
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 560px;
+  min-width: 0;
+  margin-inline: auto;
   box-shadow: none;
 }
 
@@ -123,21 +127,24 @@
 }
 
 .search-head-inner {
-  position: relative;
   display: flex;
-  justify-content: center;
+  gap: 12px;
   align-items: center;
   max-width: 980px;
   margin: 0 auto;
   padding: 14px 32px;
 }
 
-/* 结果总数：对齐内容列右缘，和搜索条同一行，不参与居中 */
+/* 结果总数 + 搜索模式开关：跟在搜索条右侧，不再绝对定位（否则窄窗口会压住搜索框） */
+.search-head-side {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 16px;
+  align-items: center;
+}
+
 .search-count {
-  position: absolute;
-  top: 50%;
-  right: 32px;
-  max-width: 190px;
+  max-width: 200px;
   min-height: 19px;
   overflow: hidden;
   color: var(--text-faint);
@@ -145,13 +152,38 @@
   font-variant-numeric: tabular-nums;
   line-height: 19px;
   text-overflow: ellipsis;
-  transform: translateY(-50%);
   white-space: nowrap;
 }
 
 .search-count b {
   color: var(--text-muted);
   font-weight: 500;
+}
+
+/* ── 搜索模式开关：本地 / 在线 ── */
+
+.search-mode {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.search-mode-label {
+  color: var(--text-faint);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.search-mode-switch {
+  display: inline-flex;
+}
+
+/* 初始态没有吸顶头部，开关落在落地页右上角 */
+.search-intro-mode {
+  position: absolute;
+  top: 10px;
+  right: 0;
+  z-index: 2;
 }
 
 /* ── 页面主体 ── */
@@ -174,6 +206,7 @@
 /* ── 初始态：居中搜索 + 历史 + 分类 + 封面带 ── */
 
 .search-intro {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -222,8 +255,9 @@
   line-height: 1.25;
 }
 
+/* 说明只占一行：文案控制得足够短，宽度留一点余量，别在初始态里折成两行 */
 .search-intro-desc {
-  max-width: 460px;
+  max-width: 520px;
   margin: 0 0 20px;
   color: var(--text-muted);
   font-size: 13px;
@@ -713,12 +747,22 @@
 
 .search-footer {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   justify-content: center;
   min-height: 76px;
   color: var(--text-faint);
   font-size: 12.5px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 在线检索里失败的站点：虚线提示，悬停看具体原因 */
+.search-online-failed {
+  color: var(--text-muted);
+  border-bottom: 1px dashed color-mix(in srgb, var(--text-muted) 55%, transparent);
+  cursor: help;
 }
 
 .search-loading {

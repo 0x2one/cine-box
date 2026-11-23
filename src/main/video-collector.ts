@@ -4,15 +4,18 @@ import type { CollectLogStore } from './collect-log-store'
 import type { Site } from './site-store'
 import { parseCollectPage, type CollectedPage } from './video-collect-parser'
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, clampPageSize } from './video-collect-probe'
-import type { VideoCacheStore, DetailSourceRow } from './video-cache-store'
+import { makeNameKey } from './video-text'
+import type { DetailSourceRow, SearchWordRow, VideoCacheStore } from './video-cache-store'
 import type { VideoDetailCache } from './video-detail-cache'
-import type {
-  CollectMode,
-  CollectOrigin,
-  FetchRange,
-  VideoCollectProgress,
-  VideoCollectStartInput,
-  VideoCollectStartResult
+import {
+  ONLINE_SEARCH_PAGE_SIZE,
+  SEARCH_MAX_ITEMS,
+  type CollectMode,
+  type CollectOrigin,
+  type FetchRange,
+  type VideoCollectProgress,
+  type VideoCollectStartInput,
+  type VideoCollectStartResult
 } from './video-types'
 
 export interface VideoCollector {
@@ -59,7 +62,12 @@ interface ActiveEntry {
   done: Promise<void>
 }
 
-const DEFAULT_MAX_PAGES: Record<CollectMode, number> = { full: 500, incremental: 100 }
+const DEFAULT_MAX_PAGES: Record<CollectMode, number> = {
+  full: 500,
+  incremental: 100,
+  // 检索按「每个关键词最多 SEARCH_MAX_ITEMS 条」算页数上限，这里只是兜底
+  search: Math.ceil(SEARCH_MAX_ITEMS / ONLINE_SEARCH_PAGE_SIZE)
+}
 /** 单轮页数硬上限：站点总页数异常（例如 pagecount 一直涨）时兜底，避免无限翻页 */
 const MAX_PAGES_PER_RUN = 10000
 const REPLACE_BATCH = 1000
@@ -69,11 +77,29 @@ function nowIso(): string {
 }
 
 function isMode(value: unknown): value is CollectMode {
-  return value === 'full' || value === 'incremental'
+  return value === 'full' || value === 'incremental' || value === 'search'
 }
 
 function isRange(value: unknown): value is FetchRange {
   return value === 'all' || value === '24h' || value === '48h'
+}
+
+/** 检索关键词归一化：去空白、截断、按合并键去重（与库里的 word_key 同一套规则） */
+function normalizeWords(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const words: string[] = []
+  for (const item of value) {
+    const word = String(item ?? '')
+      .trim()
+      .slice(0, 60)
+    if (!word) continue
+    const key = makeNameKey(word) || word.toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    words.push(word)
+  }
+  return words
 }
 
 function progressId(siteId: string, mode: CollectMode, range: FetchRange): string {
@@ -123,6 +149,11 @@ export function createVideoCollector(options: {
   const { store, details, logs, listSites, emitProgress, waitForSite, getConcurrency } = options
   const queue: QueueItem[] = []
   const active = new Map<string, ActiveEntry>()
+  /**
+   * 每个站点的检索「代」：每次追加关键词就 +1。
+   * 运行中的检索任务在 pending 读空时对比它，就绪发现新词后继续消费，不会漏词。
+   */
+  const searchTokens = new Map<string, number>()
   let disposed = false
   let suspended = false
 
@@ -167,8 +198,12 @@ export function createVideoCollector(options: {
     if (!siteId || !isMode(input?.mode) || !isRange(input?.fetchRange)) {
       return { ok: false, error: 'INVALID_INPUT' }
     }
-    // 全量模式只对全量范围有意义
+    // 全量模式只对全量范围有意义；检索也不按时间范围取数
     if (input.mode === 'full' && input.fetchRange !== 'all') {
+      return { ok: false, error: 'INVALID_INPUT' }
+    }
+    const words = input.mode === 'search' ? normalizeWords(input.words) : []
+    if (input.mode === 'search' && (input.fetchRange !== 'all' || words.length === 0)) {
       return { ok: false, error: 'INVALID_INPUT' }
     }
     const site = listSites().find((item) => item.id === siteId)
@@ -176,12 +211,65 @@ export function createVideoCollector(options: {
     // 这个站点的旧缓存正在后台清理（改地址 / 删站点）：等它删完再建任务，
     // 否则 prepareTask 刚写进去的进度行会被紧接着的删除一起带走
     if (waitForSite) await waitForSite(siteId).catch(() => {})
+    // 主进程会先把探测到的真实页大小带进来；没带就按默认 100
+    const pageSize = clampPageSize(input.pageSize) || DEFAULT_PAGE_SIZE
+
+    // 检索：同一个站点只保留一条进度，关键词追加进队列（已存在的重置为待检索）。
+    // 已经在跑 / 排队的任务不会因为这次提交而重启，只是把新词接在后面。
+    if (input.mode === 'search') {
+      store.addSearchWords(siteId, words)
+      const key = progressId(siteId, 'search', 'all')
+      // token 变了运行中的任务才知道「又来了新词」，否则它读空 pending 就退出了
+      searchTokens.set(siteId, (searchTokens.get(siteId) ?? 0) + 1)
+      if (
+        active.has(key) ||
+        queue.some((item) => item.mode === 'search' && item.siteId === siteId)
+      ) {
+        emit(store.getProgress(key))
+        log(
+          'info',
+          { siteId, mode: 'search', fetchRange: 'all' },
+          '检索关键词已追加',
+          `${words.length} 个：${words.join(' / ')}`
+        )
+        void pump()
+        return { ok: true, progress: store.getProgress(key) ?? undefined, pageSize }
+      }
+      const progress = store.prepareTask({
+        siteId,
+        mode: 'search',
+        fetchRange: 'all',
+        restart: input.restart,
+        pageSize
+      })
+      const item: QueueItem = {
+        siteId,
+        mode: 'search',
+        fetchRange: 'all',
+        restart: Boolean(input.restart),
+        maxPages: input.maxPages,
+        allowEmpty: false,
+        origin,
+        resumeReplace: false,
+        cacheDetail: Boolean(input.cacheDetail),
+        pageSize
+      }
+      queue.push(item)
+      emit(progress)
+      log(
+        'info',
+        item,
+        origin === 'schedule' ? '定时检索已入队' : '检索任务已入队',
+        `${words.length} 个关键词：${words.join(' / ')}`
+      )
+      void pump()
+      return { ok: true, progress, pageSize }
+    }
+
     if (isQueuedOrActive(siteId, input.mode, input.fetchRange)) {
       return { ok: false, error: 'ALREADY_QUEUED' }
     }
     const existing = store.getProgress(progressId(siteId, input.mode, input.fetchRange))
-    // 主进程会先把探测到的真实页大小带进来；没带就按默认 100
-    const pageSize = clampPageSize(input.pageSize) || DEFAULT_PAGE_SIZE
     const progress = store.prepareTask({
       siteId,
       mode: input.mode,
@@ -222,16 +310,45 @@ export function createVideoCollector(options: {
     return url.toString()
   }
 
+  /** 检索模式的请求：`ac=detail&wd=<词>`，站点地址里残留的 ids / h 会干扰结果，一并去掉 */
+  function buildSearchUrl(site: Site, word: string, page: number, pageSize: number): string {
+    const url = new URL(site.address)
+    url.searchParams.set('ac', 'detail')
+    url.searchParams.set('wd', word)
+    url.searchParams.set('pg', String(page))
+    url.searchParams.set('pagesize', String(Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE)))
+    url.searchParams.delete('ids')
+    url.searchParams.delete('h')
+    if (site.format === 'xml') url.searchParams.set('at', 'xml')
+    else url.searchParams.delete('at')
+    return url.toString()
+  }
+
   async function fetchPage(
     site: Site,
     item: QueueItem,
     page: number,
     signal: AbortSignal
   ): Promise<{ ok: true; value: CollectedPage } | { ok: false; error: string }> {
-    const response = await fetchCollectText(
-      buildUrl(site, item.fetchRange, page, item.pageSize),
-      signal
-    )
+    return readPage(site, buildUrl(site, item.fetchRange, page, item.pageSize), signal)
+  }
+
+  async function fetchSearchPage(
+    site: Site,
+    word: string,
+    page: number,
+    pageSize: number,
+    signal: AbortSignal
+  ): Promise<{ ok: true; value: CollectedPage } | { ok: false; error: string }> {
+    return readPage(site, buildSearchUrl(site, word, page, pageSize), signal)
+  }
+
+  async function readPage(
+    site: Site,
+    url: string,
+    signal: AbortSignal
+  ): Promise<{ ok: true; value: CollectedPage } | { ok: false; error: string }> {
+    const response = await fetchCollectText(url, signal)
     if (!response.ok) {
       if (response.error === 'ABORT') return { ok: false, error: 'ABORT' }
       return {
@@ -272,6 +389,8 @@ export function createVideoCollector(options: {
     const runStartTs = Number.isNaN(Date.parse(progress.startedAt))
       ? 0
       : Date.parse(progress.startedAt)
+    // 本轮开始时间：全量替换前用它排除「跑到一半时被在线检索写进来的来源」
+    const runStartedAt = runStartTs > 0 ? new Date(runStartTs).toISOString() : nowIso()
     let deleted = progress.deleted
     let updated = store.updateProgress(progress.id, {
       status: 'replacing',
@@ -293,7 +412,13 @@ export function createVideoCollector(options: {
         log('warn', item, '全量替换已暂停', '下次继续清理')
         return paused ?? progress
       }
-      const stale = store.listStaleSources(item.siteId, runToken, runStartTs, REPLACE_BATCH)
+      const stale = store.listStaleSources(
+        item.siteId,
+        runToken,
+        runStartTs,
+        runStartedAt,
+        REPLACE_BATCH
+      )
       if (stale.length === 0) break
       const rows = stale
         .map((entry) => store.getDetailSource(entry.id))
@@ -319,6 +444,222 @@ export function createVideoCollector(options: {
     return done ?? progress
   }
 
+  /**
+   * 检索任务：一条进度（`siteId:search:all`）+ 多个关键词，逐个词翻页写入。
+   * 只追加、不做全量替换；每个词、每个站点最多入库 SEARCH_MAX_ITEMS 条。
+   * 运行中追加关键词会让 token 变化，当前词结束后自动接上，不会漏词。
+   */
+  async function runSearchTask(task: ActiveTask): Promise<void> {
+    const item = task.item
+    const signal = task.controller.signal
+    const site = listSites().find((entry) => entry.id === item.siteId)
+    let progress = store.getProgress(progressId(item.siteId, item.mode, item.fetchRange))
+    if (!progress) return
+    if (!site) {
+      await finishWithError(item, progress.id, 'NOT_FOUND')
+      return
+    }
+    store.ensureSite({ id: site.id, address: site.address, format: site.format })
+
+    progress =
+      store.updateProgress(progress.id, { status: 'running', error: '', finishedAt: '' }) ??
+      progress
+    let words = store.listSearchWords(item.siteId)
+    /** 已处理（成功或失败）的词数：进度的百分比按它算 */
+    const processedCount = (rows: SearchWordRow[]): number =>
+      rows.filter((row) => row.status === 'done' || row.status === 'error').length
+    progress =
+      store.updateProgress(progress.id, {
+        page: processedCount(words),
+        pageCount: words.length
+      }) ?? progress
+    emit(progress)
+    log(
+      'info',
+      item,
+      '开始检索采集',
+      `${item.origin === 'schedule' ? '定时触发' : '手动触发'} · ${words.length} 个关键词` +
+        ` · 每页 ${item.pageSize} 条 · 每个关键词最多 ${SEARCH_MAX_ITEMS} 条`
+    )
+
+    const startedAt = Date.now()
+    let paused = false
+    let failedWords = 0
+    let detailCached = 0
+    let detailFailed = 0
+    let token = searchTokens.get(item.siteId) ?? 0
+
+    while (true) {
+      if (signal.aborted || task.cancelled || disposed || suspended) {
+        paused = true
+        break
+      }
+      let pending: SearchWordRow[]
+      try {
+        pending = store.listPendingSearchWords(item.siteId)
+      } catch {
+        // 缓存库正在重建 / 已关闭：按暂停退出，别让异常跑到 pump 的兜底
+        paused = true
+        break
+      }
+      if (pending.length === 0) {
+        // 读完 pending 立刻看 token：这期间追加进来的关键词不能被漏掉
+        const current = searchTokens.get(item.siteId) ?? 0
+        if (current !== token) {
+          token = current
+          continue
+        }
+        break
+      }
+      token = searchTokens.get(item.siteId) ?? token
+      const word = pending[0]
+      try {
+        store.markSearchWord(item.siteId, word.wordKey, 'running', 0)
+      } catch {
+        paused = true
+        break
+      }
+
+      let fetched = 0
+      let pages = 0
+      let wordError = ''
+      let pageNo = 1
+      while (fetched < SEARCH_MAX_ITEMS) {
+        if (signal.aborted || task.cancelled || disposed || suspended) {
+          paused = true
+          break
+        }
+        let result: Awaited<ReturnType<typeof fetchSearchPage>>
+        try {
+          result = await fetchSearchPage(site, word.word, pageNo, item.pageSize, signal)
+        } catch {
+          result = { ok: false, error: 'NETWORK' }
+        }
+        if (!result.ok) {
+          if (result.error === 'ABORT' || signal.aborted || task.cancelled) {
+            paused = true
+            break
+          }
+          wordError = result.error
+          break
+        }
+        const page = result.value
+        if (page.items.length === 0) break
+        // 一个词最多 200 条：最后一页只写还需要的条数
+        const items = page.items.slice(0, SEARCH_MAX_ITEMS - fetched)
+        let write
+        try {
+          write = store.writePage(item.siteId, items, '', false)
+        } catch {
+          wordError = 'DB'
+          break
+        }
+        fetched += write.fetched
+        pages += 1
+        const pageCount = derivePageCount(page, progress.pageSize || item.pageSize)
+        progress =
+          store.updateProgress(progress.id, {
+            pageSize: page.pageSize || progress.pageSize,
+            fetchedDelta: write.fetched,
+            insertedDelta: write.inserted,
+            updatedDelta: write.updatedDelta,
+            failedDelta: write.failed
+          }) ?? progress
+        emit(progress)
+        if (item.cacheDetail && write.sourceIds.length > 0) {
+          // 整页 ac=detail 已带回简介与播路线，直接落盘，不额外请求
+          try {
+            const itemsById = new Map(page.items.map((entry) => [entry.sourceVideoId, entry]))
+            const sources = write.sourceIds
+              .map((id) => store.getDetailSource(id))
+              .filter((row): row is DetailSourceRow => row !== null)
+            const warmed = await details.warmFromPage(sources, itemsById)
+            detailCached += warmed.cached
+            detailFailed += warmed.failed
+          } catch {
+            // 详情预热失败不影响检索入库
+          }
+        }
+        if (items.length < page.items.length) break
+        if (pageCount > 0 && pageNo >= pageCount) break
+        if (pageNo >= MAX_PAGES_PER_RUN) break
+        pageNo += 1
+        await delay(0)
+      }
+
+      if (paused) {
+        // 中止时当前词退回待检索，下次接着跑
+        try {
+          store.markSearchWord(item.siteId, word.wordKey, 'pending', 0)
+        } catch {
+          // 缓存库已关闭：忽略
+        }
+        break
+      }
+      if (wordError) failedWords += 1
+      try {
+        store.markSearchWord(
+          item.siteId,
+          word.wordKey,
+          wordError ? 'error' : 'done',
+          fetched,
+          wordError
+        )
+        words = store.listSearchWords(item.siteId)
+      } catch {
+        words = []
+      }
+      progress =
+        store.updateProgress(progress.id, {
+          page: processedCount(words),
+          pageCount: words.length
+        }) ?? progress
+      emit(progress)
+      log(
+        wordError ? 'warn' : 'info',
+        item,
+        `关键词「${word.word}」${wordError ? '检索失败' : '检索完成'}`,
+        `${pages} 页 · 抓取 ${fetched} 条` +
+          (fetched >= SEARCH_MAX_ITEMS ? ` · 已达上限 ${SEARCH_MAX_ITEMS} 条` : '') +
+          (wordError ? ` · ${wordError}` : '')
+      )
+      await delay(0)
+    }
+
+    const phaseText = `耗时 ${formatMs(Date.now() - startedAt)}`
+    if (paused) {
+      const pausedProgress =
+        store.updateProgress(progress.id, { status: 'paused', error: '' }) ?? progress
+      emit(pausedProgress)
+      log(
+        'warn',
+        item,
+        '检索已暂停',
+        `已完成 ${pausedProgress.page}/${pausedProgress.pageCount} 个关键词，下次继续 · ${phaseText}`
+      )
+      return
+    }
+    const done =
+      store.updateProgress(progress.id, {
+        status: 'done',
+        error: failedWords > 0 ? 'SEARCH_PARTIAL' : '',
+        finishedAt: nowIso()
+      }) ?? progress
+    emit(done)
+    log(
+      'info',
+      item,
+      '检索完成',
+      `${done.page}/${done.pageCount} 个关键词 · 抓取 ${done.fetched} 条 · 新增 ${done.inserted}` +
+        ` · 更新 ${done.updated}` +
+        (failedWords > 0 ? ` · 失败 ${failedWords}` : '') +
+        (item.cacheDetail
+          ? ` · 详情缓存 ${detailCached} 个${detailFailed > 0 ? `（失败 ${detailFailed}）` : ''}`
+          : '') +
+        ` · ${phaseText}`
+    )
+  }
+
   async function runTask(task: ActiveTask): Promise<void> {
     const item = task.item
     const signal = task.controller.signal
@@ -327,6 +668,11 @@ export function createVideoCollector(options: {
     if (!progress) return
     if (!site) {
       await finishWithError(item, progress.id, 'NOT_FOUND')
+      return
+    }
+    // 检索是另一条链路：按关键词翻页、只追加，不做全量替换
+    if (item.mode === 'search') {
+      await runSearchTask(task)
       return
     }
     // 对账用的极小表：每个采集过的站点一行，启动时只读它
@@ -743,7 +1089,10 @@ export function createVideoCollector(options: {
       if (!matches(item)) continue
       queue.splice(index, 1)
       const id = progressId(item.siteId, item.mode, item.fetchRange)
-      const progress = store.updateProgress(id, { status: 'idle' })
+      // 检索取消后仍然可以「继续采集」（关键词还挂在进度上），所以停在 paused 而不是 idle
+      const progress = store.updateProgress(id, {
+        status: item.mode === 'search' ? 'paused' : 'idle'
+      })
       emit(progress)
       log('warn', item, '已取消排队中的采集')
     }
@@ -780,7 +1129,10 @@ export function createVideoCollector(options: {
     for (const item of queue) {
       const id = progressId(item.siteId, item.mode, item.fetchRange)
       const progress = store.getProgress(id)
-      if (progress && progress.status === 'queued') store.updateProgress(id, { status: 'idle' })
+      if (progress && progress.status === 'queued') {
+        // 检索取消后保留关键词，按暂停处理，进度里可以直接继续
+        store.updateProgress(id, { status: item.mode === 'search' ? 'paused' : 'idle' })
+      }
     }
     queue.length = 0
     const running = [...active.values()].map((entry) => entry.done)
@@ -804,7 +1156,10 @@ export function createVideoCollector(options: {
     for (const item of queue) {
       const id = progressId(item.siteId, item.mode, item.fetchRange)
       const progress = store.getProgress(id)
-      if (progress && progress.status === 'queued') store.updateProgress(id, { status: 'idle' })
+      if (progress && progress.status === 'queued') {
+        // 检索取消后保留关键词，按暂停处理，进度里可以直接继续
+        store.updateProgress(id, { status: item.mode === 'search' ? 'paused' : 'idle' })
+      }
     }
     queue.length = 0
   }

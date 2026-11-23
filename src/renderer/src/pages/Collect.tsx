@@ -4,6 +4,7 @@ import {
   Button,
   Checkbox,
   Form,
+  Input,
   InputNumber,
   Modal,
   Radio,
@@ -17,6 +18,7 @@ import {
 import {
   ClockCircleOutlined,
   CloudDownloadOutlined,
+  GlobalOutlined,
   ReloadOutlined,
   StopOutlined
 } from '@ant-design/icons'
@@ -45,6 +47,16 @@ const RANGE_OPTIONS = [
   { value: '48h', label: '最近 48 小时' }
 ]
 
+/** 检索方式：只有开启了「支持在线检索」的站点才有，按片名（wd）检索入库 */
+const SEARCH_OPTION = { value: 'search', label: '检索（按片名在线检索）' }
+
+/** 站点没开「在线检索」时也把这一项列出来，但不可选：否则会以为这个功能没做 */
+const SEARCH_OPTION_LOCKED = {
+  value: 'search',
+  label: '检索（需先在「站点」里开启在线检索）',
+  disabled: true
+}
+
 const INTERVAL_OPTIONS = [
   { value: 30, label: '30 分钟' },
   { value: 60, label: '1 小时' },
@@ -55,8 +67,10 @@ const INTERVAL_OPTIONS = [
 ]
 
 interface ManualValues {
-  mode: CollectMode
-  fetchRange: FetchRange
+  mode: ScheduleMode
+  /** 采集方式；'search' 表示按片名检索 */
+  fetchRange: FetchRange | 'search'
+  keyword?: string
   allowEmpty: boolean
   cacheDetail: boolean
 }
@@ -66,7 +80,7 @@ interface ScheduleValues {
   timing: ScheduleTiming
   intervalMinutes: number
   dailyTime: Dayjs
-  mode: CollectMode
+  mode: ScheduleMode
   fetchRange: FetchRange
   cacheDetail: boolean
 }
@@ -98,6 +112,10 @@ function CollectPanel({
   const manualFetchRange = Form.useWatch('fetchRange', manualForm) ?? '24h'
   const scheduleMode = Form.useWatch('mode', scheduleForm) ?? 'incremental'
   const scheduleTiming = Form.useWatch('timing', scheduleForm) ?? 'interval'
+  /** 采集方式选了「检索」：按片名检索入库，模式不再参与 */
+  const manualSearch = manualFetchRange === 'search'
+  /** 检索项：站点开了「在线检索」才可选，否则列一条禁用的说明项 */
+  const searchOption = manualTarget?.onlineSearch ? SEARCH_OPTION : SEARCH_OPTION_LOCKED
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -147,11 +165,17 @@ function CollectPanel({
   /** 弹窗里选中模式 + 采集方式对应的那条进度，用来判断是否已有暂停 / 出错的任务 */
   const manualResumeRow = useMemo(() => {
     if (!manualTarget) return null
-    const range: FetchRange = manualMode === 'full' ? 'all' : manualFetchRange
-    const key = collectProgressKey(manualTarget.id, manualMode, range)
+    // 检索只有一条进度（`site:search:all`），关键词累积在它上面
+    const key = manualSearch
+      ? collectProgressKey(manualTarget.id, 'search', 'all')
+      : collectProgressKey(
+          manualTarget.id,
+          manualMode,
+          manualMode === 'full' ? 'all' : (manualFetchRange as FetchRange)
+        )
     const row = progressRows.find((item) => item.id === key)
     return row && isResumableStatus(row.status) ? row : null
-  }, [manualTarget, manualMode, manualFetchRange, progressRows])
+  }, [manualTarget, manualMode, manualFetchRange, manualSearch, progressRows])
 
   const resumeFromStart = Boolean(manualResumeRow && restartChoice === manualResumeRow.id)
 
@@ -192,14 +216,17 @@ function CollectPanel({
     }
     setSaving(true)
     try {
+      const isSearch = values.fetchRange === 'search'
+      const keyword = (values.keyword ?? '').trim()
       const result = await window.api.videos.collect({
         siteId: manualTarget.id,
-        mode: values.mode,
-        fetchRange: values.mode === 'full' ? 'all' : values.fetchRange,
+        mode: isSearch ? 'search' : values.mode,
+        fetchRange: isSearch || values.mode === 'full' ? 'all' : (values.fetchRange as FetchRange),
         // 只有已经存在暂停 / 出错的任务时才有意义：不传则按库里的状态自动续采或重来
         restart: manualResumeRow ? resumeFromStart : undefined,
-        allowEmpty: values.allowEmpty,
-        cacheDetail: values.cacheDetail
+        allowEmpty: isSearch ? false : values.allowEmpty,
+        cacheDetail: values.cacheDetail,
+        words: isSearch ? [keyword] : undefined
       })
       if (!result.ok) {
         message.warning(COLLECT_ERRORS[result.error ?? ''] ?? '发起采集失败，请重试')
@@ -211,7 +238,9 @@ function CollectPanel({
       // 站点忽略 pagesize=100 时按探测到的真实页大小采集，提示里说清楚
       const sizeNote =
         result.pageSize && result.pageSize < 100 ? `（每页 ${result.pageSize} 条）` : ''
-      if (manualResumeRow && !resumeFromStart) {
+      if (isSearch) {
+        message.success(`已加入检索队列「${keyword}」${sizeNote}，可在「进度」查看`)
+      } else if (manualResumeRow && !resumeFromStart) {
         message.success(`已继续采集，从第 ${manualResumeRow.page + 1} 页开始${sizeNote}`)
       } else if (manualResumeRow) {
         message.success(`已重新加入队列，从第 1 页开始${sizeNote}`)
@@ -364,9 +393,13 @@ function CollectPanel({
                 <div className="site-card-head">
                   <div className="site-card-title">
                     <span className="site-card-name">{siteLabel(site)}</span>
-                    <Tag color={site.format === 'xml' ? 'blue' : 'green'}>
-                      {site.format.toUpperCase()}
-                    </Tag>
+                    {site.onlineSearch && (
+                      <Tooltip title="支持在线检索：采集时可选用「检索」方式">
+                        <span className="site-card-online" aria-label="支持在线检索">
+                          <GlobalOutlined />
+                        </span>
+                      </Tooltip>
+                    )}
                   </div>
                   <Tag color={COLLECT_STATUS_COLOR[status]}>{COLLECT_STATUS_TEXT[status]}</Tag>
                 </div>
@@ -452,18 +485,36 @@ function CollectPanel({
       >
         <Form form={manualForm} layout="vertical" requiredMark={false} className="collect-form">
           <Form.Item name="mode" label="模式" rules={[{ required: true }]}>
-            <Select options={MODE_OPTIONS} />
+            <Select options={MODE_OPTIONS} disabled={manualSearch} />
           </Form.Item>
           <Form.Item name="fetchRange" label="采集方式" rules={[{ required: true }]}>
             <Select
-              options={manualMode === 'full' ? RANGE_OPTIONS.slice(0, 1) : RANGE_OPTIONS}
-              disabled={manualMode === 'full'}
+              options={
+                manualMode === 'full'
+                  ? [RANGE_OPTIONS[0], searchOption]
+                  : [...RANGE_OPTIONS, searchOption]
+              }
+              disabled={manualMode === 'full' && !manualTarget?.onlineSearch}
             />
           </Form.Item>
+          {manualSearch && (
+            <Form.Item
+              name="keyword"
+              label="视频名字"
+              rules={[{ required: true, whitespace: true, message: '请填写要检索的视频名字' }]}
+              extra="用采集接口的 wd 参数按片名检索：命中的视频直接入库，同一个站点只保留一条检索进度，多个关键词会累积在这条记录上（重复关键词会重置并重采）。"
+            >
+              <Input maxLength={60} placeholder="如：名侦探柯南" allowClear />
+            </Form.Item>
+          )}
           {manualResumeRow && (
             <Form.Item
               label={`上次采集${manualResumeRow.status === 'error' ? '出错' : '已暂停'}`}
-              extra="继续会接着上次中断 / 失败的页码抓，保留已入库的数据；重新会清空这条进度与计数，从第 1 页开始。"
+              extra={
+                manualSearch
+                  ? '继续会接着检索还没采完的关键词；重新会把所有关键词重置为待检索，从第一个词重新采。'
+                  : '继续会接着上次中断 / 失败的页码抓，保留已入库的数据；重新会清空这条进度与计数，从第 1 页开始。'
+              }
             >
               <Radio.Group
                 value={resumeFromStart ? 'restart' : 'resume'}
@@ -472,10 +523,12 @@ function CollectPanel({
                 }
               >
                 <Radio value="resume">
-                  继续采集
-                  {manualResumeRow.page > 0 ? `（第 ${manualResumeRow.page + 1} 页起）` : ''}
+                  {manualSearch ? '继续检索' : '继续采集'}
+                  {!manualSearch && manualResumeRow.page > 0
+                    ? `（第 ${manualResumeRow.page + 1} 页起）`
+                    : ''}
                 </Radio>
-                <Radio value="restart">重新采集（第 1 页起）</Radio>
+                <Radio value="restart">{manualSearch ? '重新检索' : '重新采集（第 1 页起）'}</Radio>
               </Radio.Group>
             </Form.Item>
           )}
@@ -492,7 +545,7 @@ function CollectPanel({
               同时生成详情缓存
             </Checkbox>
           </Form.Item>
-          {manualMode === 'full' && (
+          {manualMode === 'full' && !manualSearch && (
             <Form.Item
               name="allowEmpty"
               valuePropName="checked"
