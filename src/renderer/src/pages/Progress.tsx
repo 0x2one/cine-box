@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { App, Button, Popconfirm, Select, Spin, Tag, Tooltip } from 'antd'
 import {
   CloudDownloadOutlined,
@@ -23,8 +23,6 @@ import {
 
 /** 检索任务里每个关键词的入库上限，与主进程 SEARCH_MAX_ITEMS 保持一致（仅用于标记「已达上限」） */
 const SEARCH_WORD_CAP = 200
-/** 卡片上最多平铺多少个关键词，其余收进 Tooltip */
-const SEARCH_WORD_SHOWN = 12
 
 function progressText(item: VideoCollectProgress): string {
   if (item.mode === 'search') {
@@ -42,6 +40,69 @@ function progressText(item: VideoCollectProgress): string {
     return item.mode === 'incremental' && item.fetched === 0 ? '最近没有新数据' : '0 页'
   }
   return '等待开始'
+}
+
+/**
+ * 检索关键词：只占一行，最新提交 / 更新的排在最前面。
+ * 超出一行宽度时右侧淡出并补一个省略号，完整列表（含每条状态与抓取数）收在省略号的 Tooltip 里。
+ */
+function SearchWords({ words }: { words: CollectSearchWord[] }): React.JSX.Element {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [overflow, setOverflow] = useState(false)
+
+  // 主进程按 updated_at 升序返回（即采过的排后面），这里反过来：刚触发 / 刚采完的词靠前
+  const ordered = useMemo(
+    () =>
+      [...words].sort((a, b) =>
+        a.updatedAt === b.updatedAt ? 0 : a.updatedAt < b.updatedAt ? 1 : -1
+      ),
+    [words]
+  )
+
+  useLayoutEffect(() => {
+    const track = trackRef.current
+    if (!track) return
+    // 只在内容真的溢出时才补省略号：省略号本身会占掉几十像素，但加上它只可能更溢出，
+    // 不会出现「加了又取消」的来回跳
+    const measure = (): void => setOverflow(track.scrollWidth - track.clientWidth > 1)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(track)
+    return () => observer.disconnect()
+  }, [ordered])
+
+  return (
+    <div className={`progress-words${overflow ? ' is-overflow' : ''}`}>
+      <div className="progress-words-track" ref={trackRef}>
+        {ordered.map((word) => (
+          <Tooltip
+            key={word.word}
+            title={`${SEARCH_WORD_TEXT[word.status]}${
+              word.fetched > 0 ? ` · 已抓 ${word.fetched} 条` : ''
+            }${word.error ? ` · ${word.error}` : ''}`}
+          >
+            <span className={`progress-word is-${word.status}`}>
+              {word.word}
+              {word.status === 'done' && word.fetched >= SEARCH_WORD_CAP ? (
+                <span className="progress-word-flag">上限</span>
+              ) : null}
+            </span>
+          </Tooltip>
+        ))}
+      </div>
+      {overflow && (
+        <Tooltip
+          title={ordered
+            .map((word) => `${word.word}（${SEARCH_WORD_TEXT[word.status]}）`)
+            .join('、')}
+        >
+          <span className="progress-word is-more" aria-label="还有更多关键词">
+            …
+          </span>
+        </Tooltip>
+      )}
+    </div>
+  )
 }
 
 /** 「进度」页可调的并发档位：1–4 路，和主进程的 clamp 范围保持一致 */
@@ -309,14 +370,9 @@ function ProgressPanel({
                     : 0
             const active = item.status === 'running' || item.status === 'replacing'
             const label = siteLabel(siteMap.get(item.siteId), item.siteId)
-            // 下边框进度条只在这三种状态下出现：进行中（流光）、暂停（琥珀）、已完成（满格绿）
-            const stateClass = active
-              ? ' is-active'
-              : item.status === 'paused'
-                ? ' is-paused'
-                : item.status === 'done'
-                  ? ' is-done'
-                  : ''
+            // 下边框进度条只在「还没跑完」时出现：进行中（流光）/ 暂停（琥珀断点）。
+            // 已完成不再留一条满格的绿线——卡片会一直挂在列表里，那条线看着像永远没跑完
+            const stateClass = active ? ' is-active' : item.status === 'paused' ? ' is-paused' : ''
             return (
               <article
                 className={`progress-card${stateClass}`}
@@ -441,36 +497,7 @@ function ProgressPanel({
                   </div>
                 </div>
 
-                {isSearch && words.length > 0 && (
-                  <div className="progress-words">
-                    {words.slice(0, SEARCH_WORD_SHOWN).map((word) => (
-                      <Tooltip
-                        key={word.word}
-                        title={`${SEARCH_WORD_TEXT[word.status]}${
-                          word.fetched > 0 ? ` · 已抓 ${word.fetched} 条` : ''
-                        }${word.error ? ` · ${word.error}` : ''}`}
-                      >
-                        <span className={`progress-word is-${word.status}`}>
-                          {word.word}
-                          {word.status === 'done' && word.fetched >= SEARCH_WORD_CAP ? (
-                            <span className="progress-word-flag">上限</span>
-                          ) : null}
-                        </span>
-                      </Tooltip>
-                    ))}
-                    {words.length > SEARCH_WORD_SHOWN && (
-                      <Tooltip
-                        title={words
-                          .map((word) => `${word.word}（${SEARCH_WORD_TEXT[word.status]}）`)
-                          .join('、')}
-                      >
-                        <span className="progress-word is-more">
-                          还有 {words.length - SEARCH_WORD_SHOWN} 个
-                        </span>
-                      </Tooltip>
-                    )}
-                  </div>
-                )}
+                {isSearch && words.length > 0 && <SearchWords words={words} />}
 
                 <div className="progress-card-foot">
                   <div className="progress-counts">

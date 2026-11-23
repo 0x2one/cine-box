@@ -3076,10 +3076,10 @@ body .site-form .ant-form-item-extra {
   background: color-mix(in srgb, var(--accent) 4%, var(--surface));
 }
 
-/* 下边框进度条：进行中 / 暂停 / 已完成时出现（--progress 由行内样式给） */
+/* 下边框进度条：只在还没跑完时出现——进行中（流光）/ 暂停（琥珀断点），
+   已完成的任务不再画一条满格绿线（卡片会长期留在列表里，看着像没跑完） */
 .progress-card.is-active::after,
-.progress-card.is-paused::after,
-.progress-card.is-done::after {
+.progress-card.is-paused::after {
   position: absolute;
   bottom: 0;
   left: 0;
@@ -3092,7 +3092,7 @@ body .site-form .ant-form-item-extra {
   transition: width 240ms ease;
 }
 
-/* 进行中：一段高光沿进度条向右流动，和已完成（静止实色）区分开 */
+/* 进行中：一段高光沿进度条向右流动，和暂停（静止琥珀）区分开 */
 .progress-card.is-active::after {
   background-image: linear-gradient(
     90deg,
@@ -3110,10 +3110,6 @@ body .site-form .ant-form-item-extra {
 
 .progress-card.is-paused::after {
   background: #f08c00;
-}
-
-.progress-card.is-done::after {
-  background: #2f9e44;
 }
 
 @keyframes progress-flow {
@@ -3256,15 +3252,30 @@ body .site-form .ant-form-item-extra {
 
 /* ── 进度卡片：检索模式的关键词（一条进度绑定多个 wd） ── */
 
+/* 只占一行：最新的关键词在前，超宽时裁掉右侧并补省略号 */
 .progress-words {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  min-width: 0;
   align-items: center;
+  gap: 6px;
+}
+
+.progress-words-track {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  overflow: hidden;
+}
+
+/* 被裁掉的那半个胶囊淡出，避免看着像被硬切掉 */
+.progress-words.is-overflow .progress-words-track {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 30px), transparent);
 }
 
 .progress-word {
   display: inline-flex;
+  flex: none;
   gap: 5px;
   align-items: center;
   max-width: 180px;
@@ -3299,9 +3310,13 @@ body .site-form .ant-form-item-extra {
   color: var(--text-faint);
 }
 
+/* 行尾省略号：只提示还有更多关键词，完整列表在它的 Tooltip 里 */
 .progress-word.is-more {
-  border-style: dashed;
+  padding: 0 2px;
+  border: 0;
   color: var(--text-faint);
+  cursor: default;
+  letter-spacing: 0.08em;
 }
 
 .progress-word-flag {
