@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Input, Spin, Switch, Tooltip } from 'antd'
-import { ArrowUpOutlined, CloseOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons'
+import { Button, Input, Segmented, Spin, Tooltip } from 'antd'
+import {
+  ArrowUpOutlined,
+  CloseOutlined,
+  DatabaseOutlined,
+  GlobalOutlined,
+  HistoryOutlined,
+  SearchOutlined
+} from '@ant-design/icons'
 import FallbackImage from '../components/FallbackImage'
 import HomePicture from '../components/HomePicture'
 import { visibleCategoryIds } from '../lib/category-tree'
@@ -146,32 +153,33 @@ function SearchBar({
   )
 }
 
-/** 搜索模式开关：本地 = 查已入库的片库，在线 = 向开启了在线检索的站点按片名检索 */
-function SearchModeSwitch({
+/** 检索方式：本地 = 查已入库的片库，在线 = 向开启了在线检索的站点按片名检索 */
+function SearchModeGroup({
   mode,
   disabled,
   onChange
 }: {
   mode: SearchMode
-  /** 没有站点开启在线检索时禁用（在线模式本身也会被回落到本地） */
+  /** 没有站点开启在线检索时「在线」这一档禁用（在线模式本身也会被回落到本地） */
   disabled: boolean
   onChange: (next: SearchMode) => void
 }): React.JSX.Element {
   return (
-    <div className="search-mode">
-      <span className="search-mode-label">搜索模式</span>
-      {/* Tooltip 包一层 span：禁用的开关不派发鼠标事件，直接包它提示不会出现 */}
+    <div className="search-mode" role="group" aria-label="检索方式">
+      {/* Tooltip 包一层 div：禁用项不派发鼠标事件，直接包它提示不会出现 */}
       <Tooltip title={disabled ? '还没有站点开启「支持在线检索」，去控制台 › 站点 编辑开启' : ''}>
-        <span className="search-mode-switch">
-          <Switch
-            checked={mode === 'online'}
-            checkedChildren="在线"
-            unCheckedChildren="本地"
-            disabled={disabled}
-            onChange={(checked) => onChange(checked ? 'online' : 'local')}
-            aria-label="搜索模式：在线或本地"
+        <div className="search-mode-switch">
+          <Segmented
+            shape="round"
+            value={mode}
+            onChange={(next) => onChange(next as SearchMode)}
+            options={[
+              // 在线在前、本地在后；默认选中的仍是本地（localStorage 里没有记录时）
+              { value: 'online', label: '在线', icon: <GlobalOutlined />, disabled },
+              { value: 'local', label: '本地', icon: <DatabaseOutlined /> }
+            ]}
           />
-        </span>
+        </div>
       </Tooltip>
     </div>
   )
@@ -290,13 +298,17 @@ function SearchView({
   const [showBackTop, setShowBackTop] = useState(false)
   /** 搜索模式：本地查片库，在线向支持在线检索的站点按片名检索 */
   const [modeState, setModeState] = useState<SearchMode>(readSearchMode)
-  /** 站点列表只为「在线」开关服务：哪些站点开了在线检索 */
+  /** 站点列表只为「检索方式」这一档服务：哪些站点开了在线检索 */
   const [sites, setSites] = useState<Site[]>([])
   const [sitesLoaded, setSitesLoaded] = useState(false)
   /** 在线模式最近一次检索的结果：站点分布、后台任务数、是否截断 */
   const [online, setOnline] = useState<VideoOnlineSearchResult | null>(null)
 
-  const onlineSites = useMemo(() => sites.filter((site) => site.onlineSearch), [sites])
+  // 禁用的站点不参与在线检索，只在开关可用性上就不算数
+  const onlineSites = useMemo(
+    () => sites.filter((site) => site.onlineSearch && !site.disabled),
+    [sites]
+  )
   const onlineReady = onlineSites.length > 0
   /**
    * 上次停在在线模式、但已经没有站点支持在线检索时回落到本地：
@@ -688,7 +700,7 @@ function SearchView({
                   '正在搜索…'
                 ) : null}
               </span>
-              <SearchModeSwitch mode={mode} disabled={!onlineReady} onChange={changeMode} />
+              <SearchModeGroup mode={mode} disabled={!onlineReady} onChange={changeMode} />
             </div>
           </div>
         </header>
@@ -698,7 +710,7 @@ function SearchView({
         {!keyword ? (
           <div className="search-intro">
             <div className="search-intro-mode">
-              <SearchModeSwitch mode={mode} disabled={!onlineReady} onChange={changeMode} />
+              <SearchModeGroup mode={mode} disabled={!onlineReady} onChange={changeMode} />
             </div>
             <div className="search-intro-main">
               <h2 className="search-intro-title">搜索片库</h2>

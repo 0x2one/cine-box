@@ -344,7 +344,9 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
         categoryId: categoryId || undefined,
         page,
         pageSize: PAGE_SIZE,
-        visibility
+        visibility,
+        // 控制台是管理口径：禁用站点的视频也要列出来，否则没法查看 / 编辑
+        includeDisabledSites: true
       })
       if (ticket !== requestId.current) return
       if (!result.ok) {

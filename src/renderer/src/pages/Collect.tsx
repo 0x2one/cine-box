@@ -23,6 +23,7 @@ import {
   StopOutlined
 } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
+import SiteFormatIcon from '../components/SiteFormatIcon'
 import { formatDateTime } from '../utils/format'
 import {
   COLLECT_ERRORS,
@@ -389,10 +390,19 @@ function CollectPanel({
             const status = current?.status ?? 'idle'
             const busy = status === 'running' || status === 'queued' || status === 'replacing'
             return (
-              <article className="site-card collect-card" key={site.id}>
+              <article
+                className={`site-card collect-card${site.disabled ? ' is-disabled' : ''}`}
+                key={site.id}
+              >
                 <div className="site-card-head">
                   <div className="site-card-title">
                     <span className="site-card-name">{siteLabel(site)}</span>
+                    <Tooltip title={`采集格式：${site.format.toUpperCase()}`}>
+                      <span className={`site-card-format is-${site.format}`}>
+                        <SiteFormatIcon format={site.format} />
+                      </span>
+                    </Tooltip>
+                    {site.disabled && <Tag className="site-card-disabled">已禁用</Tag>}
                     {site.onlineSearch && (
                       <Tooltip title="支持在线检索：采集时可选用「检索」方式">
                         <span className="site-card-online" aria-label="支持在线检索">
@@ -434,21 +444,32 @@ function CollectPanel({
                 </div>
 
                 <div className="collect-actions">
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<CloudDownloadOutlined />}
-                    onClick={() => setManualTarget(site)}
-                  >
-                    采集
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<ClockCircleOutlined />}
-                    onClick={() => setScheduleTarget(site)}
-                  >
-                    定时
-                  </Button>
+                  {/* 禁用的站点不能采集：按钮置灰，悬停说明去哪儿启用 */}
+                  <Tooltip title={site.disabled ? '站点已禁用，先到「站点」里启用' : ''}>
+                    <span>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<CloudDownloadOutlined />}
+                        disabled={site.disabled}
+                        onClick={() => setManualTarget(site)}
+                      >
+                        采集
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title={site.disabled ? '站点已禁用，先到「站点」里启用' : ''}>
+                    <span>
+                      <Button
+                        size="small"
+                        icon={<ClockCircleOutlined />}
+                        disabled={site.disabled}
+                        onClick={() => setScheduleTarget(site)}
+                      >
+                        定时
+                      </Button>
+                    </span>
+                  </Tooltip>
                   {/* 取消只在采集中 / 排队时出现，避免误点 */}
                   {busy && (
                     <Tooltip title="取消当前采集 / 排队">

@@ -21,6 +21,8 @@ export function createCollectScheduler(options: {
   schedules: CollectScheduleStore
   collector: VideoCollector
   logs: CollectLogStore
+  /** 站点被禁用时跳过这次定时任务（时间照常推进，不重复触发） */
+  isSiteDisabled?: (siteId: string) => boolean
 }): CollectScheduler {
   const { schedules, collector, logs } = options
   let timer: ReturnType<typeof setInterval> | null = null
@@ -32,6 +34,18 @@ export function createCollectScheduler(options: {
     // 先推进时间：即使入队失败也不重复触发
     const next = nextRunAt(now, schedule.timing, schedule.intervalMinutes, schedule.dailyTime)
     schedules.markRun(schedule.siteId, now.toISOString(), next)
+    // 站点禁用期间不采集：时间已经推进，重新启用后按自己的节奏继续
+    if (options.isSiteDisabled?.(schedule.siteId)) {
+      logs.append({
+        level: 'warn',
+        siteId: schedule.siteId,
+        mode: schedule.mode,
+        fetchRange: schedule.fetchRange,
+        message: '站点已禁用，跳过本次定时采集',
+        detail: 'SITE_DISABLED'
+      })
+      return
+    }
     const result = await collector.enqueue(
       {
         siteId: schedule.siteId,

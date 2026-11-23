@@ -60,6 +60,8 @@ interface SiteRow {
   remark: string
   /** 是否支持在线检索；旧备份没有该字段时按关闭处理 */
   onlineSearch: boolean
+  /** 是否禁用；旧备份没有该字段时按启用处理 */
+  disabled: boolean
   createdAt: string
   updatedAt: string
 }
@@ -197,7 +199,7 @@ export interface BackupStore {
 }
 
 const SELECT_SITES = `
-SELECT id, name, display, address, format, remark, online_search, created_at, updated_at
+SELECT id, name, display, address, format, remark, online_search, disabled, created_at, updated_at
 FROM sites
 ORDER BY created_at ASC, rowid ASC
 `
@@ -229,8 +231,8 @@ ORDER BY created_at ASC, rowid ASC
 
 const INSERT_SITE = `
 INSERT INTO sites
-  (id, name, display, address, format, remark, online_search, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (id, name, display, address, format, remark, online_search, disabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_SITE_CATEGORY = `
@@ -323,6 +325,8 @@ function parseSites(value: unknown): SiteRow[] | null {
       remark: optionalText(item.remark),
       // 旧备份没有这个字段：按「不支持在线检索」恢复
       onlineSearch: item.onlineSearch === true,
+      // 旧备份没有这个字段：按「启用」恢复
+      disabled: item.disabled === true,
       createdAt,
       updatedAt: timestamp(item.updatedAt, createdAt)
     })
@@ -552,6 +556,7 @@ function readState(database: DatabaseSync): BackupData {
         format: raw.format === 'json' ? ('json' as const) : ('xml' as const),
         remark: String(raw.remark ?? ''),
         onlineSearch: Number(raw.online_search ?? 0) !== 0,
+        disabled: Number(raw.disabled ?? 0) !== 0,
         createdAt,
         updatedAt: timestamp(raw.updated_at, createdAt)
       }
@@ -672,6 +677,7 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.format,
         row.remark,
         row.onlineSearch ? 1 : 0,
+        row.disabled ? 1 : 0,
         row.createdAt,
         row.updatedAt
       )

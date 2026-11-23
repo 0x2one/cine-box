@@ -3,7 +3,9 @@ import {
   AppstoreOutlined,
   BorderOutlined,
   CloseOutlined,
+  CompassOutlined,
   CompressOutlined,
+  FireOutlined,
   MinusOutlined,
   SearchOutlined,
   SettingOutlined
@@ -123,6 +125,7 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
           aria-current={view === 'home' ? 'page' : undefined}
           onClick={() => onNavigate('home')}
         >
+          <FireOutlined className="titlebar-nav-icon" />
           推荐
         </button>
         {/* 长得像输入框的搜索按钮：点开搜索页，真正的搜索框在页面里 */}
@@ -144,6 +147,7 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
           aria-current={view === 'browse' ? 'page' : undefined}
           onClick={() => onNavigate('browse')}
         >
+          <CompassOutlined className="titlebar-nav-icon" />
           找片看
         </button>
       </nav>

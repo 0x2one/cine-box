@@ -22,6 +22,11 @@ export interface Site {
    * `wd` 参数按片名检索，并在控制台「采集」里多出一种「检索」采集方式。
    */
   onlineSearch: boolean
+  /**
+   * 是否禁用：禁用后仍然可以编辑，但不再采集、不再参与搜索（本地 / 在线）、
+   * 推荐页与列表页也不再显示只属于它的视频；它的缓存数据保留，重新启用即恢复。
+   */
+  disabled: boolean
   /** 创建 / 更新时间，ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -35,6 +40,7 @@ export interface SiteInput {
   format?: SiteFormat
   remark?: string
   onlineSearch?: boolean
+  disabled?: boolean
 }
 
 export type SiteError = 'INVALID_NAME' | 'INVALID_ADDRESS' | 'INVALID_FORMAT' | 'NOT_FOUND'
@@ -132,6 +138,7 @@ CREATE TABLE IF NOT EXISTS sites (
   format TEXT NOT NULL DEFAULT 'xml',
   remark TEXT NOT NULL DEFAULT '',
   online_search INTEGER NOT NULL DEFAULT 0,
+  disabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -149,24 +156,24 @@ CREATE INDEX IF NOT EXISTS idx_site_categories_site ON site_categories (site_id)
 `
 
 const INSERT_SITE = `
-INSERT INTO sites (id, name, display, address, format, remark, online_search, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO sites (id, name, display, address, format, remark, online_search, disabled, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const UPDATE_SITE = `
 UPDATE sites
-SET name = ?, display = ?, address = ?, format = ?, remark = ?, online_search = ?, updated_at = ?
+SET name = ?, display = ?, address = ?, format = ?, remark = ?, online_search = ?, disabled = ?, updated_at = ?
 WHERE id = ?
 `
 
 const SELECT_ALL = `
-SELECT id, name, display, address, format, remark, online_search, created_at, updated_at
+SELECT id, name, display, address, format, remark, online_search, disabled, created_at, updated_at
 FROM sites
 ORDER BY created_at DESC, rowid DESC
 `
 
 const SELECT_ONE = `
-SELECT id, name, display, address, format, remark, online_search, created_at, updated_at
+SELECT id, name, display, address, format, remark, online_search, disabled, created_at, updated_at
 FROM sites
 WHERE id = ?
 `
@@ -231,6 +238,7 @@ function normalizeSite(value: unknown): Site | null {
     format: raw.format === 'json' ? 'json' : 'xml',
     remark: typeof raw.remark === 'string' ? raw.remark : '',
     onlineSearch: raw.onlineSearch === true,
+    disabled: raw.disabled === true,
     createdAt,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : createdAt
   }
@@ -248,6 +256,7 @@ function rowToSite(row: unknown): Site | null {
     format: raw.format,
     remark: raw.remark,
     onlineSearch: Number(raw.online_search ?? 0) !== 0,
+    disabled: Number(raw.disabled ?? 0) !== 0,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at
   })
@@ -308,13 +317,17 @@ function validateSiteInput(
       remark: String(input?.remark ?? '')
         .trim()
         .slice(0, MAX_REMARK),
-      onlineSearch: Boolean(input?.onlineSearch)
+      onlineSearch: Boolean(input?.onlineSearch),
+      disabled: Boolean(input?.disabled)
     }
   }
 }
 
 // 后加列：老库补上（新库建表时已经有了），保持迁移幂等
-const LATE_COLUMNS = [{ name: 'online_search', ddl: 'online_search INTEGER NOT NULL DEFAULT 0' }]
+const LATE_COLUMNS = [
+  { name: 'online_search', ddl: 'online_search INTEGER NOT NULL DEFAULT 0' },
+  { name: 'disabled', ddl: 'disabled INTEGER NOT NULL DEFAULT 0' }
+]
 
 function migrate(connection: DatabaseSync): void {
   const columns = connection.prepare('PRAGMA table_info(sites)').all() as Record<string, unknown>[]
@@ -435,6 +448,7 @@ export function createSiteStore(file: string): SiteStore {
           site.format,
           site.remark,
           site.onlineSearch ? 1 : 0,
+          site.disabled ? 1 : 0,
           site.createdAt,
           site.updatedAt
         )
@@ -459,6 +473,7 @@ export function createSiteStore(file: string): SiteStore {
           site.format,
           site.remark,
           site.onlineSearch ? 1 : 0,
+          site.disabled ? 1 : 0,
           site.updatedAt,
           site.id
         )

@@ -152,11 +152,20 @@ export interface VideoCacheStore {
   ) => VideoListResult
   /** 只数总数、不取行（控制台概览的「隐藏了多少」）：条件与 `listVideos` 完全一致 */
   countVideos: (
-    query: Pick<VideoListQuery, 'keyword' | 'visibility'>,
+    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ) => number
   /** 按 id 批量取视频（首页海报 / 推荐条目用，可能不在分类前 100 条里） */
-  listVideosByIds: (videoIds: number[]) => VideoListItem[]
+  listVideosByIds: (
+    videoIds: number[],
+    options?: { includeDisabledSites?: boolean }
+  ) => VideoListItem[]
+  /**
+   * 禁用的站点：它们收录的来源不再算「可见来源」，只被这些站点收录的视频
+   * 在默认口径下等于不存在（列表、搜索、首页推荐都不返回）。控制台视频页
+   * 传 `includeDisabledSites: true` 仍能看到全部。
+   */
+  setDisabledSites: (siteIds: string[]) => void
   /** 指定视频各来源的在线分类，列表页据此解析绑定后的本地分类 */
   listSourceCategories: (
     videoIds: number[]
@@ -488,6 +497,22 @@ export function createVideoCacheStore(
   options: { defaultPicSiteId?: () => string } = {}
 ): VideoCacheStore {
   const preferredPicSite = (): string => (options.defaultPicSiteId?.() ?? '').trim()
+
+  /** 禁用站点 id（由主进程在站点增删改 / 恢复备份后同步进来）；为空时查询不多加条件 */
+  let disabledSiteIds: string[] = []
+
+  /**
+   * 「这个视频至少还有一个启用站点的来源」——禁用站点的来源不算数。
+   * 没有禁用站点时返回 null，调用方保持原查询（不多付一条 EXISTS）。
+   */
+  function visibleSourceClause(alias: string): { sql: string; params: string[] } | null {
+    if (disabledSiteIds.length === 0) return null
+    const placeholders = disabledSiteIds.map(() => '?').join(', ')
+    return {
+      sql: `EXISTS (SELECT 1 FROM video_sources ds WHERE ds.video_id = ${alias}.id AND ds.site_id NOT IN (${placeholders}))`,
+      params: [...disabledSiteIds]
+    }
+  }
 
   /** 缓存库行 -> 选图规则需要的最小结构 */
   const asPicSources = (rows: Record<string, unknown>[]): PicSource[] =>
@@ -1272,8 +1297,20 @@ FROM collect_progress`)
   function countVideos(
     connection: DatabaseSync,
     filters: { siteId: string; categoryId: string }[] | undefined,
-    visibility: 'all' | 'shown' | 'hidden'
+    visibility: 'all' | 'shown' | 'hidden',
+    includeDisabledSites = false
   ): number {
+    const hiddenSites = includeDisabledSites ? [] : disabledSiteIds
+    // 两条分支查询的表不同：数 `video_sources` 时用 video_id，数 `videos` 时用 videos.id
+    const markers = hiddenSites.map(() => '?').join(', ')
+    const visibleOnSources =
+      hiddenSites.length > 0
+        ? ` AND video_id IN (SELECT s2.video_id FROM video_sources s2 WHERE s2.site_id NOT IN (${markers}))`
+        : ''
+    const visibleOnVideos =
+      hiddenSites.length > 0
+        ? ` AND EXISTS (SELECT 1 FROM video_sources s2 WHERE s2.video_id = videos.id AND s2.site_id NOT IN (${markers}))`
+        : ''
     if (filters && filters.length > 0) {
       const hiddenSql =
         visibility === 'shown'
@@ -1286,9 +1323,9 @@ FROM collect_progress`)
       for (const filter of filters) params.push(filter.siteId, filter.categoryId)
       const counted = connection
         .prepare(
-          `SELECT COUNT(DISTINCT video_id) AS n FROM video_sources WHERE (${clauses}) ${hiddenSql}`
+          `SELECT COUNT(DISTINCT video_id) AS n FROM video_sources WHERE (${clauses}) ${hiddenSql}${visibleOnSources}`
         )
-        .get(...params) as Record<string, unknown> | undefined
+        .get(...params, ...hiddenSites) as Record<string, unknown> | undefined
       return num(counted?.n)
     }
     const hiddenSql =
@@ -1298,8 +1335,8 @@ FROM collect_progress`)
           ? 'AND id IN (SELECT video_id FROM video_edits WHERE hidden = 1)'
           : ''
     const counted = connection
-      .prepare(`SELECT COUNT(*) AS n FROM videos WHERE 1 = 1 ${hiddenSql}`)
-      .get() as Record<string, unknown> | undefined
+      .prepare(`SELECT COUNT(*) AS n FROM videos WHERE 1 = 1 ${hiddenSql}${visibleOnVideos}`)
+      .get(...hiddenSites) as Record<string, unknown> | undefined
     return num(counted?.n)
   }
 
@@ -1308,7 +1345,7 @@ FROM collect_progress`)
    * 返回的 `keyword` 决定总数要不要走带 FTS 的完整条件。
    */
   function buildListWhere(
-    query: Pick<VideoListQuery, 'keyword' | 'visibility'>,
+    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ): { keyword: string; where: string[]; params: (string | number)[] } | null {
     const keyword = query.keyword?.trim() ?? ''
@@ -1327,6 +1364,12 @@ FROM collect_progress`)
       where.push(`EXISTS (SELECT 1 FROM video_sources f WHERE f.video_id = v.id AND (${clauses}))`)
       for (const filter of categoryFilters) params.push(filter.siteId, filter.categoryId)
     }
+    // 禁用站点的视频不算数：只被它们收录的视频从这里开始就查不到
+    const visible = query.includeDisabledSites ? null : visibleSourceClause('v')
+    if (visible) {
+      where.push(visible.sql)
+      params.push(...visible.params)
+    }
     const visibility = query.visibility ?? 'all'
     if (visibility === 'hidden') where.push('COALESCE(e.hidden, 0) = 1')
     if (visibility === 'shown') where.push('COALESCE(e.hidden, 0) = 0')
@@ -1339,13 +1382,18 @@ FROM collect_progress`)
    * 会为了找 1 条把整张 videos 表连着两个 JOIN 扫一遍（实测 140–175ms）。
    */
   function countMatching(
-    query: Pick<VideoListQuery, 'keyword' | 'visibility'>,
+    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ): number {
     const built = buildListWhere(query, categoryFilters)
     if (!built) return 0
     if (!built.keyword) {
-      return countVideos(database(), categoryFilters, query.visibility ?? 'all')
+      return countVideos(
+        database(),
+        categoryFilters,
+        query.visibility ?? 'all',
+        query.includeDisabledSites
+      )
     }
     const from = `${VIDEO_ITEM_FROM}${built.where.length ? ` WHERE ${built.where.join(' AND ')}` : ''}`
     const counted = database()
@@ -1391,7 +1439,12 @@ FROM collect_progress`)
           Record<string, unknown> | undefined
         total = num(counted?.n)
       } else {
-        total = countVideos(connection, categoryFilters, query.visibility ?? 'all')
+        total = countVideos(
+          connection,
+          categoryFilters,
+          query.visibility ?? 'all',
+          query.includeDisabledSites
+        )
       }
     } catch {
       // FTS 语法错误 / 索引异常时返回空，而不是把异常抛给渲染层
@@ -1409,14 +1462,22 @@ FROM collect_progress`)
    * 按 id 批量取列表项，顺序不保证（调用方自己按配置排）。
    * 不存在的 id 直接缺席——首页把它显示成「视频已丢失」，不会整块报错。
    */
-  function listVideosByIds(videoIds: number[]): VideoListItem[] {
+  function listVideosByIds(
+    videoIds: number[],
+    options: { includeDisabledSites?: boolean } = {}
+  ): VideoListItem[] {
     const ids = [...new Set(videoIds.filter((id) => Number.isInteger(id) && id > 0))]
     if (ids.length === 0) return []
     const placeholders = ids.map(() => '?').join(', ')
+    const visible = options.includeDisabledSites ? null : visibleSourceClause('v')
     try {
       const rows = database()
-        .prepare(`${VIDEO_ITEM_SELECT} ${VIDEO_ITEM_FROM} WHERE v.id IN (${placeholders})`)
-        .all(...ids) as Record<string, unknown>[]
+        .prepare(
+          `${VIDEO_ITEM_SELECT} ${VIDEO_ITEM_FROM} WHERE v.id IN (${placeholders})${
+            visible ? ` AND ${visible.sql}` : ''
+          }`
+        )
+        .all(...ids, ...(visible?.params ?? [])) as Record<string, unknown>[]
       const candidates = candidatesFor(rows.map((row) => num(row.id)))
       return rows.map((row) => rowToVideoItem(row, candidates.get(num(row.id)) ?? []))
     } catch {
@@ -2179,6 +2240,9 @@ FROM collect_progress`)
     listVideos,
     countVideos: countMatching,
     listVideosByIds,
+    setDisabledSites: (siteIds) => {
+      disabledSiteIds = [...new Set(siteIds.filter((id) => typeof id === 'string' && id))]
+    },
     listSourceCategories,
     updateVideo,
     stats,

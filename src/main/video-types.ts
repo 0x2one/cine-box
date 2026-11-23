@@ -297,6 +297,12 @@ export interface VideoListQuery {
    * 它要扫一整张表），返回的 total 为 0，调用方不要展示它。
    */
   withTotal?: boolean
+  /**
+   * 是否连同禁用站点的视频一起返回。默认 false：禁用站点的来源不算数，
+   * 只被禁用站点收录的视频在列表 / 搜索里查不到。控制台「视频」页传 true，
+   * 管理员仍然能看到并编辑这些视频。
+   */
+  includeDisabledSites?: boolean
 }
 
 export interface VideoListItem {

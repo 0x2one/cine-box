@@ -3,10 +3,10 @@ import {
   App,
   Button,
   Col,
+  Dropdown,
   Form,
   Input,
   Modal,
-  Popconfirm,
   Row,
   Select,
   Space,
@@ -21,11 +21,14 @@ import {
   EditOutlined,
   GlobalOutlined,
   LinkOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
   TagsOutlined
 } from '@ant-design/icons'
+import SiteFormatIcon from '../components/SiteFormatIcon'
 import { splitCategoryPath } from '../lib/category-tree'
 import { formatCount, formatDateTime } from '../utils/format'
 
@@ -36,6 +39,19 @@ interface SiteFormValues {
   format: SiteFormat
   remark?: string
   onlineSearch: boolean
+  /** 禁用：还能编辑，但不再采集、不参与搜索、不显示只属于它的视频 */
+  disabled: boolean
+}
+
+/** 竖排三点：antd 只有横排的 MoreOutlined，这里直接画一颗，别用旋转凑 */
+function MoreVerticalIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 1024 1024" width="1em" height="1em" fill="currentColor" aria-hidden="true">
+      <circle cx="512" cy="192" r="96" />
+      <circle cx="512" cy="512" r="96" />
+      <circle cx="512" cy="832" r="96" />
+    </svg>
+  )
 }
 
 const SITE_ERRORS: Record<string, string> = {
@@ -98,7 +114,7 @@ function SitesPanel({
   /** 跳转到分类页，把该站点的在线分类拖到本地分类上完成绑定 */
   onStartBinding: (site: { id: string; name: string }) => void
 }): React.JSX.Element {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [sites, setSites] = useState<Site[]>([])
   const [loading, setLoading] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
@@ -160,7 +176,8 @@ function SitesPanel({
         address: editing.address,
         format: editing.format,
         remark: editing.remark,
-        onlineSearch: editing.onlineSearch
+        onlineSearch: editing.onlineSearch,
+        disabled: editing.disabled
       })
     } else {
       form.resetFields()
@@ -209,6 +226,29 @@ function SitesPanel({
     }
   }
 
+  /** 卡片上的禁用 / 启用：只改这一个字段，其余字段原样带回去（update 是整行覆盖） */
+  const toggleDisabled = (site: Site): void => {
+    void window.api.sites
+      .update(site.id, {
+        name: site.name,
+        display: site.display,
+        address: site.address,
+        format: site.format,
+        remark: site.remark,
+        onlineSearch: site.onlineSearch,
+        disabled: !site.disabled
+      })
+      .then(async (result) => {
+        if (!result.ok) {
+          message.error(SITE_ERRORS[result.error ?? ''] ?? '操作失败，请重试')
+          return
+        }
+        setSites(await window.api.sites.list())
+        message.success(site.disabled ? '已启用站点' : '已禁用站点')
+      })
+      .catch(() => message.error('操作失败，请重试'))
+  }
+
   const remove = (site: Site): void => {
     void window.api.sites
       .remove(site.id)
@@ -218,6 +258,28 @@ function SitesPanel({
         else message.warning('站点不存在，可能已被删除')
       })
       .catch(() => message.error('删除失败，请重试'))
+  }
+
+  /** 删除确认：操作收进「更多」菜单后没法再套 Popconfirm，改用应用级弹窗确认 */
+  const confirmRemove = (site: Site): void => {
+    modal.confirm({
+      title: '删除站点',
+      content: `确定删除「${siteLabel(site)}」吗？删除后不可恢复。`,
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => remove(site)
+    })
+  }
+
+  /** 卡片「更多」菜单：编辑 / 测试 / 分类 / 绑定 / 禁用 / 删除都收在这颗竖排三点里 */
+  const runMoreAction = (key: string, site: Site): void => {
+    if (key === 'edit') openEdit(site)
+    else if (key === 'test') openSearchTest(site)
+    else if (key === 'categories') loadCategories(site)
+    else if (key === 'bind') startBindingFromCard(site)
+    else if (key === 'toggle') toggleDisabled(site)
+    else if (key === 'remove') confirmRemove(site)
   }
 
   const loadBindings = (siteId: string): void => {
@@ -434,6 +496,7 @@ function SitesPanel({
         address: testSite.address,
         format: testSite.format,
         remark: testSite.remark,
+        disabled: testSite.disabled,
         onlineSearch: true
       })
       if (!result.ok) {
@@ -491,10 +554,16 @@ function SitesPanel({
       ) : (
         <div className="sites-grid">
           {sites.map((site) => (
-            <article className="site-card" key={site.id}>
+            <article className={`site-card${site.disabled ? ' is-disabled' : ''}`} key={site.id}>
               <div className="site-card-head">
                 <div className="site-card-title">
                   <span className="site-card-name">{siteLabel(site)}</span>
+                  <Tooltip title={`采集格式：${site.format.toUpperCase()}`}>
+                    <span className={`site-card-format is-${site.format}`}>
+                      <SiteFormatIcon format={site.format} />
+                    </span>
+                  </Tooltip>
+                  {site.disabled && <Tag className="site-card-disabled">已禁用</Tag>}
                   {site.onlineSearch && (
                     <Tooltip title="支持在线检索：搜索页可切到「在线」，采集里多出「检索」方式">
                       <span className="site-card-online" aria-label="支持在线检索">
@@ -504,58 +573,40 @@ function SitesPanel({
                   )}
                 </div>
                 <div className="site-card-actions">
-                  <Tooltip title="测试在线检索（只发请求，不写入缓存）">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<SearchOutlined />}
-                      onClick={() => openSearchTest(site)}
-                      aria-label={`测试 ${siteLabel(site)} 的在线检索`}
-                    />
-                  </Tooltip>
-                  <Tooltip title="获取分类">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<TagsOutlined />}
-                      onClick={() => loadCategories(site)}
-                      aria-label={`获取 ${siteLabel(site)} 的视频分类`}
-                    />
-                  </Tooltip>
-                  <Tooltip title="绑定在线分类">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<LinkOutlined />}
-                      onClick={() => startBindingFromCard(site)}
-                      aria-label={`绑定 ${siteLabel(site)} 的在线分类`}
-                    />
-                  </Tooltip>
-                  <Tooltip title="编辑">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<EditOutlined />}
-                      onClick={() => openEdit(site)}
-                      aria-label={`编辑 ${siteLabel(site)}`}
-                    />
-                  </Tooltip>
-                  <Popconfirm
-                    title="删除站点"
-                    description={`确定删除「${siteLabel(site)}」吗？删除后不可恢复。`}
-                    okText="删除"
-                    cancelText="取消"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => remove(site)}
+                  {/* 所有操作都收进竖排三点，标题行只留一颗按钮 */}
+                  <Dropdown
+                    trigger={['click']}
+                    placement="bottomRight"
+                    menu={{
+                      items: [
+                        { key: 'edit', icon: <EditOutlined />, label: '编辑站点' },
+                        { type: 'divider' },
+                        { key: 'test', icon: <SearchOutlined />, label: '测试在线检索' },
+                        { key: 'categories', icon: <TagsOutlined />, label: '获取分类' },
+                        { key: 'bind', icon: <LinkOutlined />, label: '绑定在线分类' },
+                        { type: 'divider' },
+                        {
+                          key: 'toggle',
+                          icon: site.disabled ? <PlayCircleOutlined /> : <PauseCircleOutlined />,
+                          label: site.disabled ? '启用站点' : '禁用站点'
+                        },
+                        { type: 'divider' },
+                        { key: 'remove', icon: <DeleteOutlined />, label: '删除站点', danger: true }
+                      ],
+                      onClick: ({ key, domEvent }) => {
+                        // 卡片本身没有点击行为，这里只是别让菜单点击冒泡到头部
+                        domEvent.stopPropagation()
+                        runMoreAction(key, site)
+                      }
+                    }}
                   >
                     <Button
                       type="text"
-                      danger
                       size="small"
-                      icon={<DeleteOutlined />}
-                      aria-label={`删除 ${siteLabel(site)}`}
+                      icon={<MoreVerticalIcon />}
+                      aria-label={`更多操作：${siteLabel(site)}`}
                     />
-                  </Popconfirm>
+                  </Dropdown>
                 </div>
               </div>
 
@@ -588,7 +639,7 @@ function SitesPanel({
           form={form}
           layout="vertical"
           requiredMark={false}
-          initialValues={{ format: 'xml', onlineSearch: false }}
+          initialValues={{ format: 'xml', onlineSearch: false, disabled: false }}
           className="site-form"
         >
           <Row gutter={12}>
@@ -643,6 +694,14 @@ function SitesPanel({
               </Form.Item>
             </Col>
           </Row>
+          <Form.Item
+            name="disabled"
+            label="禁用站点"
+            valuePropName="checked"
+            extra="禁用后仍然可以编辑，但不再采集、不参与搜索（本地 / 在线），推荐页与列表页也不再显示只属于它的视频；缓存数据保留，重新启用即恢复。"
+          >
+            <Switch checkedChildren="已禁用" unCheckedChildren="正常" />
+          </Form.Item>
           <Form.Item name="remark" label="备注">
             <Input.TextArea
               rows={3}

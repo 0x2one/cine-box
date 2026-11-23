@@ -135,7 +135,7 @@
   padding: 14px 32px;
 }
 
-/* 结果总数 + 搜索模式开关：跟在搜索条右侧，不再绝对定位（否则窄窗口会压住搜索框） */
+/* 结果总数 + 检索方式：跟在搜索条右侧，不再绝对定位（否则窄窗口会压住搜索框） */
 .search-head-side {
   display: flex;
   flex: 0 0 auto;
@@ -160,25 +160,18 @@
   font-weight: 500;
 }
 
-/* ── 搜索模式开关：本地 / 在线 ── */
+/* ── 检索方式：在线 / 本地，按钮式单选组（不用开关） ── */
 
 .search-mode {
   display: flex;
-  gap: 8px;
   align-items: center;
-}
-
-.search-mode-label {
-  color: var(--text-faint);
-  font-size: 12px;
-  white-space: nowrap;
 }
 
 .search-mode-switch {
   display: inline-flex;
 }
 
-/* 初始态没有吸顶头部，开关落在落地页右上角 */
+/* 初始态没有吸顶头部，单选组落在落地页右上角 */
 .search-intro-mode {
   position: absolute;
   top: 10px;

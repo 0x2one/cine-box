@@ -140,6 +140,11 @@ interface Site {
    * 控制台「采集」里也多出「检索」这种采集方式。
    */
   onlineSearch: boolean
+  /**
+   * 是否禁用：禁用后仍然可以编辑，但不再采集、不参与搜索（本地 / 在线），
+   * 推荐页与列表页也不再显示只属于它的视频；缓存数据保留，重新启用即恢复。
+   */
+  disabled: boolean
   /** ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -152,6 +157,7 @@ interface SiteInput {
   format?: SiteFormat
   remark?: string
   onlineSearch?: boolean
+  disabled?: boolean
 }
 
 interface AddSiteResult {
@@ -733,6 +739,11 @@ interface VideoListQuery {
    * 此时返回的 total 为 0，不要拿它覆盖已经知道的总数。
    */
   withTotal?: boolean
+  /**
+   * 是否连同禁用站点的视频一起返回。默认 false：禁用站点的来源不算数，
+   * 只被禁用站点收录的视频查不到；控制台「视频」页传 true 才能看到全部。
+   */
+  includeDisabledSites?: boolean
 }
 
 interface VideoListItem {

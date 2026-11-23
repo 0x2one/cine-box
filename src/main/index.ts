@@ -142,7 +142,9 @@ const collector = createVideoCollector({
 const scheduler = createCollectScheduler({
   schedules: scheduleStore,
   collector,
-  logs: collectLogs
+  logs: collectLogs,
+  // 禁用的站点不跑定时采集：照常推进 next_run_at，只补一条日志
+  isSiteDisabled: (siteId) => siteStore.list().some((site) => site.id === siteId && site.disabled)
 })
 // 首页配置（海报叠层 + 分类推荐）与自定义图片：userData/Data/Home
 const homeStore = createHomeStore(join(app.getPath('userData'), 'Data', 'Home'))
@@ -255,6 +257,22 @@ function invalidateHomeFeed(): void {
 }
 
 /**
+ * 把「禁用的站点」同步给缓存库：列表 / 搜索 / 首页默认只返回「还有启用站点来源」的视频，
+ * 只被禁用站点收录的视频等于不存在；多个来源时只要还有一个启用站点就照常显示。
+ * 站点增删改、恢复备份之后都要调一次。
+ */
+function refreshDisabledSites(): void {
+  if (!videoCacheReady) return
+  videoStore.setDisabledSites(
+    siteStore
+      .list()
+      .filter((site) => site.disabled)
+      .map((site) => site.id)
+  )
+  invalidateHomeFeed()
+}
+
+/**
  * 首页数据：配置 + 分类绑定 + 视频库解析成一份可以直接渲染的 feed。
  * 展示端取 'display'（不算总数、不含隐藏轨道、不带搜索推荐位），控制台取 'console'。
  */
@@ -268,7 +286,9 @@ function readHomeFeed(view: HomeFeedView): HomeFeedResult {
         config: homeStore.get(),
         categories: categoryStore.list(),
         bindingsFor: (categoryId) => bindingStore.forCategory(categoryId),
-        videosByIds: (videoIds) => videoStore.listVideosByIds(videoIds),
+        // 控制台要把禁用站点的条目也读出来（否则会显示成「视频已丢失」）；展示端按可见口径
+        videosByIds: (videoIds) =>
+          videoStore.listVideosByIds(videoIds, { includeDisabledSites: view === 'console' }),
         listVideos: (query, filters) => videoStore.listVideos(query, filters),
         cacheReady: videoCacheReady
       },
@@ -539,8 +559,8 @@ function createWindow(): void {
     const BRAND_ZONE_WIDTH = 150
     const ACTIONS_ZONE_WIDTH = 222
     // 与 TitleBar 中间「推荐 / 搜索 / 找片看」胶囊的实际宽度对齐（main.css 的 .titlebar-nav）：
-    // 内边距 3+3、边框 1+1、推荐 58、找片看约 62、搜索框 200、三处间距 6×2
-    const CENTER_NAV_WIDTH = 340
+    // 内边距 3+3、边框 1+1、推荐约 65、找片看约 78、搜索框 200、三处间距 6×2
+    const CENTER_NAV_WIDTH = 366
     mainWindow.hookWindowMessage(WM_LBUTTONDBLCLK, () => {
       if (!mainWindow || mainWindow.isDestroyed()) return
       const cursor = screen.getCursorScreenPoint()
@@ -1178,10 +1198,10 @@ ipcMain.handle(
     }
     if (!videoCacheReady) return { ...empty, ok: false, error: 'CACHE_UNAVAILABLE' }
     if (!keyword) return empty
-    // 正在后台清理缓存的站点先跳过：刚写进去的来源会被清理一起删掉
+    // 正在后台清理缓存的站点先跳过：刚写进去的来源会被清理一起删掉；禁用的站点也不问
     const sites = siteStore
       .list()
-      .filter((site) => site.onlineSearch && !siteCachePurges.has(site.id))
+      .filter((site) => site.onlineSearch && !site.disabled && !siteCachePurges.has(site.id))
     if (sites.length === 0) return empty
 
     const results = await Promise.all(sites.map((site) => searchOneSite(site, keyword)))
@@ -1252,6 +1272,10 @@ ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartIn
   if (!videoCacheReady) return cacheUnavailable()
   const siteId = String(input?.siteId ?? '').trim()
   const isSearch = input?.mode === 'search'
+  // 禁用的站点不再采集：手动 / 检索 / 定时都不入队（缓存数据保留，重新启用即可恢复）
+  if (siteStore.list().find((site) => site.id === siteId)?.disabled) {
+    return { ok: false, error: 'SITE_DISABLED' }
+  }
   // 同一模式与方式已经在跑 / 排队时不用探测；检索走的是追加关键词，也不探测
   const range = input?.mode === 'full' || isSearch ? 'all' : input?.fetchRange
   const live = videoStore
@@ -1373,7 +1397,11 @@ ipcMain.handle('videos:clear', async () => {
 
 ipcMain.handle('sites:list', () => siteStore.list())
 
-ipcMain.handle('sites:add', (_event, input: SiteInput) => siteStore.add(input))
+ipcMain.handle('sites:add', (_event, input: SiteInput) => {
+  const result = siteStore.add(input)
+  if (result.ok) refreshDisabledSites()
+  return result
+})
 
 ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
   const siteId = String(id)
@@ -1391,6 +1419,10 @@ ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
   if (existing.onlineSearch && !result.site.onlineSearch) {
     collector.cancel({ siteId, mode: 'search' })
   }
+  // 刚被禁用：该站点在跑 / 排队的采集都停掉；视频数据保留，重新启用即可恢复
+  if (!existing.disabled && result.site.disabled) collector.cancel({ siteId })
+  // 禁用状态影响列表 / 搜索 / 首页能查到哪些视频，同步给缓存库并作废 feed 缓存
+  refreshDisabledSites()
   // 只有真的换了站点（域名 / 格式变了）旧缓存才不可信。同一个 domain 下改路径、补斜杠
   // 通常只是笔误，为此把几万条来源和详情文件全清掉不值当；清理本身也放到后台，不堵保存。
   if (formatChanged || !isSameSiteHost(existing.address, result.site.address)) {
@@ -1412,7 +1444,7 @@ ipcMain.handle('sites:remove', (_event, id: string) => {
     scheduleStore.remove(siteId)
     // 站点的绑定被级联删掉了，推荐要按剩下的绑定重算
     syncHomeRecommendations()
-    invalidateHomeFeed()
+    refreshDisabledSites()
     // 默认 pic 来源指向这个站点时清掉配置，别留下悬空 id
     if (appSettingsStore.get().defaultPicSiteId === siteId) {
       appSettingsStore.setDefaultPicSite('')
@@ -1843,8 +1875,8 @@ ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
     if (defaultPicSiteId && !siteStore.list().some((site) => site.id === defaultPicSiteId)) {
       appSettingsStore.setDefaultPicSite('')
     }
-    // 分类 / 绑定被整体替换，推荐页那份缓存不再可信
-    invalidateHomeFeed()
+    // 分类 / 绑定被整体替换，推荐页那份缓存不再可信；禁用站点状态也要重新灌一次
+    refreshDisabledSites()
   }
   return result
 })
@@ -1929,6 +1961,8 @@ if (!gotTheLock) {
       await videoStore.init()
       videoCacheReady = true
       videoStore.resetInterrupted()
+      // 禁用站点的视频默认不进列表 / 搜索 / 首页，启动时先把状态灌进缓存库
+      refreshDisabledSites()
       collectLogs.trim()
       await reconcileVideoCache()
     } catch (error) {

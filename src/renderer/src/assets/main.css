@@ -311,9 +311,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   min-width: 58px;
   height: 24px;
-  padding: 0 12px;
+  padding: 0 11px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -325,6 +326,13 @@
   transition:
     color 220ms ease,
     transform 160ms ease;
+}
+
+/* tab 前的小图标：比文字略大、和搜索框里的图标同一档，随按钮一起变色 */
+.titlebar-nav-btn .titlebar-nav-icon {
+  flex: none;
+  font-size: 13px;
+  color: inherit;
 }
 
 .titlebar-nav-btn:hover {
@@ -877,6 +885,24 @@
   white-space: nowrap;
 }
 
+/* 采集格式图标：XML 用「</>」、JSON 用花括号，蓝 / 绿区分，悬停显示格式名。
+   图形本身铺满画布，字号略大于旁边的地球图标，视觉大小才对得上 */
+.site-card-format {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.site-card-format.is-xml {
+  color: #4c8dff;
+}
+
+.site-card-format.is-json {
+  color: #3fb950;
+}
+
 .site-card-alias,
 .site-card-remark,
 .site-card-meta {
@@ -915,6 +941,27 @@
   color: var(--accent);
   font-size: 11px;
   opacity: 0.9;
+}
+
+/* ── 禁用的站点：整张卡压成灰色，标题 / 地址降一档，仍然可以编辑、可以启用回来 ── */
+
+.site-card.is-disabled {
+  background: color-mix(in srgb, var(--surface) 72%, var(--bg));
+}
+
+.site-card.is-disabled .site-card-name,
+.site-card.is-disabled .site-card-address,
+.site-card.is-disabled .site-card-remark {
+  color: var(--text-faint);
+}
+
+.site-card-disabled {
+  margin-inline-end: 0;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  color: var(--text-faint);
+  font-size: 10.5px;
+  line-height: 16px;
 }
 
 /* ── 站点弹窗：在线检索自检（发一次真实请求看支不支持） ── */

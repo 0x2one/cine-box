@@ -32,7 +32,8 @@ export const COLLECT_ERRORS: Record<string, string> = {
   INVALID_INPUT: '采集参数不合法',
   NOT_FOUND: '站点不存在，可能已被删除',
   CACHE_UNAVAILABLE: '缓存库不可用，请重启应用后重试',
-  BUSY: '缓存正在清理，请稍后再试'
+  BUSY: '缓存正在清理，请稍后再试',
+  SITE_DISABLED: '站点已禁用，先在「站点」里启用后再采集'
 }
 
 /** 采集状态对应的 antd Tag 颜色 */
