@@ -312,9 +312,11 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-width: 58px;
+  /* 两侧等宽（不跟文字长短走），中间的搜索框才会正好落在窗口中心 */
+  flex: none;
+  width: 82px;
   height: 24px;
-  padding: 0 11px;
+  padding: 0;
   border: 0;
   border-radius: 999px;
   background: transparent;

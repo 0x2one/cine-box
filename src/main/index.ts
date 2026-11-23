@@ -559,8 +559,8 @@ function createWindow(): void {
     const BRAND_ZONE_WIDTH = 150
     const ACTIONS_ZONE_WIDTH = 222
     // 与 TitleBar 中间「推荐 / 搜索 / 找片看」胶囊的实际宽度对齐（main.css 的 .titlebar-nav）：
-    // 内边距 3+3、边框 1+1、推荐约 65、找片看约 78、搜索框 200、三处间距 6×2
-    const CENTER_NAV_WIDTH = 366
+    // 内边距 3+3、边框 1+1、两侧等宽按钮 82×2、搜索框 200、三处间距 6×2
+    const CENTER_NAV_WIDTH = 384
     mainWindow.hookWindowMessage(WM_LBUTTONDBLCLK, () => {
       if (!mainWindow || mainWindow.isDestroyed()) return
       const cursor = screen.getCursorScreenPoint()
