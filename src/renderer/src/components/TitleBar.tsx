@@ -5,12 +5,12 @@ import {
   CloseOutlined,
   CompassOutlined,
   CompressOutlined,
-  DownloadOutlined,
   FireOutlined,
   MinusOutlined,
   SearchOutlined,
   SettingOutlined
 } from '@ant-design/icons'
+import DownloadIcon from './DownloadIcon'
 import logoUrl from '../assets/logo.svg'
 import type { AppView } from '../types'
 
@@ -161,7 +161,7 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
           title="下载中心"
           aria-label="下载中心"
         >
-          <DownloadOutlined />
+          <DownloadIcon />
         </button>
 
         <button

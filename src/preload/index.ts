@@ -62,6 +62,9 @@ const api = {
   },
   downloads: {
     list: (): Promise<DownloadRecordView[]> => ipcRenderer.invoke('downloads:list'),
+    /** 下载目录占用（文件数 / 字节数）与所在磁盘的容量，设置页的「下载」分区用 */
+    usage: (): Promise<{ ok: boolean; usage?: DownloadUsage }> =>
+      ipcRenderer.invoke('downloads:usage'),
     /** 用独立播放窗播本机文件；文件被删 / 记录不存在时 ok 为假 */
     play: (id: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('downloads:play', id),

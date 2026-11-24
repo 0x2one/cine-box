@@ -3,11 +3,14 @@ import { App, Button, Popconfirm, Progress, Segmented, Spin, Switch, Tooltip } f
 import {
   ArrowLeftOutlined,
   CheckOutlined,
+  CloudDownloadOutlined,
   CompassOutlined,
   CompressOutlined,
   DeleteOutlined,
   DesktopOutlined,
+  EditOutlined,
   ExpandOutlined,
+  FolderOpenOutlined,
   HddOutlined,
   InfoCircleOutlined,
   LaptopOutlined,
@@ -25,7 +28,7 @@ import type { ThemeMode } from '../theme/appearance'
 import { formatBytes } from '../utils/format'
 import { AboutPanel } from './About'
 
-type SettingsSection = 'preferences' | 'shortcut' | 'storage' | 'about'
+type SettingsSection = 'preferences' | 'shortcut' | 'download' | 'storage' | 'about'
 
 const NAV_ITEMS: {
   key: SettingsSection
@@ -34,6 +37,7 @@ const NAV_ITEMS: {
 }[] = [
   { key: 'preferences', label: '偏好设置', icon: SettingOutlined },
   { key: 'shortcut', label: '快捷键', icon: ThunderboltOutlined },
+  { key: 'download', label: '下载', icon: CloudDownloadOutlined },
   { key: 'storage', label: '存储', icon: HddOutlined },
   { key: 'about', label: '关于', icon: InfoCircleOutlined }
 ]
@@ -41,6 +45,7 @@ const NAV_ITEMS: {
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   preferences: { title: '偏好设置', desc: '启动、关闭、更新与外观' },
   shortcut: { title: '快捷键', desc: '在任何应用中唤起映盒剧场' },
+  download: { title: '下载', desc: '保存位置与同时下载任务数' },
   storage: { title: '存储', desc: '本地缓存占用与清理' },
   about: { title: '关于', desc: '应用介绍与软件更新' }
 }
@@ -466,6 +471,221 @@ function ShortcutPanel(): React.JSX.Element {
   )
 }
 
+/* ── 下载 ── */
+
+/** 下载占磁盘的比例：很小的比例写成「<0.1%」，不要一律显示 0.0% */
+function formatShare(size: number, total: number): string {
+  if (total <= 0) return '—'
+  const percent = (size / total) * 100
+  if (percent === 0) return '0%'
+  if (percent < 0.1) return '<0.1%'
+  return `${percent.toFixed(percent >= 10 ? 0 : 1)}%`
+}
+
+/**
+ * 下载相关设置：存储占用概览 + 保存位置 + 同时下载任务数。
+ * 下载中心页只保留记录列表，这两项单独占一个设置分区，路径可以整行铺开。
+ */
+function DownloadPanel(): React.JSX.Element {
+  const { message } = App.useApp()
+  const [path, setPath] = useState('')
+  const [concurrency, setConcurrency] = useState(2)
+  const [usage, setUsage] = useState<DownloadUsage | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [picking, setPicking] = useState(false)
+  const [scanning, setScanning] = useState(true)
+
+  const refreshUsage = useCallback(async (): Promise<void> => {
+    setScanning(true)
+    try {
+      const result = await window.api.downloads.usage()
+      setUsage(result.ok && result.usage ? result.usage : null)
+    } catch {
+      setUsage(null)
+    } finally {
+      setScanning(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    void window.api.settings.get().then((settings) => {
+      if (!alive) return
+      setPath(settings.downloadPath)
+      setConcurrency(settings.downloadConcurrency)
+      setLoading(false)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // 进入分区就统计一次；改下载目录后目录变了，重新扫。
+  // refreshUsage 会先同步置 scanning，规则按调用点误报，这里显式关闭
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshUsage()
+  }, [refreshUsage])
+
+  const changePath = async (): Promise<void> => {
+    setPicking(true)
+    try {
+      const picked = await window.api.downloads.pickPath()
+      if (!picked.ok || !picked.path) return
+      const result = await window.api.downloads.setPath(picked.path)
+      if (!result.ok) {
+        message.error(
+          result.error === 'NOT_WRITABLE' ? '这个目录不可写，换一个位置试试' : '目录路径无效'
+        )
+        return
+      }
+      setPath(result.settings.downloadPath)
+      void refreshUsage()
+      message.success('下载目录已更新')
+    } catch {
+      message.error('更改下载目录失败')
+    } finally {
+      setPicking(false)
+    }
+  }
+
+  const changeConcurrency = (next: string | number): void => {
+    const value = Number(next)
+    void window.api.downloads
+      .setConcurrency(value)
+      .then((saved) => {
+        setConcurrency(saved.downloadConcurrency)
+        message.success(`同时下载任务数已设为 ${saved.downloadConcurrency}`)
+      })
+      .catch(() => message.error('保存并发设置失败'))
+  }
+
+  const openDirectory = async (): Promise<void> => {
+    const result = await window.api.downloads.openFolder()
+    if (!result.ok) message.error('打开下载目录失败')
+  }
+
+  const used = usage && usage.total > 0 ? usage.total - usage.free : 0
+  const usedPercent =
+    usage && usage.total > 0 ? Math.min(100, Math.round((used / usage.total) * 100)) : 0
+  const downloadPercent = usage && usage.total > 0 ? (usage.size / usage.total) * 100 : 0
+
+  return (
+    <>
+      <SettingsCard>
+        <div className="settings-usage">
+          <div className="settings-usage-head">
+            <span className="settings-row-title">存储占用</span>
+            <Tooltip title="重新统计">
+              <Button
+                size="small"
+                type="text"
+                icon={<ReloadOutlined />}
+                aria-label="重新统计下载占用"
+                loading={scanning}
+                onClick={() => void refreshUsage()}
+              />
+            </Tooltip>
+          </div>
+
+          <div className="settings-usage-stats">
+            <div className="settings-usage-stat">
+              <span className="settings-usage-label">下载占用</span>
+              <span className="settings-usage-value">{usage ? formatBytes(usage.size) : '—'}</span>
+              <span className="settings-usage-sub">
+                {usage ? `${usage.files.toLocaleString('zh-CN')} 个文件` : '正在统计…'}
+              </span>
+            </div>
+            <div className="settings-usage-stat">
+              <span className="settings-usage-label">磁盘剩余</span>
+              <span className="settings-usage-value">
+                {usage && usage.total > 0 ? formatBytes(usage.free) : '—'}
+              </span>
+              <span className="settings-usage-sub">
+                {usage && usage.total > 0 ? `已用 ${formatBytes(used)}` : '读取不到磁盘信息'}
+              </span>
+            </div>
+            <div className="settings-usage-stat">
+              <span className="settings-usage-label">磁盘总容量</span>
+              <span className="settings-usage-value">
+                {usage && usage.total > 0 ? formatBytes(usage.total) : '—'}
+              </span>
+              <span className="settings-usage-sub">
+                {usage && usage.total > 0 ? `下载占 ${formatShare(usage.size, usage.total)}` : '—'}
+              </span>
+            </div>
+          </div>
+
+          <div className="settings-usage-bar">
+            <div
+              className="settings-usage-track"
+              role="img"
+              aria-label={`磁盘已用 ${usedPercent}%`}
+            >
+              <span className="settings-usage-used" style={{ width: `${usedPercent}%` }} />
+              <span
+                className="settings-usage-download"
+                style={{ width: `${Math.min(100, downloadPercent)}%` }}
+              />
+            </div>
+            <span className="settings-usage-caption">
+              {usage && usage.total > 0 ? `磁盘已用 ${usedPercent}%` : '—'}
+            </span>
+          </div>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingRow
+          stacked
+          title="保存位置"
+          description="新下载的文件保存到这个目录；更改后已有文件与记录不受影响"
+        >
+          <div className="settings-path-row">
+            <span className="settings-path" title={path || undefined}>
+              {loading ? '正在读取…' : path || '—'}
+            </span>
+            <Tooltip title="更改下载目录">
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                aria-label="更改下载目录"
+                loading={picking}
+                disabled={loading}
+                onClick={() => void changePath()}
+              />
+            </Tooltip>
+            <Tooltip title="打开下载目录">
+              <Button
+                size="small"
+                type="text"
+                icon={<FolderOpenOutlined />}
+                aria-label="打开下载目录"
+                onClick={() => void openDirectory()}
+              />
+            </Tooltip>
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          title="同时下载任务数"
+          description="同时进行的下载数量，太多容易占满带宽；调小不会中断正在下载的任务"
+        >
+          <Segmented
+            value={concurrency}
+            disabled={loading}
+            onChange={changeConcurrency}
+            options={[1, 2, 3, 4, 5].map((value) => ({
+              value,
+              label: `${value}`
+            }))}
+          />
+        </SettingRow>
+      </SettingsCard>
+    </>
+  )
+}
+
 /* ── 存储 / 清理缓存 ── */
 
 /** 自动扫描（进入面板时）：超过这个时长才显示进度，很快出结果就不露状态 */
@@ -740,6 +960,7 @@ function Settings({ onBack }: { onBack: () => void }): React.JSX.Element {
           </div>
           {section === 'preferences' && <PreferencesPanel />}
           {section === 'shortcut' && <ShortcutPanel />}
+          {section === 'download' && <DownloadPanel />}
           {section === 'storage' && <StoragePanel />}
           {section === 'about' && <AboutPanel />}
         </div>

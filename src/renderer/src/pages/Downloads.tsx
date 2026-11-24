@@ -66,14 +66,12 @@ function progressText(record: DownloadRecordView): string {
   return record.receivedBytes > 0 ? formatBytes(record.receivedBytes) : ''
 }
 
-/** 下载中心：保存位置 / 并发设置 + 下载记录（播放本机文件、定位文件、删除） */
+/** 下载中心：只列下载记录（播放本机文件、定位文件、删除）；保存位置与并发数在 设置 › 下载 */
 function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
   const { message, modal } = App.useApp()
-  const [settings, setSettings] = useState<AppSettings | null>(null)
   const [records, setRecords] = useState<DownloadRecordView[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<DownloadFilter>('all')
-  const [picking, setPicking] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
   const loadRecords = useCallback(async (): Promise<void> => {
@@ -88,9 +86,6 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
 
   useEffect(() => {
     let alive = true
-    void window.api.settings.get().then((value) => {
-      if (alive) setSettings(value)
-    })
     // loadRecords 是异步函数，setState 在 await 之后执行；规则按调用点误报，这里显式关闭
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadRecords()
@@ -144,38 +139,6 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
   const openDirectory = async (id?: string): Promise<void> => {
     const result = await window.api.downloads.openFolder(id)
     if (!result.ok) message.error('打开下载目录失败')
-  }
-
-  const changePath = async (): Promise<void> => {
-    setPicking(true)
-    try {
-      const picked = await window.api.downloads.pickPath()
-      if (!picked.ok || !picked.path) return
-      const result = await window.api.downloads.setPath(picked.path)
-      if (!result.ok) {
-        message.error(
-          result.error === 'NOT_WRITABLE' ? '这个目录不可写，换一个位置试试' : '目录路径无效'
-        )
-        return
-      }
-      setSettings(result.settings)
-      message.success('下载目录已更新')
-    } catch {
-      message.error('更改下载目录失败')
-    } finally {
-      setPicking(false)
-    }
-  }
-
-  const changeConcurrency = (next: string | number): void => {
-    const value = Number(next)
-    void window.api.downloads
-      .setConcurrency(value)
-      .then((saved) => {
-        setSettings(saved)
-        message.success(`同时下载任务数已设为 ${saved.downloadConcurrency}`)
-      })
-      .catch(() => message.error('保存并发设置失败'))
   }
 
   const play = async (record: DownloadRecordView): Promise<void> => {
@@ -249,7 +212,7 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
   const emptyTitle = filter === 'all' ? '还没有下载记录' : '这个分类下没有记录'
   const emptyDesc =
     filter === 'all'
-      ? '下载的视频会保存到上面的目录里，完成后可以在这里直接播放或打开所在文件夹。'
+      ? '下载的视频会保存到设置里指定的目录，完成后可以在这里直接播放或打开所在文件夹。'
       : '切换上方的筛选条件看看。'
 
   return (
@@ -261,59 +224,9 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
         </button>
       </div>
       <h1 className="page-title">下载中心</h1>
-      <p className="page-subtitle">设置保存位置与并发数，管理已下载的视频</p>
+      <p className="page-subtitle">管理已下载的视频；保存位置与并发数在「设置 › 下载」里调整</p>
 
       <div className="downloads-body">
-        <section className="settings-card">
-          <div className="settings-row settings-row--stack">
-            <div className="settings-row-text">
-              <span className="settings-row-title">保存位置</span>
-              <span className="settings-row-desc">
-                新下载的文件保存到这个目录；更改后已有文件与记录不受影响
-              </span>
-            </div>
-            <div className="downloads-path-row">
-              <span className="downloads-path" title={settings?.downloadPath}>
-                {settings?.downloadPath ?? '正在读取…'}
-              </span>
-              <div className="downloads-path-actions">
-                <Button size="small" onClick={() => void changePath()} loading={picking}>
-                  更改目录
-                </Button>
-                <Tooltip title="打开下载目录">
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<FolderOpenOutlined />}
-                    aria-label="打开下载目录"
-                    onClick={() => void openDirectory()}
-                  />
-                </Tooltip>
-              </div>
-            </div>
-          </div>
-
-          <div className="settings-row">
-            <div className="settings-row-text">
-              <span className="settings-row-title">同时下载任务数</span>
-              <span className="settings-row-desc">
-                同时进行的下载数量，太多容易占满带宽；调小不会中断正在下载的任务
-              </span>
-            </div>
-            <div className="settings-row-control">
-              <Segmented
-                value={settings?.downloadConcurrency ?? 2}
-                disabled={!settings}
-                onChange={changeConcurrency}
-                options={[1, 2, 3, 4, 5].map((value) => ({
-                  value,
-                  label: `${value}`
-                }))}
-              />
-            </div>
-          </div>
-        </section>
-
         <section className="settings-card downloads-records">
           <div className="downloads-records-head">
             <div className="downloads-records-title">
@@ -340,14 +253,16 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
                   onClick={() => void refresh()}
                 />
               </Tooltip>
-              <Button
-                size="small"
-                type="text"
-                onClick={clearFinished}
-                disabled={counts.finished === 0}
-              >
-                清空已结束
-              </Button>
+              <Tooltip title="清空已结束的记录">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<DeleteOutlined />}
+                  aria-label="清空已结束的记录"
+                  onClick={clearFinished}
+                  disabled={counts.finished === 0}
+                />
+              </Tooltip>
             </div>
           </div>
 

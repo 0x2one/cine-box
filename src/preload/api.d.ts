@@ -1379,8 +1379,24 @@ interface DownloadPathResult {
   settings: AppSettings
 }
 
+/** 下载目录的占用与所在磁盘的容量（`downloads:usage`） */
+interface DownloadUsage {
+  /** 实际扫描的目录 */
+  path: string
+  /** 目录里的文件数（递归） */
+  files: number
+  /** 目录里所有文件的总字节数 */
+  size: number
+  /** 所在磁盘总容量；读不到时为 0 */
+  total: number
+  /** 所在磁盘剩余可用空间；读不到时为 0 */
+  free: number
+}
+
 interface DownloadsApi {
   list: () => Promise<DownloadRecordView[]>
+  /** 下载目录占用 + 磁盘容量；读取失败时 ok 为假 */
+  usage: () => Promise<{ ok: boolean; usage?: DownloadUsage }>
   /** 用播放窗播本机文件；文件被删 / 记录不存在时返回 ok: false */
   play: (id: string) => Promise<{ ok: boolean; error?: string }>
   /** 不带 id 打开下载目录，带 id 在文件管理器里定位该文件 */

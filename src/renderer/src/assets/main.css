@@ -440,7 +440,8 @@
     color 120ms ease;
 }
 
-.titlebar-action .anticon {
+.titlebar-action .anticon,
+.titlebar-action .titlebar-download-icon {
   font-size: 14px;
 }
 
@@ -2156,6 +2157,121 @@
   color: var(--text-faint);
   font-size: 11.5px;
   line-height: 1.6;
+}
+
+/* 设置里的下载路径：等宽显示，单行省略，右侧接「更改目录 / 打开目录」 */
+.settings-path-row {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-path {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+/* 下载分区的存储概览：三项数字 + 一条磁盘占用条（深色段是下载占用） */
+.settings-usage {
+  padding-bottom: 16px;
+}
+
+.settings-usage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 18px 8px;
+}
+
+.settings-usage-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  padding: 0 18px 14px;
+}
+
+.settings-usage-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-usage-label {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.settings-usage-value {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.settings-usage-sub {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-usage-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+}
+
+.settings-usage-track {
+  position: relative;
+  height: 8px;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+/* 两段都从左边起：浅色段是磁盘已用，深色段是其中的下载占用 */
+.settings-usage-used,
+.settings-usage-download {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 999px;
+}
+
+.settings-usage-used {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.settings-usage-download {
+  background: var(--accent);
+}
+
+.settings-usage-caption {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── 封面 ── */

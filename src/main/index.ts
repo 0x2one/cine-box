@@ -32,6 +32,7 @@ import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
 import { downloadMediaUrl, DOWNLOAD_MEDIA_SCHEME, serveDownloadFile } from './download-media'
 import { createDownloadStore } from './download-store'
+import { readDownloadUsage } from './download-usage'
 import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
@@ -712,6 +713,15 @@ ipcMain.handle('settings:setCollectConcurrency', (_event, value: number) => {
 /* ── IPC：下载中心 ── */
 
 ipcMain.handle('downloads:list', () => downloadStore.list())
+
+// 目录占用 + 磁盘容量：设置页的「下载」分区用它画概览，扫描放在 IPC 里不堵界面
+ipcMain.handle('downloads:usage', async () => {
+  try {
+    return { ok: true, usage: await readDownloadUsage(downloadStore.ensureDirectory()) }
+  } catch {
+    return { ok: false }
+  }
+})
 
 ipcMain.handle('downloads:pickPath', async () => {
   const options: Electron.OpenDialogOptions = {

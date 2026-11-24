@@ -1,4 +1,4 @@
-/* 下载中心：页面头、保存位置 / 并发设置、下载记录列表 */
+/* 下载中心：页面头、下载记录列表（保存位置 / 并发数已挪到 设置 › 下载） */
 
 .downloads-topbar {
   display: flex;
@@ -7,40 +7,6 @@
 
 .downloads-body {
   margin-top: 18px;
-}
-
-/* ── 保存位置 ── */
-
-.downloads-path-row {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-}
-
-/* 路径可能很长：单行省略，完整值走 title；字体用等宽，盘符 / 目录层级更好认 */
-.downloads-path {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 10px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-muted);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: text;
-}
-
-.downloads-path-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 6px;
 }
 
 /* ── 记录卡片头 ── */
