@@ -3,7 +3,15 @@ import { LeftOutlined, ReloadOutlined, RightOutlined, VideoCameraOutlined } from
 import { applyPlayerAppearance, findAccent } from '../theme/appearance'
 import PlayerPanel, { type PlayerPanelTab } from './PlayerPanel'
 import PlayerTitleBar from './PlayerTitleBar'
-import { buildLines, episodeTitle, lineLabels, type PlayerLine } from './player-data'
+import {
+  buildLines,
+  episodeTitle,
+  firstEpisodeIndex,
+  groupBySource,
+  lineName,
+  readEpisodeOrder,
+  type PlayerLine
+} from './player-data'
 import { useArtPlayer } from './useArtPlayer'
 
 const AUTO_NEXT_KEY = 'player-auto-next'
@@ -96,10 +104,13 @@ function PlayerSession({
           built.find((item) => item.sourceId === payload.sourceId) ??
           built[0]
         setLineKey(preferred.key)
-        const target =
-          preferred.episodes.find((item) => item.index === payload.episodeIndex) ??
-          preferred.episodes[0]
-        setEpisodeIndex(preferred.episodes.indexOf(target))
+        // 没指定具体集数时按集数排序播第一格：倒序 = 最新一集，正序 = 第 1 集
+        const fallbackIndex = firstEpisodeIndex(preferred.episodes, readEpisodeOrder())
+        const specified =
+          typeof payload.episodeIndex === 'number'
+            ? preferred.episodes.find((item) => item.index === payload.episodeIndex)
+            : undefined
+        setEpisodeIndex(specified ? preferred.episodes.indexOf(specified) : fallbackIndex)
         setPhase('ready')
       })
       .catch(() => {
@@ -119,8 +130,8 @@ function PlayerSession({
     [lines, lineKey]
   )
   const episode = line?.episodes[episodeIndex] ?? line?.episodes[0] ?? null
-  const labels = useMemo(() => lineLabels(lines), [lines])
-  const lineLabel = line ? (labels.get(line.key) ?? '') : ''
+  const groups = useMemo(() => groupBySource(lines), [lines])
+  const lineLabel = line ? lineName(line, groups) : ''
 
   const title = detail?.name?.trim() || payload.title?.trim() || '正在播放'
   const episodeName = episode

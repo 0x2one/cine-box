@@ -1,5 +1,30 @@
-import { useEffect, useRef } from 'react'
-import { episodeLabel, lineLabels, type PlayerLine } from './player-data'
+import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
+import { MoreOutlined, SettingOutlined } from '@ant-design/icons'
+import {
+  circledNumber,
+  currentEpisodeLabel,
+  EPISODE_ORDER_KEY,
+  episodeLabel,
+  episodeTitle,
+  groupBySource,
+  lineName,
+  lineOrdinal,
+  readEpisodeOrder,
+  type EpisodeOrder,
+  type PlayerLine
+} from './player-data'
+
+/** 每 100 集一个锚点区间：1-100、101-200 … */
+const RANGE_SIZE = 100
+
+type PanelMenu = 'settings' | 'sources' | null
+
+interface EpisodeRange {
+  /** 区间起点（原始序号，1 起） */
+  start: number
+  /** 区间终点，最后一段按总集数截断 */
+  end: number
+}
 
 interface EpisodePanelProps {
   lines: PlayerLine[]
@@ -11,10 +36,23 @@ interface EpisodePanelProps {
   onAutoNext: (value: boolean) => void
 }
 
+function buildRanges(total: number): EpisodeRange[] {
+  const ranges: EpisodeRange[] = []
+  for (let start = 1; start <= total; start += RANGE_SIZE) {
+    ranges.push({ start, end: Math.min(start + RANGE_SIZE - 1, total) })
+  }
+  return ranges
+}
+
 /**
- * 面板里的剧集列表：线路切换 + 集数格子 + 自动连播开关。
- * 集数用等宽数字排成「胶片格」，正在播放的那一格填强调色并带三根跳动的电平条；
- * 网格自己滚动，头部和底部固定。
+ * 面板里的剧集列表 + 底部操作条。
+ *
+ * 这里不显示播放类型（jjm3u8 之类），也不在顶部放大字号的资源站名：
+ * 当前播放源由底部那颗高亮的站名 chip 表示，够用又不抢戏。
+ * 底部一条是「设置」+「播放源 chip」+（放不下时）「全部播放源」：
+ * 两个图标按钮都把面板紧贴着往上弹，设置里是自动连播和集数排序，更多里是全部播放源。
+ * 集数默认倒序（新→旧），可切正序；超过 100 集时网格上方多一条 1-100 / 101-200 的锚点，
+ * 点击直接滚到对应区间，滚动时锚点跟着高亮。
  */
 function EpisodePanel({
   lines,
@@ -25,44 +63,206 @@ function EpisodePanel({
   autoNext,
   onAutoNext
 }: EpisodePanelProps): React.JSX.Element {
-  const labels = lineLabels(lines)
-  const scrollerRef = useRef<HTMLDivElement>(null)
+  const groups = useMemo(() => groupBySource(lines), [lines])
+  const [order, setOrder] = useState<EpisodeOrder>(readEpisodeOrder)
+  const [menu, setMenu] = useState<PanelMenu>(null)
+  // 首帧就落在当前集所在的区间，避免先亮 1-100 再跳过去
+  const [activeRange, setActiveRange] = useState(
+    () => Math.floor(episodeIndex / RANGE_SIZE) * RANGE_SIZE + 1
+  )
+  const [overflow, setOverflow] = useState(false)
+  const [edge, setEdge] = useState({ start: true, end: true })
+  const gridRef = useRef<HTMLDivElement>(null)
+  const sourcesRef = useRef<HTMLDivElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
+  const spyFrame = useRef(0)
 
-  // 切集 / 切线路 / 重新展开面板后把当前格滚到可见位置
+  /** 按排序方式摊开的集数：index 始终是 line.episodes 里的原始下标 */
+  const episodes = useMemo(() => {
+    const items = line.episodes.map((episode, index) => ({ episode, index }))
+    return order === 'desc' ? items.reverse() : items
+  }, [line.episodes, order])
+
+  const ranges = useMemo(() => buildRanges(line.episodes.length), [line.episodes.length])
+
   useEffect(() => {
-    const container = scrollerRef.current
-    const active = container?.querySelector<HTMLElement>('.episode-cell.is-active')
+    localStorage.setItem(EPISODE_ORDER_KEY, order)
+  }, [order])
+
+  /**
+   * 区间里「显示在最上面」的那一集：正序是区间起点，倒序是区间终点。
+   * 滚动定位和滚动高亮都拿它当参照，否则倒序时锚点会跳错地方。
+   */
+  const rangeAnchor = useCallback(
+    (range: EpisodeRange): number => (order === 'desc' ? range.end : range.start),
+    [order]
+  )
+
+  /** 滚动时让锚点跟着走：最后一个「已经滚过顶部」的区间就是当前区间 */
+  const syncRange = useCallback(() => {
+    const grid = gridRef.current
+    if (!grid || ranges.length <= 1) return
+    const top = grid.getBoundingClientRect().top
+    const ordered = order === 'desc' ? [...ranges].reverse() : ranges
+    let current = ordered[0].start
+    for (const range of ordered) {
+      const cell = grid.querySelector<HTMLElement>(`[data-ordinal="${rangeAnchor(range)}"]`)
+      if (!cell) continue
+      if (cell.getBoundingClientRect().top - top <= 8) current = range.start
+    }
+    setActiveRange(current)
+  }, [order, rangeAnchor, ranges])
+
+  const goRange = useCallback(
+    (range: EpisodeRange) => {
+      const grid = gridRef.current
+      const cell = grid?.querySelector<HTMLElement>(`[data-ordinal="${rangeAnchor(range)}"]`)
+      if (!grid || !cell) return
+      // 只滚剧集网格，不走 scrollIntoView：面板外层是 overflow: hidden，
+      // 让它去滚动祖先容器会把整个面板内容顶走
+      const top =
+        grid.scrollTop + cell.getBoundingClientRect().top - grid.getBoundingClientRect().top
+      grid.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+    },
+    [rangeAnchor]
+  )
+
+  // 切集 / 切线路 / 改排序 / 重新展开面板：把当前集滚进可见区，再同步一次锚点
+  useEffect(() => {
+    const active = gridRef.current?.querySelector<HTMLElement>('.episode-cell.is-active')
     active?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
-  }, [episodeIndex, line.key])
+    syncRange()
+  }, [episodeIndex, line.key, order, syncRange])
+
+  const handleGridScroll = (): void => {
+    if (spyFrame.current) return
+    spyFrame.current = requestAnimationFrame(() => {
+      spyFrame.current = 0
+      syncRange()
+    })
+  }
+
+  useEffect(
+    () => () => {
+      if (spyFrame.current) cancelAnimationFrame(spyFrame.current)
+    },
+    []
+  )
+
+  // 播放源多到一行放不下时，最右边那颗「更多」出现；两端压暗只在没滚到头时显示
+  useEffect(() => {
+    const strip = sourcesRef.current
+    if (!strip) return
+    const update = (): void => {
+      const max = strip.scrollWidth - strip.clientWidth
+      const nextOverflow = max > 1
+      setOverflow(nextOverflow)
+      // 「更多」随溢出消失时，已经展开的播放源菜单也跟着收起
+      if (!nextOverflow) setMenu((current) => (current === 'sources' ? null : current))
+      const start = strip.scrollLeft <= 1
+      const end = max <= 1 || strip.scrollLeft >= max - 1
+      // 滚动时只在端点真的变了才更新，避免整块剧集网格跟着重渲染
+      setEdge((current) =>
+        current.start === start && current.end === end ? current : { start, end }
+      )
+    }
+    update()
+    strip.addEventListener('scroll', update, { passive: true })
+    const observer = new ResizeObserver(update)
+    observer.observe(strip)
+    return () => {
+      strip.removeEventListener('scroll', update)
+      observer.disconnect()
+    }
+  }, [lines.length])
+
+  // 切站后把当前 chip 带回可见区。「更多」出现时来源条会变窄，所以 overflow 变化也要重算
+  useEffect(() => {
+    const strip = sourcesRef.current
+    const chip = strip?.querySelector<HTMLElement>('.episode-source-chip.is-active')
+    if (!strip || !chip) return
+    const chipRect = chip.getBoundingClientRect()
+    const stripRect = strip.getBoundingClientRect()
+    if (chipRect.right > stripRect.right) {
+      strip.scrollBy({ left: chipRect.right - stripRect.right, behavior: 'smooth' })
+    } else if (chipRect.left < stripRect.left) {
+      strip.scrollBy({ left: chipRect.left - stripRect.left, behavior: 'smooth' })
+    }
+  }, [line.key, lines.length, overflow])
+
+  // 点面板外面 / 按 Esc 收起弹出层
+  useEffect(() => {
+    if (!menu) return
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!barRef.current?.contains(event.target as Node)) setMenu(null)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setMenu(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menu])
+
+  // 播放源条横向滚动：普通鼠标只有竖向滚轮，这里把 deltaY 转给 scrollLeft
+  const wheelSources = (event: WheelEvent<HTMLDivElement>): void => {
+    const strip = sourcesRef.current
+    if (!strip || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+    if (strip.scrollWidth <= strip.clientWidth) return
+    strip.scrollLeft += event.deltaY
+  }
+
+  /**
+   * 顶部那行右侧的「正在播放」：跟随当前集 / 换线路更新，
+   * 剧集网格滚到别的区间时也能知道在播哪一集。
+   */
+  const currentIndex = episodeIndex < line.episodes.length ? episodeIndex : 0
+  const current = line.episodes[currentIndex] ?? null
 
   return (
     <section className="episode-panel">
       <div className="episode-head">
-        <span className="episode-current" title={line.sourceName}>
-          {line.sourceName}
-        </span>
-        <span className="episode-count">{line.episodes.length} 集</span>
+        <span className="episode-total">共 {line.episodes.length} 集</span>
+        {current && (
+          <span
+            className="episode-now"
+            title={`正在播放 ${episodeTitle(current.name, currentIndex)}`}
+          >
+            <span className="episode-now-label">正在播放</span>
+            <span className="episode-now-episode">
+              {currentEpisodeLabel(current.name, currentIndex)}
+            </span>
+          </span>
+        )}
       </div>
 
-      {lines.length > 1 && (
-        <div className="episode-lines" role="group" aria-label="播放线路">
-          {lines.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={`episode-line${item.key === line.key ? ' is-active' : ''}`}
-              aria-pressed={item.key === line.key}
-              title={`${item.sourceName} · ${item.flag || '默认线路'}`}
-              onClick={() => onLine(item)}
-            >
-              {labels.get(item.key)}
-            </button>
-          ))}
+      {ranges.length > 1 && (
+        <div className="episode-anchors" role="group" aria-label="集数区间">
+          {ranges.map((range) => {
+            const active = range.start === activeRange
+            const label =
+              range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`
+            return (
+              <button
+                key={range.start}
+                type="button"
+                className={`episode-anchor${active ? ' is-active' : ''}`}
+                aria-current={active ? 'true' : undefined}
+                title={`跳到第 ${range.start}–${range.end} 集`}
+                onClick={() => goRange(range)}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
       )}
 
-      <div className="episode-grid" ref={scrollerRef}>
-        {line.episodes.map((episode, index) => {
+      <div className="episode-grid" ref={gridRef} onScroll={handleGridScroll}>
+        {episodes.map(({ episode, index }) => {
           const label = episodeLabel(episode.name, index)
           const active = index === episodeIndex
           return (
@@ -70,6 +270,7 @@ function EpisodePanel({
               key={`${episode.index}-${episode.url}`}
               type="button"
               className={`episode-cell${active ? ' is-active' : ''}`}
+              data-ordinal={index + 1}
               title={episode.name || `第 ${index + 1} 集`}
               aria-current={active ? 'true' : undefined}
               onClick={() => onEpisode(index)}
@@ -88,18 +289,136 @@ function EpisodePanel({
         })}
       </div>
 
-      <div className="episode-foot">
-        <span className="episode-foot-label">自动连播</span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={autoNext}
-          className={`episode-switch${autoNext ? ' is-on' : ''}`}
-          title={autoNext ? '关闭自动连播' : '开启自动连播'}
-          onClick={() => onAutoNext(!autoNext)}
-        >
-          <span className="episode-switch-knob" />
-        </button>
+      <div className="episode-actions">
+        <div className="episode-actionbar" ref={barRef}>
+          <button
+            type="button"
+            className={`episode-action${menu === 'settings' ? ' is-open' : ''}`}
+            title="播放设置"
+            aria-label="播放设置"
+            aria-expanded={menu === 'settings'}
+            onClick={() => setMenu(menu === 'settings' ? null : 'settings')}
+          >
+            <SettingOutlined />
+          </button>
+
+          <div
+            className={`episode-sources${edge.start ? '' : ' is-fade-start'}${
+              edge.end ? '' : ' is-fade-end'
+            }`}
+            ref={sourcesRef}
+            role="group"
+            aria-label="播放源"
+            onWheel={wheelSources}
+          >
+            {lines.map((item) => {
+              const ordinal = lineOrdinal(item, groups)
+              const active = item.key === line.key
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`episode-source-chip${active ? ' is-active' : ''}`}
+                  aria-pressed={active}
+                  title={lineName(item, groups)}
+                  onClick={() => {
+                    setMenu(null)
+                    onLine(item)
+                  }}
+                >
+                  <span className="episode-source-name">{item.sourceName}</span>
+                  {ordinal > 0 && (
+                    <span className="episode-source-ordinal">{circledNumber(ordinal)}</span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          {overflow && (
+            <button
+              type="button"
+              className={`episode-action${menu === 'sources' ? ' is-open' : ''}`}
+              title="全部播放源"
+              aria-label="全部播放源"
+              aria-expanded={menu === 'sources'}
+              onClick={() => setMenu(menu === 'sources' ? null : 'sources')}
+            >
+              <MoreOutlined />
+            </button>
+          )}
+
+          {menu === 'settings' && (
+            <div className="episode-popover is-settings" role="dialog" aria-label="播放设置">
+              <div className="episode-setting-row">
+                <span className="episode-setting-label">自动连播</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoNext}
+                  className={`episode-switch${autoNext ? ' is-on' : ''}`}
+                  title={autoNext ? '关闭自动连播' : '开启自动连播'}
+                  onClick={() => onAutoNext(!autoNext)}
+                >
+                  <span className="episode-switch-knob" />
+                </button>
+              </div>
+              <div className="episode-setting-row">
+                <span className="episode-setting-label">集数排序</span>
+                <div className="episode-order" role="group" aria-label="集数排序">
+                  <button
+                    type="button"
+                    className={`episode-order-btn${order === 'desc' ? ' is-active' : ''}`}
+                    aria-pressed={order === 'desc'}
+                    onClick={() => setOrder('desc')}
+                  >
+                    倒序
+                  </button>
+                  <button
+                    type="button"
+                    className={`episode-order-btn${order === 'asc' ? ' is-active' : ''}`}
+                    aria-pressed={order === 'asc'}
+                    onClick={() => setOrder('asc')}
+                  >
+                    正序
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {menu === 'sources' && (
+            <div className="episode-popover is-sources" role="dialog" aria-label="全部播放源">
+              <div className="episode-popover-head">播放源</div>
+              <div className="episode-source-list">
+                {lines.map((item) => {
+                  const ordinal = lineOrdinal(item, groups)
+                  const active = item.key === line.key
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`episode-source-item${active ? ' is-active' : ''}`}
+                      aria-pressed={active}
+                      onClick={() => {
+                        setMenu(null)
+                        onLine(item)
+                      }}
+                    >
+                      <span className="episode-source-item-name">{item.sourceName}</span>
+                      {ordinal > 0 && (
+                        <span className="episode-source-item-ordinal">
+                          {circledNumber(ordinal)}
+                        </span>
+                      )}
+                      <span className="episode-source-item-count">{item.episodes.length} 集</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </section>
   )

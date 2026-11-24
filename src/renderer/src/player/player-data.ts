@@ -15,11 +15,21 @@ export interface PlayerLine {
   key: string
   sourceId: number
   sourceName: string
-  /** 线路名（采集站给的 flag），空串表示默认线路 */
+  /**
+   * 线路名（采集站给的 flag，如 jjm3u8）。播放页只播 m3u8，它跟「播放类型」没区别，
+   * 界面上不再展示，只留在数据里方便排查。
+   */
   flag: string
   /** playLines 里的原始下标 */
   index: number
   episodes: PlayerEpisode[]
+}
+
+/** 一个资源站下的所有 m3u8 线路：面板按站分组，同一站有多条时才用 ① ② 区分 */
+export interface PlayerSourceGroup {
+  sourceId: number
+  sourceName: string
+  lines: PlayerLine[]
 }
 
 export function isM3u8(url: string): boolean {
@@ -65,17 +75,89 @@ export function buildLines(sources: VideoDetailSource[]): PlayerLine[] {
   return lines
 }
 
-/** 线路名：同名线路（不同来源都叫「线路一」）带上站点名区分 */
-export function lineLabels(lines: PlayerLine[]): Map<string, string> {
-  const base = (line: PlayerLine): string => line.flag || '默认线路'
-  const counts = new Map<string, number>()
-  for (const line of lines) counts.set(base(line), (counts.get(base(line)) ?? 0) + 1)
-  return new Map(
-    lines.map((line) => [
-      line.key,
-      (counts.get(base(line)) ?? 0) > 1 ? `${line.sourceName} · ${base(line)}` : base(line)
-    ])
-  )
+/** 圆圈数字：① … ⑳，超过 20 条线路时退回 (21) 这种写法 */
+const CIRCLED = [
+  '①',
+  '②',
+  '③',
+  '④',
+  '⑤',
+  '⑥',
+  '⑦',
+  '⑧',
+  '⑨',
+  '⑩',
+  '⑪',
+  '⑫',
+  '⑬',
+  '⑭',
+  '⑮',
+  '⑯',
+  '⑰',
+  '⑱',
+  '⑲',
+  '⑳'
+]
+
+export function circledNumber(value: number): string {
+  return CIRCLED[value - 1] ?? `(${value})`
+}
+
+/**
+ * 线路按资源站分组，顺序沿用详情里的来源顺序。
+ * 正常情况下一个站只有一条 m3u8 线路，分组只是为了让标题稳定显示「资源站名」。
+ */
+export function groupBySource(lines: PlayerLine[]): PlayerSourceGroup[] {
+  const groups: PlayerSourceGroup[] = []
+  const index = new Map<number, PlayerSourceGroup>()
+  for (const line of lines) {
+    let group = index.get(line.sourceId)
+    if (!group) {
+      group = { sourceId: line.sourceId, sourceName: line.sourceName, lines: [] }
+      index.set(line.sourceId, group)
+      groups.push(group)
+    }
+    group.lines.push(line)
+  }
+  return groups
+}
+
+/** 集数排序：倒序 = 最新一集在前（默认），正序 = 第 1 集在前 */
+export type EpisodeOrder = 'asc' | 'desc'
+
+export const EPISODE_ORDER_KEY = 'player-episode-order'
+
+/** 读集数排序偏好；没存过或者值不合法都按倒序 */
+export function readEpisodeOrder(): EpisodeOrder {
+  return localStorage.getItem(EPISODE_ORDER_KEY) === 'asc' ? 'asc' : 'desc'
+}
+
+/**
+ * 打开视频但调用方没指定具体集数时，默认播排序后的第一格：
+ * 倒序就是最新一集，正序就是第 1 集。
+ */
+export function firstEpisodeIndex(episodes: PlayerEpisode[], order: EpisodeOrder): number {
+  if (episodes.length <= 1) return 0
+  return order === 'desc' ? episodes.length - 1 : 0
+}
+
+/**
+ * 同一个资源站里的第几条 m3u8 线路（1 起）；该站只有一条（绝大多数情况）时返回 0。
+ * 面板只在多线路站给 chip 补 ① ②，单线路站不需要区分。
+ */
+export function lineOrdinal(line: PlayerLine, groups: PlayerSourceGroup[]): number {
+  const group = groups.find((item) => item.sourceId === line.sourceId)
+  if (!group || group.lines.length <= 1) return 0
+  return group.lines.findIndex((item) => item.key === line.key) + 1
+}
+
+/**
+ * 线路显示名：{资源站名}；同一个站有多条 m3u8 线路时补成「{资源站名} · ①」。
+ * 播放类型（原 flag）不参与命名。
+ */
+export function lineName(line: PlayerLine, groups: PlayerSourceGroup[]): string {
+  const ordinal = lineOrdinal(line, groups)
+  return ordinal > 0 ? `${line.sourceName} · ${circledNumber(ordinal)}` : line.sourceName
 }
 
 /**
@@ -89,6 +171,17 @@ export function episodeLabel(name: string, index: number): { number: string; cap
   const digits = numbered?.[1] ?? plain?.[1]
   if (digits) return { number: digits.padStart(2, '0'), caption: '' }
   return { number: String(index + 1).padStart(2, '0'), caption: text }
+}
+
+/**
+ * 剧集头部「正在播放」用的短标签：认得出集数就写「第 N 集」，
+ * 认不出（正片 / 预告之类）才退回原始集名。
+ */
+export function currentEpisodeLabel(name: string, index: number): string {
+  const text = name.trim()
+  const numbered = text.match(/第\s*(\d+)\s*[集话期回]/) ?? text.match(/^(\d+)$/)
+  if (numbered) return `第 ${Number(numbered[1])} 集`
+  return text || `第 ${index + 1} 集`
 }
 
 /** 标题栏里显示的集数：优先用原始集名，没有就按序号补一个 */

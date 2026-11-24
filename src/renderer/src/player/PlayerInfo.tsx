@@ -5,7 +5,7 @@ import type { PlayerLine } from './player-data'
 interface PlayerInfoProps {
   detail: VideoDetail | null
   line: PlayerLine | null
-  /** 当前线路名，显示在元信息里 */
+  /** 当前播放源名：「{资源站名}」，同站有多条 m3u8 时带 ① ② */
   lineLabel: string
 }
 
@@ -23,14 +23,16 @@ function PlayerInfo({ detail, line, lineLabel }: PlayerInfoProps): React.JSX.Ele
   const actors = (detail?.vodActor?.trim() || meta?.actor?.trim() || '').trim()
   const director = meta?.director?.trim() ?? ''
 
+  const sourceName = lineLabel || source?.siteName?.trim() || ''
+
   const chips = [
     meta?.year?.trim(),
     meta?.area?.trim(),
     source?.categoryName?.trim(),
     detail?.note?.trim(),
     line ? `共 ${line.episodes.length} 集` : '',
-    lineLabel ? `线路 ${lineLabel}` : '',
-    source ? `来源 ${source.siteName}` : ''
+    // 播放页只播 m3u8，不再标注「线路 xxx」这种播放类型，只写资源站名
+    sourceName ? `来源 ${sourceName}` : ''
   ].filter((item): item is string => Boolean(item))
 
   const expandable = intro.length > 140
