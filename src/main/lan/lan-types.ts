@@ -97,10 +97,45 @@ export interface LanLatestPayload {
   pageSize: number
 }
 
+/** 网页端「找片看」用的分类：只给展示端可见的分类（隐藏的父分类连同子树一起不返回） */
+export interface LanCategory {
+  id: string
+  /** 一级分类为 null */
+  parentId: string | null
+  name: string
+  sortOrder: number
+}
+
+export interface LanCategoriesPayload {
+  ok: boolean
+  error?: string
+  categories: LanCategory[]
+}
+
+export interface LanBrowseQuery {
+  /** 选中的本地分类（一级或子分类）；空串表示「全部」= 所有可见一级分类的并集 */
+  categoryId: string
+  page: number
+  pageSize: number
+}
+
+export interface LanBrowsePayload {
+  ok: boolean
+  error?: string
+  items: LanVideoCard[]
+  page: number
+  pageSize: number
+  /** 回显这次筛选的分类，空串表示「全部」 */
+  categoryId: string
+}
+
 export interface LanPlayEpisode {
   name: string
   url: string
-  /** hls 走 /api/play 重写播放列表，file 直接按字节代理 */
+  /**
+   * 网页播放器只播 m3u8：主进程已经过滤掉直链 / 分享页，目前恒为 hls；
+   * 保留这个字段是为了以后扩展其它播放协议。
+   */
   kind: 'hls' | 'file'
 }
 
@@ -145,6 +180,10 @@ export interface LanServiceDeps {
   searchOnline: (keyword: string) => Promise<LanSearchPayload>
   /** 首页「最近收录」 */
   latest: (page: number, pageSize: number) => LanLatestPayload
+  /** 找片看：展示端可见的本地分类 */
+  categories: () => LanCategoriesPayload
+  /** 找片看：按分类分页取视频（空分类 = 所有可见一级分类的并集） */
+  browse: (query: LanBrowseQuery) => LanBrowsePayload
   /** 播放页详情：详情缓存优先，缺的时候由主进程负责抓取 */
   detail: (videoId: number) => Promise<LanDetailPayload>
   /** 服务状态变化（启动 / 停止 / 意外退出）时通知控制台 */

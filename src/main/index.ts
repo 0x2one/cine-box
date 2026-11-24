@@ -23,6 +23,7 @@ import { createBindingStore, type BindingTarget } from './binding-store'
 import {
   createCategoryStore,
   type CategoryPlacement,
+  type VideoCategory,
   type VideoCategoryInput
 } from './category-store'
 import { createCollectLogStore } from './collect-log-store'
@@ -32,8 +33,12 @@ import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
 import { createLanService } from './lan/lan-service'
-import { isHlsUrl, isHttpUrl } from './lan/lan-media-url'
+import { isHlsUrl } from './lan/lan-media-url'
 import type {
+  LanBrowsePayload,
+  LanBrowseQuery,
+  LanCategoriesPayload,
+  LanCategory,
   LanDetailPayload,
   LanLatestPayload,
   LanSearchPayload,
@@ -1317,6 +1322,108 @@ function lanLatest(page: number, pageSize: number): LanLatestPayload {
   }
 }
 
+/**
+ * 展示端可见的分类：自身开关打开，且所有上级都打开。
+ * 与渲染层 `lib/category-tree.ts` 的 `visibleCategoryIds` 同一套口径
+ * （主进程不能 import 渲染层代码，所以这里保留一份）。
+ */
+function lanVisibleCategoryIds(rows: VideoCategory[]): Set<string> {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const visible = new Set<string>()
+  for (const row of rows) {
+    const chain: string[] = []
+    const seen = new Set<string>()
+    let cursor: VideoCategory | undefined = row
+    let ok = true
+    while (cursor) {
+      if (seen.has(cursor.id)) {
+        ok = false
+        break
+      }
+      seen.add(cursor.id)
+      if (!cursor.visible) {
+        ok = false
+        break
+      }
+      chain.push(cursor.id)
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
+    }
+    if (ok) for (const id of chain) visible.add(id)
+  }
+  return visible
+}
+
+/** 找片看：只把展示端可见的分类给网页，隐藏的父分类连同整棵子树一起不返回 */
+function lanCategories(): LanCategoriesPayload {
+  const rows = categoryStore.list()
+  const visible = lanVisibleCategoryIds(rows)
+  const categories: LanCategory[] = rows
+    .filter((row) => visible.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      parentId: row.parentId,
+      name: row.name,
+      sortOrder: row.sortOrder
+    }))
+  return { ok: true, categories }
+}
+
+/**
+ * 找片看列表：空分类 = 所有可见一级分类的并集（和展示端列表页「全部」一致，
+ * 只绑在隐藏分类里的视频不会漏出来）；指定分类时按它的整棵子树过滤。
+ * 不统计总数：全库统计一次要一百多毫秒，翻到底用「这一页不满」判断。
+ */
+function lanBrowse(query: LanBrowseQuery): LanBrowsePayload {
+  const base: LanBrowsePayload = {
+    ok: true,
+    items: [],
+    page: query.page,
+    pageSize: query.pageSize,
+    categoryId: query.categoryId
+  }
+  if (!videoCacheReady) return { ...base, ok: false, error: 'CACHE_UNAVAILABLE' }
+  const rows = categoryStore.list()
+  const visible = lanVisibleCategoryIds(rows)
+
+  let listQuery: VideoListQuery
+  if (query.categoryId) {
+    // 隐藏 / 已删除的分类返回空列表，不退回全库
+    if (!visible.has(query.categoryId)) return base
+    listQuery = {
+      categoryId: query.categoryId,
+      page: query.page,
+      pageSize: query.pageSize,
+      visibility: 'shown',
+      withTotal: false
+    }
+  } else {
+    const topIds = rows
+      .filter((row) => row.parentId === null && visible.has(row.id))
+      .map((row) => row.id)
+    // 没有可见分类：和显式空数组一样直接空结果，不能退化成查全库
+    if (topIds.length === 0) return base
+    listQuery = {
+      categoryIds: topIds,
+      page: query.page,
+      pageSize: query.pageSize,
+      visibility: 'shown',
+      withTotal: false
+    }
+  }
+
+  const { filters, empty } = resolveVideoFilters(listQuery)
+  if (empty) return base
+  const result = videoStore.listVideos(listQuery, filters)
+  return {
+    ok: result.ok,
+    error: result.error,
+    items: result.items.map(toLanCard),
+    page: result.page,
+    pageSize: result.pageSize,
+    categoryId: query.categoryId
+  }
+}
+
 async function lanSearchOnline(keyword: string): Promise<LanSearchPayload> {
   const result = await performOnlineSearch({ keyword })
   const names = siteNameMap()
@@ -1343,7 +1450,7 @@ async function lanSearchOnline(keyword: string): Promise<LanSearchPayload> {
   }
 }
 
-/** 网页播放页的详情：只保留线路与展示字段，并标出 HLS / 直链，客户端据此选播放器 */
+/** 网页播放页的详情：只保留 m3u8 线路与展示字段（和桌面播放页一致，直链 / 分享页在浏览器里放不了） */
 async function lanVideoDetail(videoId: number): Promise<LanDetailPayload> {
   if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
   try {
@@ -1362,11 +1469,12 @@ async function lanVideoDetail(videoId: number): Promise<LanDetailPayload> {
             flag: line.flag.trim(),
             episodes: line.episodes
               .map((episode) => ({ name: episode.name.trim(), url: episode.url.trim() }))
-              .filter((episode) => isHttpUrl(episode.url))
+              // 只要 m3u8：mp4 / flv / 分享页这类直链不在浏览器播放器里出现
+              .filter((episode) => isHlsUrl(episode.url))
               .map((episode) => ({
                 name: episode.name,
                 url: episode.url,
-                kind: isHlsUrl(episode.url) ? ('hls' as const) : ('file' as const)
+                kind: 'hls' as const
               }))
           }))
           .filter((line) => line.episodes.length > 0)
@@ -1385,7 +1493,8 @@ async function lanVideoDetail(videoId: number): Promise<LanDetailPayload> {
         vodClass: video.vodClass,
         year: primary?.year ?? '',
         area: primary?.area ?? '',
-        sourceCount: video.sourceCount,
+        // 只数真正有 m3u8 线路的来源，和线路面板一致
+        sourceCount: sources.length,
         sources
       }
     }
@@ -1401,6 +1510,8 @@ const lanService = createLanService({
     searchLocal: lanSearchLocal,
     searchOnline: lanSearchOnline,
     latest: lanLatest,
+    categories: lanCategories,
+    browse: lanBrowse,
     detail: lanVideoDetail,
     onChange: (state) => sendToRenderer('lan:changed', state)
   }

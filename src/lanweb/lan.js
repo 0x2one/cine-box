@@ -7,6 +7,12 @@
   var AUTO_NEXT_KEY = 'cinebox-lan-auto-next'
   var PAGE_SIZE = 20
   var HOME_SIZE = 12
+  /** 找片看每页 30 条：和展示端列表页一致，缓存库单页上限 100 */
+  var BROWSE_SIZE = 30
+  /** 距底部这么多像素就预取下一页 */
+  var BROWSE_LOAD_AHEAD = 600
+  /** 滚过这么多像素浮出「回到顶部」 */
+  var BACK_TOP_AT = 600
   var APP_TITLE = '映盒剧场'
   var HLS_SCRIPT = '/assets/hls.min.js'
 
@@ -25,6 +31,7 @@
     refresh:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg>',
     film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"></path></svg>',
+    up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path></svg>',
     wifi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.55a11 11 0 0 1 14 0"></path><path d="M8.5 16.1a6 6 0 0 1 7 0"></path><path d="M12 20h.01"></path></svg>'
   }
 
@@ -32,6 +39,8 @@
     CACHE_UNAVAILABLE: '片库缓存还没准备好，请稍后再试',
     SEARCH_FAILED: '检索失败，请稍后重试',
     LATEST_FAILED: '读取最新收录失败',
+    CATEGORIES_FAILED: '读取分类失败，请稍后重试',
+    BROWSE_FAILED: '读取视频列表失败，请稍后重试',
     DETAIL_FAILED: '读取播放信息失败',
     NOT_FOUND: '这个视频不在片库里',
     INVALID_INPUT: '请输入关键词',
@@ -275,6 +284,7 @@
     var params = new URLSearchParams(queryIndex >= 0 ? raw.slice(queryIndex + 1) : '')
     if (path === '/' || path === '') return { name: 'home', params: params }
     if (path === '/search') return { name: 'search', params: params }
+    if (path === '/browse') return { name: 'browse', params: params }
     var match = /^\/play\/(\d+)$/.exec(path)
     if (match) return { name: 'play', id: Number(match[1]), params: params }
     return { name: 'notfound', params: params }
@@ -303,6 +313,7 @@
     window.scrollTo(0, 0)
     if (route.name === 'home') renderHome(token)
     else if (route.name === 'search') renderSearch(route, token)
+    else if (route.name === 'browse') renderBrowse(route, token)
     else if (route.name === 'play') renderPlay(route, token)
     else renderNotFound()
   }
@@ -364,11 +375,30 @@
           icon('back') +
           '</button>'
         : ''
+    // 导航只在推荐 / 找片看两个展示页出现：搜索 / 播放页左边已经有「返回」，
+    // 手机上再塞两个入口会把标题栏挤爆。
+    var nav =
+      options && options.nav
+        ? '<nav class="topbar-nav" aria-label="浏览">' +
+          '<a class="topbar-nav-link' +
+          (options.nav === 'home' ? ' is-active' : '') +
+          '" href="#/"' +
+          (options.nav === 'home' ? ' aria-current="page"' : '') +
+          '>推荐</a>' +
+          '<a class="topbar-nav-link' +
+          (options.nav === 'browse' ? ' is-active' : '') +
+          '" href="#/browse"' +
+          (options.nav === 'browse' ? ' aria-current="page"' : '') +
+          '>找片看</a>' +
+          '</nav>'
+        : ''
     return (
       '<header class="topbar"><div class="topbar-left">' +
       back +
       '<a class="brand" href="#/" aria-label="映盒剧场首页"><span class="brand-mark" aria-hidden="true">映</span><span class="brand-text"><strong>映盒剧场</strong><span class="brand-sub">局域网影院</span></span></a>' +
-      '</div><span class="lan-pill"><i aria-hidden="true"></i>LAN</span></header>'
+      '</div>' +
+      nav +
+      '<span class="lan-pill"><i aria-hidden="true"></i>LAN</span></header>'
     )
   }
 
@@ -595,13 +625,30 @@
     while (holder.firstChild) container.appendChild(holder.firstChild)
   }
 
+  /** 首页「最近收录」和找片看共用同一张海报卡 */
+  function posterCardHtml(item) {
+    return (
+      '<a class="poster-card" href="#/play/' +
+      item.id +
+      '" aria-label="' +
+      esc(item.name) +
+      '">' +
+      coverHtml(item) +
+      '<span class="poster-name">' +
+      esc(item.name) +
+      '</span><span class="poster-meta">' +
+      esc(metaShort(item)) +
+      '</span></a>'
+    )
+  }
+
   /* ── 首页 ── */
 
   function renderHome(token) {
     document.title = APP_TITLE + ' · 局域网影院'
     var mode = modeValue
     app.innerHTML =
-      topbarHtml() +
+      topbarHtml({ nav: 'home' }) +
       '<main class="page home">' +
       '<section class="home-hero">' +
       '<p class="eyebrow">同一局域网 · 扫码即看</p>' +
@@ -609,6 +656,10 @@
       '<p class="hero-desc">搜索映盒剧场里的片库，或者直接向采集站点发起在线检索。选中的视频会直接在浏览器里播放。</p>' +
       searchPanelHtml('', mode) +
       historyHtml() +
+      '</section>' +
+      '<section class="browse-entry" id="browse-entry" hidden>' +
+      '<div class="section-head"><h2>找片看</h2><a class="section-link" href="#/browse">全部视频 <span aria-hidden="true">›</span></a></div>' +
+      '<div class="type-chips" id="home-types"></div>' +
       '</section>' +
       '<section class="latest-section" aria-labelledby="latest-title">' +
       '<div class="section-head"><h2 id="latest-title">最近收录</h2><span class="section-meta" id="latest-meta">正在读取片库…</span></div>' +
@@ -620,6 +671,7 @@
       '</main>'
     bindSearch({ mode: mode })
     bindHistory()
+    loadHomeTypes(token)
 
     var grid = document.getElementById('latest-grid')
     var meta = document.getElementById('latest-meta')
@@ -644,23 +696,7 @@
           if (meta) meta.textContent = ''
           return
         }
-        grid.innerHTML = items
-          .map(function (item) {
-            return (
-              '<a class="poster-card" href="#/play/' +
-              item.id +
-              '" aria-label="' +
-              esc(item.name) +
-              '">' +
-              coverHtml(item) +
-              '<span class="poster-name">' +
-              esc(item.name) +
-              '</span><span class="poster-meta">' +
-              esc(metaShort(item)) +
-              '</span></a>'
-            )
-          })
-          .join('')
+        grid.innerHTML = items.map(posterCardHtml).join('')
         bindCoverImages(grid, items)
         if (meta) meta.textContent = '最新 ' + formatCount(items.length) + ' 部'
       })
@@ -679,6 +715,458 @@
         var button = document.getElementById('reload-home')
         if (button) button.addEventListener('click', renderRoute)
         if (meta) meta.textContent = ''
+      })
+  }
+
+  /** 首页的「找片看」快捷入口：分类读取失败就整块不出现，不影响其它内容 */
+  function loadHomeTypes(token) {
+    getJson('/api/categories')
+      .then(function (data) {
+        if (token !== renderSeq) return
+        var categories = Array.isArray(data.categories) ? data.categories : []
+        var tops = categories.filter(function (row) {
+          return row.parentId === null
+        })
+        var box = document.getElementById('browse-entry')
+        var chips = document.getElementById('home-types')
+        if (!box || !chips || tops.length === 0) return
+        chips.innerHTML =
+          '<a class="type-chip" href="#/browse">全部</a>' +
+          tops
+            .map(function (top) {
+              return (
+                '<a class="type-chip" href="#/browse?cat=' +
+                encodeURIComponent(top.id) +
+                '">' +
+                esc(top.name) +
+                '</a>'
+              )
+            })
+            .join('')
+        box.hidden = false
+      })
+      .catch(function () {
+        // 分类接口不可用时首页照常显示，只是没有这个入口
+      })
+  }
+
+  /* ── 找片看（分类 + 视频列表） ── */
+
+  function sortCategories(rows) {
+    return rows.slice().sort(function (left, right) {
+      return (Number(left.sortOrder) || 0) - (Number(right.sortOrder) || 0)
+    })
+  }
+
+  /**
+   * 初始选中：链接里的分类优先，只认两级（一级分类或它的直接子分类）。
+   * 分类被删 / 隐藏 / 层级更深时退回「全部」，和展示端列表页同一套口径。
+   */
+  function resolveBrowseSelection(categories, initialCat) {
+    var byId = Object.create(null)
+    categories.forEach(function (row) {
+      byId[row.id] = row
+    })
+    var initial = initialCat ? byId[initialCat] : null
+    if (!initial) return { topId: null, subId: null }
+    if (initial.parentId === null) return { topId: initial.id, subId: null }
+    var parent = byId[initial.parentId]
+    if (!parent || parent.parentId !== null) return { topId: null, subId: null }
+    return { topId: parent.id, subId: initial.id }
+  }
+
+  function renderBrowse(route, token) {
+    var initialCat = String(route.params.get('cat') || '').trim()
+    document.title = '找片看 · ' + APP_TITLE
+    app.innerHTML =
+      topbarHtml({ nav: 'browse' }) +
+      '<main class="page page-browse">' +
+      '<header class="browse-head" id="browse-head"><div class="browse-head-inner">' +
+      '<div class="browse-head-top"><p class="browse-eyebrow">找片看</p>' +
+      '<h1 class="browse-title" id="browse-title">全部视频</h1>' +
+      '<span class="browse-meta">按更新时间排序</span></div>' +
+      '<nav class="browse-types" id="browse-types" aria-label="视频类型" hidden></nav>' +
+      '<nav class="browse-subs" id="browse-subs" aria-label="视频子类型" hidden></nav>' +
+      '</div></header>' +
+      '<div id="browse-state" hidden></div>' +
+      '<div class="browse-grid card-grid" id="browse-grid">' +
+      posterSkeletons(9) +
+      '</div>' +
+      '<div class="browse-footer" id="browse-footer"></div>' +
+      '</main>' +
+      '<button type="button" class="backtop" id="backtop" aria-label="回到顶部" title="回到顶部" hidden>' +
+      icon('up') +
+      '</button>'
+
+    var grid = document.getElementById('browse-grid')
+    var state = document.getElementById('browse-state')
+    var footer = document.getElementById('browse-footer')
+    var typeBox = document.getElementById('browse-types')
+    var subBox = document.getElementById('browse-subs')
+    var titleBox = document.getElementById('browse-title')
+    if (!grid || !state || !footer || !typeBox || !subBox || !titleBox) return
+
+    var categories = []
+    var tops = []
+    var selection = { topId: null, subId: null }
+    var filterCat = ''
+    /** 切换分类时递增：旧请求的响应直接丢弃 */
+    var generation = 0
+    var page = 0
+    var loading = false
+    var failed = false
+    var exhausted = false
+    var itemCount = 0
+    var seen = Object.create(null)
+    var fillFrame = 0
+    var scrollFrame = 0
+
+    var findCategory = function (id) {
+      for (var index = 0; index < categories.length; index += 1) {
+        if (categories[index].id === id) return categories[index]
+      }
+      return null
+    }
+
+    var subsOf = function (topId) {
+      return sortCategories(
+        categories.filter(function (row) {
+          return row.parentId === topId
+        })
+      )
+    }
+
+    var clearState = function () {
+      state.hidden = true
+      state.innerHTML = ''
+    }
+
+    var showState = function (options) {
+      grid.innerHTML = ''
+      state.hidden = false
+      state.innerHTML = stateBoxHtml({
+        icon: options.icon || 'film',
+        title: options.title,
+        desc: options.desc || '',
+        action: options.actionId
+          ? { id: options.actionId, label: options.actionLabel || '重新加载' }
+          : null
+      })
+      if (!options.actionId) return
+      var button = document.getElementById(options.actionId)
+      if (button) button.addEventListener('click', options.onAction || renderRoute)
+    }
+
+    var showEmpty = function () {
+      if (filterCat) {
+        showState({
+          icon: 'film',
+          title: '这个分类下还没有视频',
+          desc: '换一个类型看看，或者去映盒剧场控制台采集一些视频。',
+          actionId: 'browse-all',
+          actionLabel: '看看全部视频',
+          onAction: function () {
+            select({ topId: null, subId: null })
+          }
+        })
+        return
+      }
+      showState({
+        icon: 'film',
+        title: '片库里还没有视频',
+        desc: '先在映盒剧场控制台采集一些视频，再回到这里刷新。',
+        actionId: 'browse-reload',
+        actionLabel: '重新加载',
+        onAction: function () {
+          startFilter(filterCat)
+        }
+      })
+    }
+
+    var updateFooter = function () {
+      if (failed && itemCount > 0) {
+        footer.innerHTML =
+          '<button type="button" class="ghost-btn" id="browse-retry">加载失败，点击重试</button>'
+        var retry = document.getElementById('browse-retry')
+        if (retry) {
+          retry.addEventListener('click', function () {
+            failed = false
+            void loadPage(page + 1, true)
+          })
+        }
+        return
+      }
+      if (loading && itemCount > 0) {
+        footer.innerHTML =
+          '<span class="browse-foot-text"><span class="spinner is-small"></span>正在加载…</span>'
+        return
+      }
+      if (exhausted && itemCount > 0) {
+        footer.innerHTML = '<span class="browse-foot-text">已经全部加载</span>'
+        return
+      }
+      footer.innerHTML = ''
+    }
+
+    var maybeFill = function () {
+      if (loading || failed || exhausted || itemCount === 0) return
+      if (grid.getBoundingClientRect().bottom - window.innerHeight < BROWSE_LOAD_AHEAD) {
+        void loadPage(page + 1, true)
+      }
+    }
+
+    var scheduleFill = function () {
+      if (fillFrame) return
+      fillFrame = window.requestAnimationFrame(function () {
+        fillFrame = 0
+        maybeFill()
+      })
+    }
+
+    var loadPage = function (nextPage, append) {
+      if (loading || exhausted) return
+      loading = true
+      failed = false
+      var myGeneration = generation
+      if (!append) {
+        itemCount = 0
+        seen = Object.create(null)
+        grid.innerHTML = posterSkeletons(9)
+        clearState()
+      }
+      updateFooter()
+      getJson('/api/browse', { cat: filterCat, page: nextPage, pageSize: BROWSE_SIZE })
+        .then(function (data) {
+          if (token !== renderSeq || myGeneration !== generation) return
+          var items = Array.isArray(data.items) ? data.items : []
+          // 采集 / 隐藏会让 offset 分页错位，按视频 id 去重
+          var fresh = items.filter(function (item) {
+            var key = String(item.id)
+            if (seen[key]) return false
+            seen[key] = true
+            return true
+          })
+          if (!append) grid.innerHTML = ''
+          if (fresh.length > 0) {
+            appendHtml(grid, fresh.map(posterCardHtml).join(''), fresh)
+          }
+          itemCount += fresh.length
+          page = nextPage
+          // 不统计总数：这一页不满 30 条就是到底
+          exhausted = items.length < BROWSE_SIZE
+          if (itemCount === 0) showEmpty()
+        })
+        .catch(function (error) {
+          if (token !== renderSeq || myGeneration !== generation) return
+          failed = true
+          if (itemCount === 0) {
+            showState({
+              icon: 'film',
+              title: '读取片库失败',
+              desc: errorText(error, '片库可能正在初始化，请稍后重试。'),
+              actionId: 'browse-reload',
+              actionLabel: '重新加载',
+              onAction: function () {
+                startFilter(filterCat)
+              }
+            })
+          }
+        })
+        .finally(function () {
+          if (token !== renderSeq || myGeneration !== generation) return
+          loading = false
+          updateFooter()
+          scheduleFill()
+        })
+    }
+
+    var startFilter = function (cat) {
+      filterCat = cat
+      generation += 1
+      page = 0
+      loading = false
+      failed = false
+      exhausted = false
+      itemCount = 0
+      seen = Object.create(null)
+      clearState()
+      grid.innerHTML = posterSkeletons(9)
+      footer.innerHTML = ''
+      void loadPage(1, false)
+    }
+
+    var paintTitle = function () {
+      var top = selection.topId ? findCategory(selection.topId) : null
+      var sub = selection.subId ? findCategory(selection.subId) : null
+      if (!top) {
+        titleBox.textContent = '全部视频'
+      } else if (!sub) {
+        titleBox.textContent = top.name
+      } else {
+        titleBox.innerHTML =
+          '<span class="browse-title-parent">' +
+          esc(top.name) +
+          '</span><span class="browse-title-sep">/</span>' +
+          esc(sub.name)
+      }
+      var label = !top ? '全部视频' : !sub ? top.name : top.name + ' / ' + sub.name
+      document.title = label + ' · ' + APP_TITLE
+    }
+
+    var chipHtml = function (label, active, attribute) {
+      return (
+        '<button type="button" class="browse-chip' +
+        (active ? ' is-active' : '') +
+        '" aria-pressed="' +
+        active +
+        '" ' +
+        attribute +
+        '>' +
+        esc(label) +
+        '</button>'
+      )
+    }
+
+    var paintChips = function () {
+      typeBox.hidden = tops.length === 0
+      typeBox.innerHTML =
+        chipHtml('全部', selection.topId === null, 'data-all="1"') +
+        tops
+          .map(function (top) {
+            return chipHtml(top.name, selection.topId === top.id, 'data-top="' + esc(top.id) + '"')
+          })
+          .join('')
+      var subs = selection.topId ? subsOf(selection.topId) : []
+      subBox.hidden = subs.length === 0
+      subBox.innerHTML =
+        subs.length === 0
+          ? ''
+          : chipHtml('全部', selection.subId === null, 'data-sub=""') +
+            subs
+              .map(function (sub) {
+                return chipHtml(
+                  sub.name,
+                  selection.subId === sub.id,
+                  'data-sub="' + esc(sub.id) + '"'
+                )
+              })
+              .join('')
+    }
+
+    var syncHash = function () {
+      var cat = selection.subId || selection.topId || ''
+      var next = '#/browse' + (cat ? '?cat=' + encodeURIComponent(cat) : '')
+      try {
+        window.history.replaceState(null, '', next)
+      } catch (error) {
+        // 个别内嵌浏览器不支持 replaceState：地址栏不同步，但不影响使用
+      }
+    }
+
+    var select = function (next) {
+      if (selection.topId === next.topId && selection.subId === next.subId) return
+      selection = next
+      syncHash()
+      paintTitle()
+      paintChips()
+      window.scrollTo(0, 0)
+      startFilter(next.subId || next.topId || '')
+    }
+
+    typeBox.addEventListener('click', function (event) {
+      var button = closestFrom(event, 'button')
+      if (!button) return
+      if (button.hasAttribute('data-all')) {
+        select({ topId: null, subId: null })
+        return
+      }
+      var topId = button.getAttribute('data-top')
+      if (topId) select({ topId: topId, subId: null })
+    })
+
+    subBox.addEventListener('click', function (event) {
+      var button = closestFrom(event, 'button')
+      if (!button || !button.hasAttribute('data-sub') || !selection.topId) return
+      select({ topId: selection.topId, subId: button.getAttribute('data-sub') || null })
+    })
+
+    var syncChrome = function () {
+      var y = window.scrollY || window.pageYOffset || 0
+      var head = document.getElementById('browse-head')
+      if (head) head.classList.toggle('is-compact', y > 96)
+      var backtop = document.getElementById('backtop')
+      if (backtop) {
+        var show = y > BACK_TOP_AT
+        backtop.hidden = !show
+        backtop.classList.toggle('is-show', show)
+      }
+    }
+
+    var onScroll = function () {
+      if (scrollFrame) return
+      scrollFrame = window.requestAnimationFrame(function () {
+        scrollFrame = 0
+        syncChrome()
+        maybeFill()
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+
+    var backtop = document.getElementById('backtop')
+    if (backtop) {
+      backtop.addEventListener('click', function () {
+        var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' })
+      })
+    }
+
+    setCleanup(function () {
+      window.removeEventListener('scroll', onScroll)
+      if (fillFrame) window.cancelAnimationFrame(fillFrame)
+      if (scrollFrame) window.cancelAnimationFrame(scrollFrame)
+    })
+
+    getJson('/api/categories')
+      .then(function (data) {
+        if (token !== renderSeq) return
+        categories = Array.isArray(data.categories) ? data.categories : []
+        tops = sortCategories(
+          categories.filter(function (row) {
+            return row.parentId === null
+          })
+        )
+        if (tops.length === 0) {
+          showState({
+            icon: 'film',
+            title: '还没有可展示的视频分类',
+            desc: '去映盒剧场控制台的「分类」建好分类并绑定在线分类后，这里就会出现。',
+            actionId: 'browse-reload',
+            actionLabel: '重新加载',
+            onAction: function () {
+              renderRoute()
+            }
+          })
+          return
+        }
+        selection = resolveBrowseSelection(categories, initialCat)
+        // 链接里的分类失效时顺手把地址栏改回「全部」
+        syncHash()
+        paintTitle()
+        paintChips()
+        startFilter(selection.subId || selection.topId || '')
+      })
+      .catch(function (error) {
+        if (token !== renderSeq) return
+        showState({
+          icon: 'film',
+          title: '分类读取失败',
+          desc: errorText(error, '分类数据可能正在初始化，稍后再试一次。'),
+          actionId: 'browse-reload',
+          actionLabel: '重新加载',
+          onAction: function () {
+            renderRoute()
+          }
+        })
       })
   }
 
@@ -984,8 +1472,9 @@
     var lines = []
     ;(video.sources || []).forEach(function (source) {
       ;(source.lines || []).forEach(function (line, lineIndex) {
+        // 网页播放器只认 m3u8：mp4 / flv / 分享页这类直链直接不显示
         var episodes = (line.episodes || []).filter(function (episode) {
-          return safeUrl(episode.url)
+          return safeUrl(episode.url) && isHls(episode.url)
         })
         if (episodes.length === 0) return
         lines.push({
@@ -1003,8 +1492,8 @@
         '<main class="page page-play">' +
         stateBoxHtml({
           icon: 'film',
-          title: '这个视频还没有播放线路',
-          desc: '采集站暂时没有提供可用的播放地址，可以过一会儿再试。',
+          title: '这个视频还没有 m3u8 线路',
+          desc: '采集站暂时没有提供可播放的 m3u8 地址，可以过一会儿再试。',
           action: { id: 'play-back', label: '回到首页' }
         }) +
         '</main>'
@@ -1088,7 +1577,7 @@
       '</div><aside class="play-side">' +
       '<section class="panel"><div class="panel-head"><h2>线路</h2><span>' +
       formatCount(lines.length) +
-      ' 条</span></div><div class="line-list" id="line-list"></div></section>' +
+      ' 条 · 仅 m3u8</span></div><div class="line-list" id="line-list"></div></section>' +
       '<section class="panel"><div class="panel-head"><h2>选集</h2><span id="ep-count"></span></div><div class="episode-grid" id="episode-grid"></div></section>' +
       '<label class="switch-row"><span>自动连播</span><input type="checkbox" id="auto-next"' +
       (autoNext ? ' checked' : '') +
@@ -1247,59 +1736,52 @@
       videoEl.removeAttribute('src')
       videoEl.load()
       updateSubtitle()
-      var kind = episode.kind === 'hls' || isHls(episode.url) ? 'hls' : 'file'
-      var src =
-        '/api/' +
-        (kind === 'hls' ? 'play.m3u8' : 'stream') +
-        '?u=' +
-        encodeURIComponent(episode.url)
-      if (kind === 'hls') {
-        // 注意：Chromium 对 canPlayType('application/vnd.apple.mpegurl') 也返回 'maybe'，
-        // 但实际播不了 HLS，所以先用 hls.js 的 MSE 能力判断，原生 HLS 只做兜底。
-        loadHls().then(function (Hls) {
-          if (currentToken !== loadToken) return
-          if (Hls && typeof Hls.isSupported === 'function' && Hls.isSupported()) {
-            var instance = new Hls({ enableWorker: true, backBufferLength: 90 })
-            hls = instance
-            instance.on(Hls.Events.MANIFEST_PARSED, function () {
-              if (currentToken !== loadToken) return
-              showSpinner(false)
-              if (autoplay) playVideo()
-            })
-            instance.on(Hls.Events.ERROR, function (_event, data) {
-              if (currentToken !== loadToken || !data || !data.fatal) return
-              if (failureCount < 1) {
-                failureCount += 1
-                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                  instance.startLoad()
-                  return
-                }
-                if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                  instance.recoverMediaError()
-                  return
-                }
-              }
-              showError('这条线路播放失败，换一条线路或稍后重试。')
-            })
-            instance.attachMedia(videoEl)
-            instance.on(Hls.Events.MEDIA_ATTACHED, function () {
-              if (currentToken === loadToken) instance.loadSource(src)
-            })
-            return
-          }
-          if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-            videoEl.src = src
-            videoEl.load()
-            if (autoplay) playVideo()
-            return
-          }
-          showError('当前浏览器不支持 HLS 播放，请使用 Safari 或新版 Chrome。')
-        })
+      if (!isHls(episode.url)) {
+        showError('这条线路不是 m3u8，暂时无法播放。')
         return
       }
-      videoEl.src = src
-      videoEl.load()
-      if (autoplay) playVideo()
+      var src = '/api/play.m3u8?u=' + encodeURIComponent(episode.url)
+      // 注意：Chromium 对 canPlayType('application/vnd.apple.mpegurl') 也返回 'maybe'，
+      // 但实际播不了 HLS，所以先用 hls.js 的 MSE 能力判断，原生 HLS 只做兜底。
+      loadHls().then(function (Hls) {
+        if (currentToken !== loadToken) return
+        if (Hls && typeof Hls.isSupported === 'function' && Hls.isSupported()) {
+          var instance = new Hls({ enableWorker: true, backBufferLength: 90 })
+          hls = instance
+          instance.on(Hls.Events.MANIFEST_PARSED, function () {
+            if (currentToken !== loadToken) return
+            showSpinner(false)
+            if (autoplay) playVideo()
+          })
+          instance.on(Hls.Events.ERROR, function (_event, data) {
+            if (currentToken !== loadToken || !data || !data.fatal) return
+            if (failureCount < 1) {
+              failureCount += 1
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                instance.startLoad()
+                return
+              }
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                instance.recoverMediaError()
+                return
+              }
+            }
+            showError('这条线路播放失败，换一条线路或稍后重试。')
+          })
+          instance.attachMedia(videoEl)
+          instance.on(Hls.Events.MEDIA_ATTACHED, function () {
+            if (currentToken === loadToken) instance.loadSource(src)
+          })
+          return
+        }
+        if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+          videoEl.src = src
+          videoEl.load()
+          if (autoplay) playVideo()
+          return
+        }
+        showError('当前浏览器不支持 HLS 播放，请使用 Safari 或新版 Chrome。')
+      })
     }
 
     videoEl.addEventListener('loadedmetadata', function () {

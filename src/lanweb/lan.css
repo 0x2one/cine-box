@@ -31,6 +31,8 @@
 html {
   min-height: 100%;
   -webkit-text-size-adjust: 100%;
+  /* 切分类时列表先变成骨架屏、内容高度骤降；预留滚动条槽位，避免内容区宽度来回跳 */
+  scrollbar-gutter: stable;
   scrollbar-color: var(--surface-3) var(--bg);
 }
 
@@ -186,6 +188,39 @@ p {
   border-radius: 50%;
   background: #34d399;
   box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
+}
+
+/* 推荐 / 找片看两段式胶囊：只在展示页出现 */
+.topbar-nav {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.topbar-nav-link {
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    color 0.18s ease,
+    background 0.18s ease;
+}
+
+.topbar-nav-link:hover {
+  color: var(--text);
+}
+
+.topbar-nav-link.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(58, 169, 232, 0.25);
 }
 
 .icon-btn {
@@ -448,6 +483,252 @@ p {
 .section-meta {
   color: var(--faint);
   font-size: 12px;
+}
+
+/* ── 首页「找片看」入口 ── */
+
+.browse-entry {
+  margin-top: 8px;
+}
+
+.browse-entry .section-head {
+  margin: 0 0 12px;
+}
+
+.section-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.section-link:hover {
+  color: #7cc8f3;
+}
+
+.type-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.type-chip {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.type-chip:hover {
+  border-color: rgba(58, 169, 232, 0.5);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* ── 找片看列表页 ── */
+
+.page-browse {
+  padding-top: 0;
+  /* 头部吸顶后会在滚动时改变高度，别让浏览器滚动锚定把 scrollTop 拽回去 */
+  overflow-anchor: none;
+}
+
+.browse-head {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 20;
+  margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 18px
+    calc(-1 * max(16px, env(safe-area-inset-left)));
+  padding: 18px max(16px, env(safe-area-inset-right)) 14px max(16px, env(safe-area-inset-left));
+  border-bottom: 1px solid transparent;
+  background: rgba(11, 14, 19, 0.84);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition:
+    padding 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.browse-head.is-compact {
+  padding-top: 8px;
+  padding-bottom: 10px;
+  border-bottom-color: var(--border);
+}
+
+.browse-head-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.browse-eyebrow {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+}
+
+.browse-head.is-compact .browse-eyebrow {
+  display: none;
+}
+
+.browse-title {
+  margin: 0;
+  font-size: clamp(21px, 4.4vw, 28px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.browse-title-parent {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.browse-title-sep {
+  margin: 0 6px;
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.browse-meta {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.browse-head.is-compact .browse-title {
+  font-size: 18px;
+}
+
+.browse-head.is-compact .browse-meta {
+  display: none;
+}
+
+.browse-types,
+.browse-subs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 分类还没加载 / 没有子分类时用 hidden 收起；flex 会盖掉 UA 的 [hidden] 规则 */
+.browse-types[hidden],
+.browse-subs[hidden] {
+  display: none;
+}
+
+.browse-subs {
+  margin-top: 8px;
+}
+
+.browse-chip {
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.browse-chip:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* 激活态只换描边 / 底色 / 文字色：加粗会改变 chip 宽度，整行跟着挪 */
+.browse-chip.is-active {
+  border-color: rgba(58, 169, 232, 0.6);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.browse-subs .browse-chip {
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+.browse-footer {
+  display: flex;
+  justify-content: center;
+  min-height: 26px;
+  padding: 22px 0 8px;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.browse-foot-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spinner.is-small {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+/* 回到顶部 */
+.backtop {
+  position: fixed;
+  /* 宽屏时贴着内容列右缘，窄屏退回视口右下角 */
+  right: max(18px, calc((100vw - var(--page)) / 2 + 8px));
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: rgba(20, 28, 38, 0.92);
+  color: var(--text);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    background 0.18s ease;
+}
+
+.backtop[hidden] {
+  display: none;
+}
+
+.backtop.is-show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.backtop:hover {
+  background: var(--surface-2);
+}
+
+.backtop svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* ── 海报卡片 ── */
@@ -1348,6 +1629,46 @@ p {
   border: 0;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* ── 窄屏：标题栏给导航让位 ── */
+
+@media (max-width: 560px) {
+  .brand-sub {
+    display: none;
+  }
+
+  .topbar-nav-link {
+    padding: 6px 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .lan-pill {
+    display: none;
+  }
+
+  .topbar {
+    gap: 8px;
+  }
+
+  .topbar-nav-link {
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+
+  .browse-types,
+  .browse-subs {
+    gap: 6px;
+  }
+
+  .browse-chip {
+    padding: 6px 11px;
+  }
+
+  .browse-subs .browse-chip {
+    padding: 5px 9px;
+  }
 }
 
 @keyframes shimmer {

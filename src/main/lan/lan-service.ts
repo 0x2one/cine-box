@@ -229,6 +229,30 @@ export function createLanService(options: CreateLanServiceOptions): LanService {
       }
       return
     }
+    if (pathname === '/api/categories') {
+      try {
+        sendJson(req, res, 200, deps.categories())
+      } catch {
+        sendJson(req, res, 500, { ok: false, error: 'CATEGORIES_FAILED' })
+      }
+      return
+    }
+    if (pathname === '/api/browse') {
+      // 本地分类 id 是 32 位十六进制；空串 = 全部（服务端自己取可见一级分类的并集）
+      const categoryId = (url.searchParams.get('cat') ?? '').trim()
+      if (categoryId && !/^[0-9a-f]{32}$/i.test(categoryId)) {
+        sendJson(req, res, 400, { ok: false, error: 'INVALID_INPUT' })
+        return
+      }
+      const page = clampInt(url.searchParams.get('page'), 1, 1, 10_000)
+      const pageSize = clampInt(url.searchParams.get('pageSize'), 30, 1, 50)
+      try {
+        sendJson(req, res, 200, deps.browse({ categoryId, page, pageSize }))
+      } catch {
+        sendJson(req, res, 500, { ok: false, error: 'BROWSE_FAILED' })
+      }
+      return
+    }
     if (pathname === '/api/search') {
       await handleSearch(req, res, url)
       return

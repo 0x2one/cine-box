@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, App, Button, InputNumber, QRCode, Select, Spin } from 'antd'
 import {
+  AppstoreOutlined,
   CopyOutlined,
   ExportOutlined,
   MobileOutlined,
@@ -342,10 +343,17 @@ function LanServicePanel({ title, desc }: { title: string; desc: string }): Reac
           </div>
         </div>
         <div className="lan-feature">
+          <AppstoreOutlined />
+          <div>
+            <strong>找片看分类浏览</strong>
+            <span>按一级 / 二级分类翻整库，滚到底自动加载</span>
+          </div>
+        </div>
+        <div className="lan-feature">
           <PlayCircleOutlined />
           <div>
             <strong>列表直达播放</strong>
-            <span>搜索结果点开就是播放页，支持选集与 HLS 线路</span>
+            <span>点开就是播放页，只保留 m3u8 线路与选集</span>
           </div>
         </div>
       </div>
