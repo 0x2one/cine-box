@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Segmented, Spin, Tooltip } from 'antd'
 import {
   ArrowUpOutlined,
@@ -23,6 +23,10 @@ const BACK_TOP_AT = 600
 /** 搜索历史：存在 localStorage，最近的排最前面，最多 10 条 */
 const HISTORY_KEY = 'search-history'
 const HISTORY_LIMIT = 10
+/** 最近搜索最多铺两行，放不下的收进第二行末尾的「…」 */
+const HISTORY_MAX_ROWS = 2
+/** 「…」标记的宽度：和 search.css 的 .search-history-more 保持一致，换行计算要用 */
+const HISTORY_MORE_WIDTH = 30
 /** 搜索模式（本地 / 在线），记忆在 localStorage */
 const MODE_KEY = 'search-mode'
 /** 在线模式每站返回 20 条，主进程最多合并 200 条，这里只用于文案 */
@@ -32,6 +36,29 @@ type SearchMode = 'local' | 'online'
 
 function readSearchMode(): SearchMode {
   return localStorage.getItem(MODE_KEY) === 'online' ? 'online' : 'local'
+}
+
+/**
+ * 最近搜索的两行布局：量出每条 chip 的位置后，第三行起的条目隐藏（仍占位，方便再次测量），
+ * 第二行末尾放一颗「…」；没溢出时 maxHeight 为 null，整份原样铺开。
+ */
+interface HistoryLayout {
+  /** 两行的高度上限（px）；null 表示不裁剪 */
+  maxHeight: number | null
+  /** 从第几条开始不显示（visibility: hidden） */
+  cut: number
+  /** 「…」相对容器的位置（px），只在溢出时有意义 */
+  moreLeft: number
+  moreTop: number
+  moreHeight: number
+}
+
+const HISTORY_FIT: HistoryLayout = {
+  maxHeight: null,
+  cut: Number.POSITIVE_INFINITY,
+  moreLeft: 0,
+  moreTop: 0,
+  moreHeight: 0
 }
 
 /** 滚动回调要读的可变状态：放在 ref 里，避免闭包拿到过期的 page / loading */
@@ -288,6 +315,9 @@ function SearchView({
   const [exhausted, setExhausted] = useState(false)
   /** 搜索历史：最近 10 条，存在 localStorage */
   const [history, setHistory] = useState<string[]>(readSearchHistory)
+  /** 最近搜索最多两行：溢出部分隐藏、末位显示「…」 */
+  const [historyLayout, setHistoryLayout] = useState<HistoryLayout>(HISTORY_FIT)
+  const historyRef = useRef<HTMLDivElement>(null)
   /** 初始态的分类快捷入口与片库规模：只读本地库，不阻塞搜索 */
   const [categories, setCategories] = useState<VideoCategory[]>([])
   const [stats, setStats] = useState<VideoStats | null>(null)
@@ -499,6 +529,74 @@ function SearchView({
       // 隐私模式或配额不足时只在本次会话里保留
     }
   }, [history])
+
+  /**
+   * 最近搜索最多两行：量出每条 chip 的位置，第三行起的条目藏起来，
+   * 第二行末尾放一颗「…」；放不下时顶掉第二行最后一条，让「…」占它的位置。
+   * 条目只是 visibility: hidden，仍参与布局，所以每次量到的位置都是准的。
+   */
+  const layoutHistory = useCallback((): void => {
+    const box = historyRef.current
+    if (!box) return
+    const items = Array.from(box.querySelectorAll<HTMLElement>('.search-history-item'))
+    if (items.length === 0) {
+      setHistoryLayout((previous) => (previous === HISTORY_FIT ? previous : HISTORY_FIT))
+      return
+    }
+    const first = items[0]
+    const rowHeight = first.offsetHeight
+    if (rowHeight <= 0) return
+    const gap = Number.parseFloat(window.getComputedStyle(box).rowGap) || 8
+    // offsetTop 相对容器（.search-history 是 position: relative），这里就是两行的下边界
+    const limit = first.offsetTop + rowHeight * HISTORY_MAX_ROWS + gap
+    const cut = items.findIndex((item) => item.offsetTop >= limit - 0.5)
+    if (cut === -1) {
+      setHistoryLayout((previous) => (previous === HISTORY_FIT ? previous : HISTORY_FIT))
+      return
+    }
+    const last = items[cut - 1]
+    // 「…」跟在最后一条后面放得下就并排，放不下就顶掉这一条、居中占它的位置
+    const after = last.offsetLeft + last.offsetWidth + gap
+    const replaced = cut > 1 && after + HISTORY_MORE_WIDTH > box.clientWidth
+    const next: HistoryLayout = {
+      maxHeight: limit,
+      cut: replaced ? cut - 1 : cut,
+      moreLeft: replaced ? last.offsetLeft + (last.offsetWidth - HISTORY_MORE_WIDTH) / 2 : after,
+      moreTop: last.offsetTop,
+      moreHeight: last.offsetHeight
+    }
+    setHistoryLayout((previous) =>
+      previous.maxHeight === next.maxHeight &&
+      previous.cut === next.cut &&
+      Math.abs(previous.moreLeft - next.moreLeft) < 0.5 &&
+      Math.abs(previous.moreTop - next.moreTop) < 0.5 &&
+      Math.abs(previous.moreHeight - next.moreHeight) < 0.5
+        ? previous
+        : next
+    )
+  }, [])
+
+  // 词条变化后重新量一次；layout effect 保证在绘制前收好，不会先闪出一屏三行
+  useLayoutEffect(() => {
+    layoutHistory()
+  }, [history, layoutHistory])
+
+  // 窗口宽度变化后重排：容器宽度会跟着变，能放下的条数也变了。
+  // 历史为空时整块不渲染，等有词以后再挂观察器
+  useEffect(() => {
+    if (history.length === 0) return
+    const box = historyRef.current
+    if (!box) return
+    let width = 0
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[entries.length - 1]?.contentRect.width ?? 0
+      if (Math.abs(next - width) < 0.5) return
+      width = next
+      layoutHistory()
+    })
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [history.length, layoutHistory])
 
   /** 显式执行一次搜索：回车、点「搜索」或点历史词都走这里，顺便记历史 */
   const runSearch = (raw: string): void => {
@@ -765,9 +863,20 @@ function SearchView({
                       清空
                     </button>
                   </div>
-                  <div className="search-history">
-                    {history.map((term) => (
-                      <div className="search-history-item" key={term}>
+                  <div
+                    className={`search-history${historyLayout.maxHeight === null ? '' : ' is-capped'}`}
+                    ref={historyRef}
+                    style={
+                      historyLayout.maxHeight === null
+                        ? undefined
+                        : { maxHeight: historyLayout.maxHeight }
+                    }
+                  >
+                    {history.map((term, index) => (
+                      <div
+                        className={`search-history-item${index >= historyLayout.cut ? ' is-clipped' : ''}`}
+                        key={term}
+                      >
                         <button
                           type="button"
                           className="search-history-run"
@@ -791,6 +900,23 @@ function SearchView({
                         </button>
                       </div>
                     ))}
+                    {history.length > historyLayout.cut && (
+                      <span
+                        className="search-history-more"
+                        style={{
+                          left: historyLayout.moreLeft,
+                          top: historyLayout.moreTop,
+                          height: historyLayout.moreHeight
+                        }}
+                        title={`还有 ${history.length - historyLayout.cut} 条：${history
+                          .slice(historyLayout.cut)
+                          .join('、')}`}
+                        role="img"
+                        aria-label={`还有 ${history.length - historyLayout.cut} 条搜索记录`}
+                      >
+                        …
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

@@ -316,11 +316,40 @@
 }
 
 .search-history {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
   max-width: 700px;
+}
+
+/* 超过两行时由 Search.tsx 量出高度上限并裁剪；被裁掉的条目只是不可见，仍占位 */
+.search-history.is-capped {
+  overflow: hidden;
+}
+
+.search-history-item.is-clipped {
+  visibility: hidden;
+}
+
+/* 两行放不下的历史词收进这颗「…」：宽度固定（Search.tsx 的 HISTORY_MORE_WIDTH 要和它一致），
+   位置由 JS 按第二行最后一条的实际位置写内联样式，不参与换行 */
+.search-history-more {
+  position: absolute;
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  border: 1px dashed color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  cursor: default;
+  user-select: none;
 }
 
 .search-history-item {
