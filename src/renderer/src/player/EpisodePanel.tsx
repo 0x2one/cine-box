@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type WheelEvent
+} from 'react'
 import { MoreOutlined, SettingOutlined } from '@ant-design/icons'
 import {
   analyzeNaming,
@@ -83,6 +91,7 @@ function EpisodePanel({
 }: EpisodePanelProps): React.JSX.Element {
   const groups = useMemo(() => groupBySource(lines), [lines])
   const [order, setOrder] = useState<EpisodeOrder>(readEpisodeOrder)
+  const [orderLive, setOrderLive] = useState(false)
   const [menu, setMenu] = useState<PanelMenu>(null)
   // 首帧就落在当前集所在的区间，避免先亮 1-100 再跳过去
   const [activeRange, setActiveRange] = useState(
@@ -93,6 +102,9 @@ function EpisodePanel({
   const gridRef = useRef<HTMLDivElement>(null)
   const sourcesRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
+  const orderPillRef = useRef<HTMLSpanElement>(null)
+  const descRef = useRef<HTMLButtonElement>(null)
+  const ascRef = useRef<HTMLButtonElement>(null)
   const spyFrame = useRef(0)
 
   /** 按排序方式摊开的集数：index 始终是 line.episodes 里的原始下标 */
@@ -132,6 +144,32 @@ function EpisodePanel({
   useEffect(() => {
     localStorage.setItem(EPISODE_ORDER_KEY, order)
   }, [order])
+
+  /**
+   * 倒序 / 正序 的滑块：直接量当前按钮的宽度和位置写内联样式，不经过 state，
+   * 和标题栏的导航胶囊是同一套做法。用 offsetLeft / offsetWidth 而不是
+   * getBoundingClientRect：弹层打开时正在跑 episode-pop-in 的上浮动画，
+   * rect 会带上位移，offsetLeft 是布局坐标、不受 transform 影响。
+   */
+  const placeOrderPill = useCallback((): void => {
+    const pill = orderPillRef.current
+    const target = order === 'desc' ? descRef.current : ascRef.current
+    if (!pill || !target) return
+    pill.style.opacity = '1'
+    pill.style.width = `${target.offsetWidth}px`
+    pill.style.transform = `translate3d(${target.offsetLeft}px, 0, 0)`
+  }, [order])
+
+  useLayoutEffect(() => {
+    // 设置弹层是条件渲染的：打开 / 关闭那一刻 refs 才出现，所以要跟着 menu 再量一次
+    placeOrderPill()
+  }, [placeOrderPill, menu])
+
+  // 首帧量好位置之后才允许过渡，否则滑块会从 0 宽度展开
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setOrderLive(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
 
   /**
    * 区间里「显示在最上面」的那一集：正序是区间起点，倒序是区间终点。
@@ -408,7 +446,13 @@ function EpisodePanel({
               <div className="episode-setting-row">
                 <span className="episode-setting-label">集数排序</span>
                 <div className="episode-order" role="group" aria-label="集数排序">
+                  <span
+                    className={`episode-order-pill${orderLive ? ' is-live' : ''}`}
+                    ref={orderPillRef}
+                    aria-hidden="true"
+                  />
                   <button
+                    ref={descRef}
                     type="button"
                     className={`episode-order-btn${order === 'desc' ? ' is-active' : ''}`}
                     aria-pressed={order === 'desc'}
@@ -417,6 +461,7 @@ function EpisodePanel({
                     倒序
                   </button>
                   <button
+                    ref={ascRef}
                     type="button"
                     className={`episode-order-btn${order === 'asc' ? ' is-active' : ''}`}
                     aria-pressed={order === 'asc'}

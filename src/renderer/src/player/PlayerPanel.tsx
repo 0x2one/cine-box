@@ -1,4 +1,3 @@
-import { CloseOutlined } from '@ant-design/icons'
 import EpisodePanel from './EpisodePanel'
 import PlayerInfo from './PlayerInfo'
 import type { EpisodeNaming, PlayerLine } from './player-data'
@@ -13,7 +12,6 @@ const TABS: { value: PlayerPanelTab; label: string }[] = [
 interface PlayerPanelProps {
   tab: PlayerPanelTab
   onTab: (tab: PlayerPanelTab) => void
-  onClose: () => void
   lines: PlayerLine[]
   line: PlayerLine
   onLine: (line: PlayerLine) => void
@@ -35,11 +33,11 @@ interface PlayerPanelProps {
 /**
  * 播放器右侧的停靠面板：剧集 / 简介两个 tab。
  * 面板本身不滚动，剧集用内部的网格滚，简介整体滚；头部固定。
+ * 头部只有这两个 tab：收起 / 展开统一走播放器右缘那颗 `.player-panel-toggle`。
  */
 function PlayerPanel({
   tab,
   onTab,
-  onClose,
   lines,
   line,
   onLine,
@@ -70,15 +68,6 @@ function PlayerPanel({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="player-panel-close"
-          onClick={onClose}
-          title="收起面板"
-          aria-label="收起面板"
-        >
-          <CloseOutlined />
-        </button>
       </div>
 
       <div className={`player-panel-body is-${tab}`} role="tabpanel">

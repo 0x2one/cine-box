@@ -281,7 +281,6 @@ function PlayerSession({
           <PlayerPanel
             tab={panelTab}
             onTab={onPanelTab}
-            onClose={onTogglePanel}
             lines={lines}
             line={line}
             onLine={switchLine}
@@ -436,7 +435,7 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
     [panelOpen, panelTab]
   )
 
-  // 右缘中部按钮与面板头部关闭：只做开合，保留当前 tab
+  // 右缘中部那颗按钮：只做开合，保留当前 tab
   const togglePanel = useCallback(() => {
     setPanelOpen((value) => !value)
   }, [])
