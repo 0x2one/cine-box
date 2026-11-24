@@ -4,7 +4,8 @@ import { is } from '@electron-toolkit/utils'
 
 /** 渲染层点某一集时传给播放窗的信息：详情由播放页自己按 videoId 取 */
 export interface PlayerOpenInput {
-  videoId: number
+  /** 库里的视频 id；本机下载文件播放时留空，改传 fileUrl */
+  videoId?: number
   /** 优先起播的来源（VideoDetailSource.id），不传就用第一个能播的来源 */
   sourceId?: number
   /** 来源里的线路下标（playLines 原始下标） */
@@ -14,6 +15,13 @@ export interface PlayerOpenInput {
   /** 详情加载前先显示的片名 / 集数，避免窗口白一下 */
   title?: string
   episodeName?: string
+  /**
+   * 本机文件（下载中心）：cine-file:// 地址，由主进程解析记录后填入。
+   * 渲染层的 player:open 不接受这两个字段，只有 downloads:play 会传。
+   */
+  fileUrl?: string
+  /** 本机文件名，详情加载前先当标题用 */
+  fileName?: string
 }
 
 export interface PlayerPayload extends PlayerOpenInput {
@@ -144,23 +152,36 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
   }
 
   function open(input: PlayerOpenInput): PlayerOpenResult {
+    const fileUrl = typeof input?.fileUrl === 'string' ? input.fileUrl.trim() : ''
+    const isLocal = fileUrl.length > 0
     const videoId = Number(input?.videoId)
-    if (!Number.isInteger(videoId) || videoId <= 0) return { ok: false, error: 'INVALID_INPUT' }
+    // 二选一：要么是库里的视频，要么是下载到本机的文件
+    if (!isLocal && (!Number.isInteger(videoId) || videoId <= 0)) {
+      return { ok: false, error: 'INVALID_INPUT' }
+    }
 
     const toIndex = (value: unknown): number | undefined => {
       const index = Number(value)
       return Number.isInteger(index) && index >= 0 ? index : undefined
     }
 
-    payload = {
-      videoId,
-      sourceId: toIndex(input?.sourceId),
-      lineIndex: toIndex(input?.lineIndex),
-      episodeIndex: toIndex(input?.episodeIndex),
-      title: typeof input?.title === 'string' ? input.title : undefined,
-      episodeName: typeof input?.episodeName === 'string' ? input.episodeName : undefined,
-      token: ++token
-    }
+    payload = isLocal
+      ? {
+          fileUrl,
+          fileName: typeof input?.fileName === 'string' ? input.fileName : undefined,
+          title: typeof input?.title === 'string' ? input.title : undefined,
+          episodeName: typeof input?.episodeName === 'string' ? input.episodeName : undefined,
+          token: ++token
+        }
+      : {
+          videoId,
+          sourceId: toIndex(input?.sourceId),
+          lineIndex: toIndex(input?.lineIndex),
+          episodeIndex: toIndex(input?.episodeIndex),
+          title: typeof input?.title === 'string' ? input.title : undefined,
+          episodeName: typeof input?.episodeName === 'string' ? input.episodeName : undefined,
+          token: ++token
+        }
 
     if (!playerWindow || playerWindow.isDestroyed()) {
       // 窗口创建后由播放页主动取 payload，这里不用等 load 完再发
@@ -175,7 +196,18 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
     return { ok: true }
   }
 
-  ipcMain.handle('player:open', (_event, input: PlayerOpenInput) => open(input))
+  ipcMain.handle('player:open', (_event, input: PlayerOpenInput) => {
+    if (!input || typeof input !== 'object') return { ok: false, error: 'INVALID_INPUT' }
+    // 白名单式转交：渲染层不能借 player:open 播任意本地文件（本机文件只走 downloads:play）
+    return open({
+      videoId: input.videoId,
+      sourceId: input.sourceId,
+      lineIndex: input.lineIndex,
+      episodeIndex: input.episodeIndex,
+      title: input.title,
+      episodeName: input.episodeName
+    })
+  })
   // 播放页挂载时取当前载荷：窗口是复用的，可能已经被推到第 N 集
   ipcMain.handle('player:payload', () => payload)
 

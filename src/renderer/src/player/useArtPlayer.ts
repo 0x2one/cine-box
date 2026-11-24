@@ -33,6 +33,11 @@ export interface UseArtPlayerOptions {
   containerRef: RefObject<HTMLDivElement | null>
   /** 当前集的 m3u8 地址；切换时复用同一个播放器实例 */
   url?: string
+  /**
+   * 流类型：默认 m3u8（走 hls.js）；本机的 mp4 等直接文件传 'auto'，
+   * 交给 <video> 原生解码，不走 HLS。
+   */
+  type?: 'm3u8' | 'auto'
   poster?: string
   /** 当前主题的强调色：进度条 / 控件 / 选中态跟主窗口一致 */
   accent: string
@@ -44,6 +49,8 @@ export interface UseArtPlayerOptions {
    * 不能当成「再点一次收起」，否则退出全屏后会看不到侧栏。
    */
   onEpisodes?: (fromFullscreen: boolean) => void
+  /** 有没有剧集面板：本机单文件播放没有，不挂「选集」按钮 */
+  showEpisodes?: boolean
 }
 
 export interface ArtPlayerHandle {
@@ -59,11 +66,13 @@ export interface ArtPlayerHandle {
 export function useArtPlayer({
   containerRef,
   url,
+  type = 'm3u8',
   poster,
   accent,
   onEnded,
   onError,
-  onEpisodes
+  onEpisodes,
+  showEpisodes = true
 }: UseArtPlayerOptions): ArtPlayerHandle {
   const artRef = useRef<Artplayer | null>(null)
   const urlRef = useRef(url)
@@ -72,6 +81,8 @@ export function useArtPlayer({
   const endedRef = useRef(onEnded)
   const errorRef = useRef(onError)
   const episodesRef = useRef(onEpisodes)
+  const typeRef = useRef(type)
+  const showEpisodesRef = useRef(showEpisodes)
   /**
    * 已经交给播放器的地址。不能拿 art.url 比：hls.js 会把 video.src 换成 blob:，
    * 创建完那一刻 art.url 永远不等于 m3u8，直接比会把同一集再切一次。
@@ -89,6 +100,8 @@ export function useArtPlayer({
     endedRef.current = onEnded
     errorRef.current = onError
     episodesRef.current = onEpisodes
+    typeRef.current = type
+    showEpisodesRef.current = showEpisodes
   })
 
   useEffect(() => {
@@ -100,7 +113,8 @@ export function useArtPlayer({
       container,
       url: firstUrl,
       poster: posterRef.current,
-      type: 'm3u8',
+      // 本机文件（mp4 等）按扩展名交给原生 <video>，不走 hls.js
+      type: typeRef.current === 'auto' ? 'auto' : 'm3u8',
       lang: 'zh-cn',
       theme: accentRef.current,
       autoplay: true,
@@ -197,24 +211,26 @@ export function useArtPlayer({
 
     // 控制条右侧的「选集」：只放图标（走 ArtPlayer 的 .art-icon，和自带控件同一套
     // 尺寸 / 悬停提亮 / 按压缩小）；全屏时先退全屏再打开面板（全屏下面板看不见，只开不关）
-    instance.controls.add((art) => ({
-      name: 'cinebox-episodes',
-      html: art.icons.episodes,
-      position: 'right',
-      index: 25,
-      tooltip: '选集',
-      click: () => {
-        // 直接调 document.exitFullscreen()：ArtPlayer 的 fullscreen setter 要等
-        // video:loadedmetadata 才装上，内部也只是转调这个方法，直接用标准 API 更稳
-        const fromFullscreen = Boolean(document.fullscreenElement)
-        if (fromFullscreen) {
-          void document.exitFullscreen().catch(() => {})
-        } else if (instance.fullscreen) {
-          instance.fullscreen = false
+    if (showEpisodesRef.current) {
+      instance.controls.add((art) => ({
+        name: 'cinebox-episodes',
+        html: art.icons.episodes,
+        position: 'right',
+        index: 25,
+        tooltip: '选集',
+        click: () => {
+          // 直接调 document.exitFullscreen()：ArtPlayer 的 fullscreen setter 要等
+          // video:loadedmetadata 才装上，内部也只是转调这个方法，直接用标准 API 更稳
+          const fromFullscreen = Boolean(document.fullscreenElement)
+          if (fromFullscreen) {
+            void document.exitFullscreen().catch(() => {})
+          } else if (instance.fullscreen) {
+            instance.fullscreen = false
+          }
+          episodesRef.current?.(fromFullscreen)
         }
-        episodesRef.current?.(fromFullscreen)
-      }
-    }))
+      }))
+    }
 
     instance.on('video:ended', () => endedRef.current?.())
     instance.on('video:volumechange', () => {

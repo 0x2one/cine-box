@@ -5,6 +5,7 @@ import {
   CloseOutlined,
   CompassOutlined,
   CompressOutlined,
+  DownloadOutlined,
   FireOutlined,
   MinusOutlined,
   SearchOutlined,
@@ -21,7 +22,7 @@ interface TitleBarProps {
 }
 
 /**
- * 自绘窗口操作栏：左侧 Logo + 标题，右侧 控制台 / 设置 / 最小化 / 最大化 / 关闭。
+ * 自绘窗口操作栏：左侧 Logo + 标题，右侧 下载 / 控制台 / 设置 / 最小化 / 最大化 / 关闭。
  * 「关于」不再放在操作栏，由设置页的「关于」分区承载。
  * macOS 保留原生红绿灯，因此不再重复绘制窗口按钮。
  */
@@ -153,6 +154,16 @@ function TitleBar({ view, onNavigate }: TitleBarProps): React.JSX.Element {
       </nav>
 
       <div className="titlebar-actions">
+        <button
+          type="button"
+          className={`titlebar-action${view === 'downloads' ? ' is-active' : ''}`}
+          onClick={() => onNavigate('downloads')}
+          title="下载中心"
+          aria-label="下载中心"
+        >
+          <DownloadOutlined />
+        </button>
+
         <button
           type="button"
           className={`titlebar-action${view === 'console' ? ' is-active' : ''}`}

@@ -12,7 +12,8 @@ import {
   globalShortcut,
   screen
 } from 'electron'
-import { join } from 'path'
+import { existsSync, mkdirSync } from 'fs'
+import { isAbsolute, join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -29,6 +30,8 @@ import {
 import { createCollectLogStore } from './collect-log-store'
 import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
+import { downloadMediaUrl, DOWNLOAD_MEDIA_SCHEME, serveDownloadFile } from './download-media'
+import { createDownloadStore } from './download-store'
 import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
@@ -96,8 +99,13 @@ import {
 const gotTheLock = app.requestSingleInstanceLock()
 
 // 首页自定义图片走自己的协议，避免把图片整段塞进配置 JSON 或放开 file://
+// 下载到本机的视频也用独立协议：播放窗按 Range 取字节，只放行下载记录里登记过的文件
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'cine-img', privileges: { standard: true, secure: true, supportFetchAPI: true } }
+  { scheme: 'cine-img', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  {
+    scheme: DOWNLOAD_MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
 ])
 
 let mainWindow: BrowserWindow | null = null
@@ -161,6 +169,11 @@ const scheduler = createCollectScheduler({
 })
 // 首页配置（海报叠层 + 分类推荐）与自定义图片：userData/Data/Home
 const homeStore = createHomeStore(join(app.getPath('userData'), 'Data', 'Home'))
+// 下载中心的记录固定存 userData/Data/Downloads，媒体文件放在设置里的下载目录
+const downloadStore = createDownloadStore({
+  directory: () => appSettingsStore.get().downloadPath,
+  onChange: () => sendToRenderer('downloads:changed')
+})
 /** 缓存库初始化失败时不影响应用启动，视频相关 IPC 返回 CACHE_UNAVAILABLE */
 let videoCacheReady = false
 /** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
@@ -169,7 +182,7 @@ const PENDING_CATEGORY_TTL = 5 * 60 * 1000
 const updater = createUpdater(sendToRenderer, () => appSettingsStore.get().autoDownload)
 const cacheManager = createCacheManager()
 // 播放页跑在独立的无边框暗色窗口里，不复用主窗口（IPC 由它自己注册）
-createPlayerWindowManager({
+const playerWindows = createPlayerWindowManager({
   preload: join(__dirname, '../preload/index.js'),
   icon
 })
@@ -570,7 +583,9 @@ function createWindow(): void {
     const WM_LBUTTONDBLCLK = 0x0203
     const TITLE_BAR_HEIGHT = 44
     const BRAND_ZONE_WIDTH = 150
-    const ACTIONS_ZONE_WIDTH = 222
+    // 右侧操作区：下载 / 控制台 / 设置三颗 30px 图标按钮 + 分隔线 + 三个 46px 窗口按钮，
+    // 加间距约 253px（改动 TitleBar 的按钮数量时这里要跟着改）
+    const ACTIONS_ZONE_WIDTH = 254
     // 与 TitleBar 中间「推荐 / 搜索 / 找片看」胶囊的实际宽度对齐（main.css 的 .titlebar-nav）：
     // 内边距 3+3、边框 1+1、两侧等宽按钮 82×2、搜索框 200、三处间距 6×2
     const CENTER_NAV_WIDTH = 384
@@ -692,6 +707,80 @@ ipcMain.handle('settings:setCollectConcurrency', (_event, value: number) => {
     message: `采集并发已调整为 ${settings.collectConcurrency} 路`
   })
   return settings
+})
+
+/* ── IPC：下载中心 ── */
+
+ipcMain.handle('downloads:list', () => downloadStore.list())
+
+ipcMain.handle('downloads:pickPath', async () => {
+  const options: Electron.OpenDialogOptions = {
+    title: '选择下载目录',
+    defaultPath: appSettingsStore.get().downloadPath,
+    properties: ['openDirectory', 'createDirectory']
+  }
+  const result = mainWindow
+    ? await dialog.showOpenDialog(mainWindow, options)
+    : await dialog.showOpenDialog(options)
+  if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true }
+  return { ok: true, path: result.filePaths[0] }
+})
+
+ipcMain.handle('downloads:setPath', (_event, value: string) => {
+  const next = typeof value === 'string' ? value.trim() : ''
+  if (!next || !isAbsolute(next)) {
+    return { ok: false, error: 'INVALID_PATH', settings: appSettingsStore.get() }
+  }
+  try {
+    // 目录不存在时直接建出来：用户选的目录可能刚被删掉，没必要让他先去资源管理器建
+    mkdirSync(next, { recursive: true })
+  } catch {
+    return { ok: false, error: 'NOT_WRITABLE', settings: appSettingsStore.get() }
+  }
+  return { ok: true, settings: appSettingsStore.setDownloadPath(next) }
+})
+
+ipcMain.handle('downloads:setConcurrency', (_event, value: number) =>
+  // 下载引擎每次填槽都读一次设置，这里只落盘，不打断正在下载的任务
+  appSettingsStore.setDownloadConcurrency(value)
+)
+
+ipcMain.handle('downloads:remove', (_event, input: { ids?: string[]; deleteFiles?: boolean }) =>
+  downloadStore.remove(Array.isArray(input?.ids) ? input.ids.map(String) : [], {
+    deleteFiles: Boolean(input?.deleteFiles)
+  })
+)
+
+ipcMain.handle('downloads:clearFinished', (_event, input?: { deleteFiles?: boolean }) =>
+  downloadStore.clearFinished({ deleteFiles: Boolean(input?.deleteFiles) })
+)
+
+ipcMain.handle('downloads:openFolder', async (_event, id?: string) => {
+  const record = id ? downloadStore.find(String(id)) : null
+  // 文件还在就定位到它；被删 / 挪走则退回下载目录
+  if (record && existsSync(record.path)) {
+    shell.showItemInFolder(record.path)
+    return { ok: true }
+  }
+  try {
+    const error = await shell.openPath(downloadStore.ensureDirectory())
+    return { ok: error === '' }
+  } catch {
+    return { ok: false }
+  }
+})
+
+ipcMain.handle('downloads:play', (_event, id: string) => {
+  const record = downloadStore.find(String(id))
+  if (!record) return { ok: false, error: 'NOT_FOUND' }
+  if (!existsSync(record.path)) return { ok: false, error: 'FILE_MISSING' }
+  // 本机文件在播放窗里直接播，不按 videoId 取详情
+  return playerWindows.open({
+    fileUrl: downloadMediaUrl(record.path),
+    fileName: record.fileName,
+    title: record.title,
+    episodeName: record.episodeName
+  })
 })
 
 /* ── IPC：缓存管理 ── */
@@ -2226,6 +2315,7 @@ if (!gotTheLock) {
     await scheduleStore.init().catch((error) => console.error('采集计划初始化失败', error))
     await backupStore.init().catch(() => {})
     await homeStore.init().catch((error) => console.error('首页配置初始化失败', error))
+    await downloadStore.init().catch((error) => console.error('下载记录初始化失败', error))
     // 自定义图片：cine-img://home/<文件名> → userData/Data/Home/images/<文件名>
     protocol.handle('cine-img', (request) => {
       try {
@@ -2235,6 +2325,22 @@ if (!gotTheLock) {
         const path = homeStore.imageFile(file)
         if (!path) return new Response('Not found', { status: 404 })
         return net.fetch(pathToFileURL(path).toString())
+      } catch {
+        return new Response('Bad request', { status: 400 })
+      }
+    })
+    // 本机下载视频：cine-file://downloads/<encodeURIComponent(绝对路径)>
+    // 只放行下载记录里登记过的文件（按记录路径精确匹配），不做任意文件读取器；
+    // 不要求文件仍在当前下载目录：用户改过保存位置后，旧目录里的视频照样要能播
+    protocol.handle(DOWNLOAD_MEDIA_SCHEME, (request) => {
+      try {
+        const url = new URL(request.url)
+        if (url.hostname !== 'downloads') return new Response('Not found', { status: 404 })
+        const file = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+        if (!isAbsolute(file) || !downloadStore.findByPath(file)) {
+          return new Response('Not found', { status: 404 })
+        }
+        return serveDownloadFile(file, request)
       } catch {
         return new Response('Bad request', { status: 400 })
       }

@@ -47,9 +47,18 @@ interface PlayerOpenInput {
   episodeName?: string
 }
 
-interface PlayerPayload extends PlayerOpenInput {
+interface PlayerPayload extends Omit<PlayerOpenInput, 'videoId'> {
   /** 每次打开都递增：播放页靠它重新取详情、重新起播 */
   token: number
+  /** 库里的视频 id；播下载到本机的文件时没有 */
+  videoId?: number
+  /**
+   * 本机文件（下载中心）的 cine-file:// 地址：有它时播放页直接播，
+   * 不再按 videoId 取详情。只有主进程的 downloads:play 会填。
+   */
+  fileUrl?: string
+  /** 本机文件名，详情加载前先当标题用 */
+  fileName?: string
 }
 
 interface PlayerOpenResult {
@@ -95,6 +104,10 @@ interface AppSettings {
   defaultPicSiteId: string
   /** 同时采集的站点数（1–4）：跨站并行，同一站点始终串行 */
   collectConcurrency: number
+  /** 下载文件的保存目录（绝对路径） */
+  downloadPath: string
+  /** 同时下载的任务数（1–5） */
+  downloadConcurrency: number
 }
 
 interface SetShortcutResult {
@@ -1316,11 +1329,77 @@ interface UpdaterApi {
   onStatus: (callback: (status: UpdaterStatus) => void) => () => void
 }
 
+/** 下载任务状态：等待 / 下载中 / 暂停 / 完成 / 失败 / 取消 */
+type DownloadStatus = 'waiting' | 'downloading' | 'paused' | 'done' | 'failed' | 'canceled'
+
+interface DownloadRecord {
+  id: string
+  /** 来源视频 id；纯直链下载时没有 */
+  videoId?: number
+  title: string
+  /** 集名 / 版本名，单集下载为空串 */
+  episodeName: string
+  /** 文件名 */
+  fileName: string
+  /** 保存的绝对路径 */
+  path: string
+  status: DownloadStatus
+  /** 0–100 */
+  progress: number
+  receivedBytes: number
+  totalBytes: number
+  /** 失败原因 */
+  error: string
+  /** ISO 8601 */
+  createdAt: string
+  updatedAt: string
+  /** 完成时间，未完成时为空串 */
+  completedAt: string
+}
+
+/** 列表里的记录：多带磁盘上的真实状态（文件可能被手动删掉 / 挪走） */
+interface DownloadRecordView extends DownloadRecord {
+  exists: boolean
+  /** 磁盘上的实际大小；文件不在时为 0 */
+  size: number
+}
+
+interface DownloadRemoveResult {
+  records: DownloadRecordView[]
+  /** 真的删掉的文件数 */
+  deletedFiles: number
+  /** 想删但没删的文件数（不在下载目录 / 删除失败） */
+  keptFiles: number
+}
+
+interface DownloadPathResult {
+  ok: boolean
+  /** INVALID_PATH：不是绝对路径；NOT_WRITABLE：目录建不出来 */
+  error?: 'INVALID_PATH' | 'NOT_WRITABLE'
+  settings: AppSettings
+}
+
+interface DownloadsApi {
+  list: () => Promise<DownloadRecordView[]>
+  /** 用播放窗播本机文件；文件被删 / 记录不存在时返回 ok: false */
+  play: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 不带 id 打开下载目录，带 id 在文件管理器里定位该文件 */
+  openFolder: (id?: string) => Promise<{ ok: boolean }>
+  remove: (input: { ids: string[]; deleteFiles?: boolean }) => Promise<DownloadRemoveResult>
+  clearFinished: (input?: { deleteFiles?: boolean }) => Promise<DownloadRemoveResult>
+  pickPath: () => Promise<{ ok: boolean; canceled?: boolean; path?: string }>
+  setPath: (value: string) => Promise<DownloadPathResult>
+  /** 设置同时下载的任务数（1–5），返回保存后的设置 */
+  setConcurrency: (value: number) => Promise<AppSettings>
+  onChange: (callback: () => void) => () => void
+}
+
 interface Api {
   app: AppApi
   player: PlayerApi
   appearance: AppearanceApi
   settings: SettingsApi
+  downloads: DownloadsApi
   sites: SitesApi
   categories: CategoriesApi
   bindings: BindingsApi

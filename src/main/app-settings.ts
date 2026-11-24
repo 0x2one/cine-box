@@ -22,6 +22,31 @@ export function clampCollectConcurrency(value: unknown): number {
   return Math.min(Math.max(Math.floor(parsed), MIN_COLLECT_CONCURRENCY), MAX_COLLECT_CONCURRENCY)
 }
 
+/** 同时下载的视频数：默认 2，最多 5 路（再多容易被单站限速，磁盘也抢不过来） */
+export const DEFAULT_DOWNLOAD_CONCURRENCY = 2
+export const MIN_DOWNLOAD_CONCURRENCY = 1
+export const MAX_DOWNLOAD_CONCURRENCY = 5
+
+/** 把任意输入收敛到 1–5；缺失 / 空串 / 非法值回落到默认值 */
+export function clampDownloadConcurrency(value: unknown): number {
+  if (value === null || value === undefined || value === '') return DEFAULT_DOWNLOAD_CONCURRENCY
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_DOWNLOAD_CONCURRENCY
+  return Math.min(Math.max(Math.floor(parsed), MIN_DOWNLOAD_CONCURRENCY), MAX_DOWNLOAD_CONCURRENCY)
+}
+
+/**
+ * 默认下载目录：系统「下载」下的「映盒剧场」子目录，不和用户自己的文件混在一起。
+ * app.getPath('downloads') 在个别 Linux 环境会抛错，退回家目录下的 Downloads。
+ */
+export function defaultDownloadPath(): string {
+  try {
+    return join(app.getPath('downloads'), '映盒剧场')
+  } catch {
+    return join(app.getPath('home'), 'Downloads', '映盒剧场')
+  }
+}
+
 export interface AppSettings {
   /** 开机自启（以操作系统登录项为准） */
   openAtLogin: boolean
@@ -39,6 +64,10 @@ export interface AppSettings {
   defaultPicSiteId: string
   /** 同时采集的站点数（1–4）：跨站并行，同一站点始终串行 */
   collectConcurrency: number
+  /** 下载文件的保存目录（绝对路径） */
+  downloadPath: string
+  /** 同时下载的任务数（1–5） */
+  downloadConcurrency: number
 }
 
 interface StoreFile {
@@ -51,6 +80,8 @@ interface StoreFile {
   windowSize?: string
   defaultPicSiteId?: string
   collectConcurrency?: number
+  downloadPath?: string
+  downloadConcurrency?: number
 }
 
 const DEFAULTS: AppSettings = {
@@ -61,7 +92,10 @@ const DEFAULTS: AppSettings = {
   startView: 'home',
   windowSize: DEFAULT_WINDOW_SIZE,
   defaultPicSiteId: '',
-  collectConcurrency: DEFAULT_COLLECT_CONCURRENCY
+  collectConcurrency: DEFAULT_COLLECT_CONCURRENCY,
+  // 读取配置时再落到系统下载目录（此时 app 已就绪），这里只占位
+  downloadPath: '',
+  downloadConcurrency: DEFAULT_DOWNLOAD_CONCURRENCY
 }
 
 export interface AppSettingsStore {
@@ -76,6 +110,10 @@ export interface AppSettingsStore {
   setDefaultPicSite: (value: string | null) => AppSettings
   /** 同时采集的站点数；立即影响后续填槽，不打断正在采集的任务 */
   setCollectConcurrency: (value: number | null) => AppSettings
+  /** 下载保存目录；空串 / 非法值回落成默认目录 */
+  setDownloadPath: (value: string | null) => AppSettings
+  /** 同时下载的任务数（1–5）；下一次填槽生效，不打断在下载的任务 */
+  setDownloadConcurrency: (value: number | null) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -121,10 +159,15 @@ export function createAppSettingsStore(): AppSettingsStore {
         windowSize: isAppWindowSize(data?.windowSize) ? data.windowSize : DEFAULTS.windowSize,
         defaultPicSiteId:
           typeof data?.defaultPicSiteId === 'string' ? data.defaultPicSiteId.trim() : '',
-        collectConcurrency: clampCollectConcurrency(data?.collectConcurrency)
+        collectConcurrency: clampCollectConcurrency(data?.collectConcurrency),
+        downloadPath:
+          typeof data?.downloadPath === 'string' && data.downloadPath.trim()
+            ? data.downloadPath.trim()
+            : defaultDownloadPath(),
+        downloadConcurrency: clampDownloadConcurrency(data?.downloadConcurrency)
       }
     } catch {
-      settings = { ...DEFAULTS }
+      settings = { ...DEFAULTS, downloadPath: defaultDownloadPath() }
     }
   }
 
@@ -138,7 +181,9 @@ export function createAppSettingsStore(): AppSettingsStore {
       startView: settings.startView,
       windowSize: settings.windowSize,
       defaultPicSiteId: settings.defaultPicSiteId,
-      collectConcurrency: settings.collectConcurrency
+      collectConcurrency: settings.collectConcurrency,
+      downloadPath: settings.downloadPath,
+      downloadConcurrency: settings.downloadConcurrency
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -205,6 +250,17 @@ export function createAppSettingsStore(): AppSettingsStore {
     },
     setCollectConcurrency: (value: number | null) => {
       settings = { ...settings, collectConcurrency: clampCollectConcurrency(value) }
+      persist()
+      return snapshot()
+    },
+    setDownloadPath: (value: string | null) => {
+      const next = typeof value === 'string' ? value.trim() : ''
+      settings = { ...settings, downloadPath: next || defaultDownloadPath() }
+      persist()
+      return snapshot()
+    },
+    setDownloadConcurrency: (value: number | null) => {
+      settings = { ...settings, downloadConcurrency: clampDownloadConcurrency(value) }
       persist()
       return snapshot()
     }

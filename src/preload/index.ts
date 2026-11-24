@@ -60,6 +60,33 @@ const api = {
     setCollectConcurrency: (value: number): Promise<AppSettings> =>
       ipcRenderer.invoke('settings:setCollectConcurrency', value)
   },
+  downloads: {
+    list: (): Promise<DownloadRecordView[]> => ipcRenderer.invoke('downloads:list'),
+    /** 用独立播放窗播本机文件；文件被删 / 记录不存在时 ok 为假 */
+    play: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('downloads:play', id),
+    /** 不带 id：打开下载目录；带 id：在资源管理器里定位这个文件 */
+    openFolder: (id?: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('downloads:openFolder', id),
+    remove: (input: { ids: string[]; deleteFiles?: boolean }): Promise<DownloadRemoveResult> =>
+      ipcRenderer.invoke('downloads:remove', input),
+    clearFinished: (input?: { deleteFiles?: boolean }): Promise<DownloadRemoveResult> =>
+      ipcRenderer.invoke('downloads:clearFinished', input),
+    pickPath: (): Promise<{ ok: boolean; canceled?: boolean; path?: string }> =>
+      ipcRenderer.invoke('downloads:pickPath'),
+    setPath: (value: string): Promise<DownloadPathResult> =>
+      ipcRenderer.invoke('downloads:setPath', value),
+    setConcurrency: (value: number): Promise<AppSettings> =>
+      ipcRenderer.invoke('downloads:setConcurrency', value),
+    /** 记录有增删改时通知（进度不推，避免高频刷新列表） */
+    onChange: (callback: () => void): (() => void) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('downloads:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('downloads:changed', handler)
+      }
+    }
+  },
   sites: {
     list: (): Promise<Site[]> => ipcRenderer.invoke('sites:list'),
     add: (input: SiteInput): Promise<AddSiteResult> => ipcRenderer.invoke('sites:add', input),

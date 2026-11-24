@@ -5,6 +5,7 @@ import HomeView from './pages/Home'
 import SearchView from './pages/Search'
 import Settings from './pages/Settings'
 import Console from './pages/Console'
+import Downloads from './pages/Downloads'
 import AboutPage from './pages/About'
 import type { AppView } from './types'
 
@@ -83,6 +84,7 @@ function App({ startView = 'home' }: { startView?: AppStartView }): React.JSX.El
             />
           )}
           {view === 'console' && <Console onBack={backToDisplay} />}
+          {view === 'downloads' && <Downloads onBack={backToDisplay} />}
           {view === 'settings' && <Settings onBack={backToDisplay} />}
           {view === 'about' && <AboutPage onBack={backToDisplay} />}
         </div>

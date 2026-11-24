@@ -38,6 +38,8 @@ function readPanelTab(): PlayerPanelTab {
 
 interface PlayerSessionProps {
   payload: PlayerPayload
+  /** 库里的视频 id（本机文件不走这里） */
+  videoId: number
   /** 当前主题的强调色，ArtPlayer 的进度条 / 控件跟着它走 */
   accent: string
   panelOpen: boolean
@@ -59,6 +61,7 @@ interface PlayerSessionProps {
  */
 function PlayerSession({
   payload,
+  videoId,
   accent,
   panelOpen,
   panelTab,
@@ -81,7 +84,7 @@ function PlayerSession({
   useEffect(() => {
     let alive = true
     window.api.videos
-      .detail(payload.videoId)
+      .detail(videoId)
       .then((result) => {
         if (!alive) return
         if (!result.ok || !result.video) {
@@ -136,7 +139,7 @@ function PlayerSession({
     return () => {
       alive = false
     }
-  }, [payload, reloadToken])
+  }, [videoId, payload, reloadToken])
 
   const line = useMemo(
     () => lines.find((item) => item.key === lineKey) ?? lines[0] ?? null,
@@ -312,6 +315,64 @@ function PlayerSession({
 }
 
 /**
+ * 本机文件播放（下载中心点「播放」）：不查详情、没有线路和剧集面板，
+ * 直接把 cine-file:// 地址交给 ArtPlayer 原生播。播放失败时只给重试。
+ */
+function LocalSession({
+  payload,
+  accent
+}: {
+  payload: PlayerPayload
+  accent: string
+}): React.JSX.Element {
+  const [playError, setPlayError] = useState('')
+  const stageRef = useRef<HTMLDivElement>(null)
+  const title = payload.title?.trim() || payload.fileName?.trim() || '本机视频'
+  const episode = payload.episodeName?.trim() ?? ''
+
+  useEffect(() => {
+    document.title = episode ? `${title} · ${episode} — 映盒剧场` : `${title} — 映盒剧场`
+  }, [title, episode])
+
+  const { retry } = useArtPlayer({
+    containerRef: stageRef,
+    url: payload.fileUrl,
+    type: 'auto',
+    accent,
+    showEpisodes: false,
+    onError: (message) => setPlayError(message)
+  })
+
+  const retryPlayback = (): void => {
+    setPlayError('')
+    retry()
+  }
+
+  return (
+    <div className="player-app">
+      <PlayerTitleBar title={title} episode={episode} countLabel="本机文件" />
+
+      <div className="player-body">
+        <section className="player-stage">
+          <div className="player-stage-art" ref={stageRef} />
+
+          {playError && (
+            <div className="player-state is-overlay">
+              <p className="player-state-title">{playError}</p>
+              <div className="player-state-actions">
+                <button type="button" className="player-btn" onClick={retryPlayback}>
+                  重试
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+/**
  * 独立播放窗口的页面：先取主进程给的播放载荷，再交给按 token 挂载的会话组件。
  * 播放页固定深色，只跟随主窗口的强调色；面板开合状态放在这一层，换片不会重置。
  */
@@ -403,10 +464,34 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
     )
   }
 
+  // 本机下载文件：播放页直接播，不按 videoId 取详情
+  if (payload.fileUrl) {
+    return <LocalSession key={payload.token} payload={payload} accent={accent} />
+  }
+
+  const videoId = payload.videoId
+  if (typeof videoId !== 'number') {
+    return (
+      <div className="player-app">
+        <PlayerTitleBar title="无法播放" episode="" countLabel="" />
+        <div className="player-body">
+          <section className="player-stage">
+            <div className="player-state is-error">
+              <VideoCameraOutlined className="player-state-icon" />
+              <p className="player-state-title">没有收到播放信息</p>
+              <p className="player-state-hint">回到列表重新点一集试试</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <PlayerSession
       key={payload.token}
       payload={payload}
+      videoId={videoId}
       accent={accent}
       panelOpen={panelOpen}
       panelTab={panelTab}
