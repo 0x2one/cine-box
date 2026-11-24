@@ -8,15 +8,15 @@ interface PlayerTitleBarProps {
   title: string
   /** 当前集数（原始集名或「第 N 集」） */
   episode: string
-  /** 当前线路的集数总量，0 表示还没读到 */
-  total: number
+  /** 集数文案：「共 392 集」「共 58 期」「单集」，空串表示还没读到 */
+  countLabel: string
 }
 
 /**
  * 播放窗自绘标题栏：左上角是片名与当前集数，右侧只有窗口按钮。
  * 整条是拖拽区，所有按钮单独退出拖拽，否则点不到。
  */
-function PlayerTitleBar({ title, episode, total }: PlayerTitleBarProps): React.JSX.Element {
+function PlayerTitleBar({ title, episode, countLabel }: PlayerTitleBarProps): React.JSX.Element {
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
@@ -41,7 +41,7 @@ function PlayerTitleBar({ title, episode, total }: PlayerTitleBarProps): React.J
           {title}
         </h1>
         {episode && <span className="player-episode">{episode}</span>}
-        {total > 0 && <span className="player-total">共 {total} 集</span>}
+        {countLabel && <span className="player-total">{countLabel}</span>}
       </div>
 
       <div className="player-titlebar-drag" />

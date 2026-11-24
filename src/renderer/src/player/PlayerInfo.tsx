@@ -7,13 +7,15 @@ interface PlayerInfoProps {
   line: PlayerLine | null
   /** 当前播放源名：「{资源站名}」，同站有多条 m3u8 时带 ① ② */
   lineLabel: string
+  /** 集数文案：「共 12 期」/「单集」/「共 2 个版本」，量词跟着集名风格走 */
+  countLabel: string
 }
 
 /**
  * 面板里的简介页：封面 + 片名 + 元信息 + 主演 / 导演 + 简介。
  * 简介默认收六行，长文可以展开；整页由面板的滚动容器负责滚动。
  */
-function PlayerInfo({ detail, line, lineLabel }: PlayerInfoProps): React.JSX.Element {
+function PlayerInfo({ detail, line, lineLabel, countLabel }: PlayerInfoProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
 
   const source = detail?.sources.find((item) => item.id === line?.sourceId) ?? detail?.sources[0]
@@ -30,7 +32,7 @@ function PlayerInfo({ detail, line, lineLabel }: PlayerInfoProps): React.JSX.Ele
     meta?.area?.trim(),
     source?.categoryName?.trim(),
     detail?.note?.trim(),
-    line ? `共 ${line.episodes.length} 集` : '',
+    countLabel,
     // 播放页只播 m3u8，不再标注「线路 xxx」这种播放类型，只写资源站名
     sourceName ? `来源 ${sourceName}` : ''
   ].filter((item): item is string => Boolean(item))

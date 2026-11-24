@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type WheelEvent } from 'react'
 import { MoreOutlined, SettingOutlined } from '@ant-design/icons'
 import {
+  analyzeNaming,
   circledNumber,
-  currentEpisodeLabel,
+  describeEpisode,
   EPISODE_ORDER_KEY,
-  episodeLabel,
+  episodeCountLabel,
   episodeTitle,
   groupBySource,
   lineName,
   lineOrdinal,
   readEpisodeOrder,
+  type EpisodeNaming,
   type EpisodeOrder,
   type PlayerLine
 } from './player-data'
@@ -34,6 +36,20 @@ interface EpisodePanelProps {
   onEpisode: (index: number) => void
   autoNext: boolean
   onAutoNext: (value: boolean) => void
+  /** 当前线路的集名风格（量词 / 是否按日期排），由播放会话按分类算好传进来 */
+  naming: EpisodeNaming
+  /** 视频分类（大陆综艺 / 剧情片…）：只用来给「全部播放源」里的其它线路挑量词 */
+  category: string
+}
+
+/** 「全部播放源」里每条线路的条数：综艺数「期」、电影数「个版本」 */
+function lineCount(line: PlayerLine, category: string): string {
+  const naming = analyzeNaming(
+    line.episodes.map((episode) => episode.name),
+    category
+  )
+  if (naming.textOnly) return `${line.episodes.length} 个版本`
+  return `${line.episodes.length} ${naming.unit}`
 }
 
 function buildRanges(total: number): EpisodeRange[] {
@@ -61,7 +77,9 @@ function EpisodePanel({
   episodeIndex,
   onEpisode,
   autoNext,
-  onAutoNext
+  onAutoNext,
+  naming,
+  category
 }: EpisodePanelProps): React.JSX.Element {
   const groups = useMemo(() => groupBySource(lines), [lines])
   const [order, setOrder] = useState<EpisodeOrder>(readEpisodeOrder)
@@ -84,6 +102,32 @@ function EpisodePanel({
   }, [line.episodes, order])
 
   const ranges = useMemo(() => buildRanges(line.episodes.length), [line.episodes.length])
+
+  /** 每个格子的主行 / 次行：一条线路只解析一次，换排序不用重算 */
+  const labels = useMemo(
+    () => line.episodes.map((episode) => describeEpisode(episode.name, naming)),
+    [line.episodes, naming]
+  )
+
+  /** 区间锚点名：按日期排的线路写两端的日期（06.28–11.22），其余写序号（1-100） */
+  const rangeText = useCallback(
+    (range: EpisodeRange): { label: string; title: string } => {
+      const first = labels[range.start - 1]?.date ?? ''
+      const last = labels[range.end - 1]?.date ?? ''
+      // 日期乱序（同一线路里混着 E 号和日期）时，日期区间反而误导，退回序号
+      if (naming.dated && naming.sorted && first && last) {
+        const from = first < last ? first : last
+        const to = first < last ? last : first
+        return {
+          label: from === to ? from : `${from}–${to}`,
+          title: from === to ? `跳到 ${from}` : `跳到 ${from} 至 ${to}`
+        }
+      }
+      const label = range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`
+      return { label, title: `跳到第 ${range.start}–${range.end} ${naming.unit}` }
+    },
+    [labels, naming]
+  )
 
   useEffect(() => {
     localStorage.setItem(EPISODE_ORDER_KEY, order)
@@ -221,20 +265,19 @@ function EpisodePanel({
    */
   const currentIndex = episodeIndex < line.episodes.length ? episodeIndex : 0
   const current = line.episodes[currentIndex] ?? null
+  const currentLabel = labels[currentIndex] ?? null
 
   return (
     <section className="episode-panel">
       <div className="episode-head">
-        <span className="episode-total">共 {line.episodes.length} 集</span>
-        {current && (
+        <span className="episode-total">{episodeCountLabel(naming, line.episodes.length)}</span>
+        {current && currentLabel && (
           <span
             className="episode-now"
             title={`正在播放 ${episodeTitle(current.name, currentIndex)}`}
           >
             <span className="episode-now-label">正在播放</span>
-            <span className="episode-now-episode">
-              {currentEpisodeLabel(current.name, currentIndex)}
-            </span>
+            <span className="episode-now-episode">{currentLabel.spoken}</span>
           </span>
         )}
       </div>
@@ -243,18 +286,17 @@ function EpisodePanel({
         <div className="episode-anchors" role="group" aria-label="集数区间">
           {ranges.map((range) => {
             const active = range.start === activeRange
-            const label =
-              range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`
+            const text = rangeText(range)
             return (
               <button
                 key={range.start}
                 type="button"
                 className={`episode-anchor${active ? ' is-active' : ''}`}
                 aria-current={active ? 'true' : undefined}
-                title={`跳到第 ${range.start}–${range.end} 集`}
+                title={text.title}
                 onClick={() => goRange(range)}
               >
-                {label}
+                {text.label}
               </button>
             )
           })}
@@ -263,20 +305,20 @@ function EpisodePanel({
 
       <div className="episode-grid" ref={gridRef} onScroll={handleGridScroll}>
         {episodes.map(({ episode, index }) => {
-          const label = episodeLabel(episode.name, index)
+          const label = labels[index]
           const active = index === episodeIndex
           return (
             <button
               key={`${episode.index}-${episode.url}`}
               type="button"
-              className={`episode-cell${active ? ' is-active' : ''}`}
+              className={`episode-cell${active ? ' is-active' : ''}${label?.text ? ' is-text' : ''}`}
               data-ordinal={index + 1}
-              title={episode.name || `第 ${index + 1} 集`}
+              title={episode.name || `第 ${index + 1} ${naming.unit}`}
               aria-current={active ? 'true' : undefined}
               onClick={() => onEpisode(index)}
             >
-              <span className="episode-num">{label.number}</span>
-              {label.caption && <span className="episode-caption">{label.caption}</span>}
+              <span className="episode-num">{label?.main}</span>
+              {label?.caption && <span className="episode-caption">{label.caption}</span>}
               {active && (
                 <span className="episode-bars" aria-hidden="true">
                   <i />
@@ -411,7 +453,7 @@ function EpisodePanel({
                           {circledNumber(ordinal)}
                         </span>
                       )}
-                      <span className="episode-source-item-count">{item.episodes.length} 集</span>
+                      <span className="episode-source-item-count">{lineCount(item, category)}</span>
                     </button>
                   )
                 })}

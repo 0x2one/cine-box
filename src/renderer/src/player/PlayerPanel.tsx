@@ -1,7 +1,7 @@
 import { CloseOutlined } from '@ant-design/icons'
 import EpisodePanel from './EpisodePanel'
 import PlayerInfo from './PlayerInfo'
-import type { PlayerLine } from './player-data'
+import type { EpisodeNaming, PlayerLine } from './player-data'
 
 export type PlayerPanelTab = 'episodes' | 'info'
 
@@ -24,6 +24,12 @@ interface PlayerPanelProps {
   detail: VideoDetail | null
   /** 当前线路名，简介里显示在元信息里 */
   lineLabel: string
+  /** 当前线路的集名风格 */
+  naming: EpisodeNaming
+  /** 视频分类（综艺 / 剧情片…） */
+  category: string
+  /** 头部 / 简介里的集数文案：「共 12 期」「单集」「共 2 个版本」 */
+  countLabel: string
 }
 
 /**
@@ -42,7 +48,10 @@ function PlayerPanel({
   autoNext,
   onAutoNext,
   detail,
-  lineLabel
+  lineLabel,
+  naming,
+  category,
+  countLabel
 }: PlayerPanelProps): React.JSX.Element {
   return (
     <aside className="player-panel" aria-label="剧集与简介">
@@ -82,9 +91,11 @@ function PlayerPanel({
             onEpisode={onEpisode}
             autoNext={autoNext}
             onAutoNext={onAutoNext}
+            naming={naming}
+            category={category}
           />
         ) : (
-          <PlayerInfo detail={detail} line={line} lineLabel={lineLabel} />
+          <PlayerInfo detail={detail} line={line} lineLabel={lineLabel} countLabel={countLabel} />
         )}
       </div>
     </aside>

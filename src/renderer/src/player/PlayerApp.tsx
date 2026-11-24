@@ -4,7 +4,9 @@ import { applyPlayerAppearance, findAccent } from '../theme/appearance'
 import PlayerPanel, { type PlayerPanelTab } from './PlayerPanel'
 import PlayerTitleBar from './PlayerTitleBar'
 import {
+  analyzeNaming,
   buildLines,
+  episodeCountLabel,
   episodeTitle,
   firstEpisodeIndex,
   groupBySource,
@@ -104,8 +106,19 @@ function PlayerSession({
           built.find((item) => item.sourceId === payload.sourceId) ??
           built[0]
         setLineKey(preferred.key)
-        // 没指定具体集数时按集数排序播第一格：倒序 = 最新一集，正序 = 第 1 集
-        const fallbackIndex = firstEpisodeIndex(preferred.episodes, readEpisodeOrder())
+        // 没指定具体集数时按集数排序播第一格：倒序 = 最新一集，正序 = 第 1 集。
+        // 集名日期乱序的线路交给解析结果挑真正最晚的那集，别信列表顺序
+        const preferredCategory =
+          result.video.sources.find((item) => item.id === preferred.sourceId)?.categoryName ?? ''
+        const preferredNaming = analyzeNaming(
+          preferred.episodes.map((item) => item.name),
+          preferredCategory
+        )
+        const fallbackIndex = firstEpisodeIndex(
+          preferred.episodes,
+          readEpisodeOrder(),
+          preferredNaming
+        )
         const specified =
           typeof payload.episodeIndex === 'number'
             ? preferred.episodes.find((item) => item.index === payload.episodeIndex)
@@ -132,6 +145,17 @@ function PlayerSession({
   const episode = line?.episodes[episodeIndex] ?? line?.episodes[0] ?? null
   const groups = useMemo(() => groupBySource(lines), [lines])
   const lineLabel = line ? lineName(line, groups) : ''
+
+  // 集名风格跟着「当前线路所属来源」的分类走：综艺按「期」、电影是「国语 / 正片」这类版本名
+  const category = useMemo(
+    () => detail?.sources.find((item) => item.id === line?.sourceId)?.categoryName ?? '',
+    [detail, line?.sourceId]
+  )
+  const naming = useMemo(
+    () => analyzeNaming(line?.episodes.map((episode) => episode.name) ?? [], category),
+    [line?.episodes, category]
+  )
+  const countLabel = episodeCountLabel(naming, line?.episodes.length ?? 0)
 
   const title = detail?.name?.trim() || payload.title?.trim() || '正在播放'
   const episodeName = episode
@@ -203,7 +227,7 @@ function PlayerSession({
 
   return (
     <div className="player-app">
-      <PlayerTitleBar title={title} episode={episodeName} total={line?.episodes.length ?? 0} />
+      <PlayerTitleBar title={title} episode={episodeName} countLabel={countLabel} />
 
       <div className={`player-body${line && panelOpen ? ' has-panel' : ''}`}>
         <section className="player-stage">
@@ -264,6 +288,9 @@ function PlayerSession({
             onAutoNext={toggleAutoNext}
             detail={detail}
             lineLabel={lineLabel}
+            naming={naming}
+            category={category}
+            countLabel={countLabel}
           />
         )}
 
@@ -360,7 +387,7 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
   if (!payload) {
     return (
       <div className="player-app">
-        <PlayerTitleBar title={missing ? '无法播放' : '正在准备播放'} episode="" total={0} />
+        <PlayerTitleBar title={missing ? '无法播放' : '正在准备播放'} episode="" countLabel="" />
         <div className="player-body">
           <section className="player-stage">
             <div className="player-state is-error">
