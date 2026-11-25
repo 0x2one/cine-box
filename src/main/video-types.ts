@@ -335,6 +335,8 @@ export interface VideoListItem {
   inSearch?: boolean
   /** 视频所属的本地一级分类（按绑定关系推导，顺序跟分类树一致；推荐只允许进这些分类） */
   boundCategoryIds?: string[]
+  /** 绑定后的本地分类路径；展示侧只统计启用站点，控制台 includeDisabledSites 时包含禁用站点 */
+  localCategoryPaths?: string[]
 }
 
 export interface VideoListResult {
@@ -522,6 +524,8 @@ export interface VideoDetail {
   edited: boolean
   /** 封面取自哪个站点（手动换图时记录），空串表示用主来源 */
   picSiteId: string
+  /** 各来源绑定的本地分类路径（如「电影 / 动作片」）；只统计启用站点，由 IPC 层按绑定关系补齐 */
+  localCategoryPaths?: string[]
 }
 
 export interface VideoDetailResult {

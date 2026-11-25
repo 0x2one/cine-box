@@ -781,7 +781,7 @@ interface VideoListItem {
   sourceVideoId: string
   categoryId: string
   categoryName: string
-  /** 绑定后的本地分类路径（如「电影 / 动作片」），未绑定时为空数组 */
+  /** 绑定后的本地分类路径（如「电影 / 动作片」）；展示侧只统计启用站点，控制台 includeDisabledSites 时包含禁用站点，未绑定时为空数组 */
   localCategoryPaths: string[]
   hidden: boolean
   edited: boolean
@@ -929,6 +929,8 @@ interface VideoDetail {
   hidden: boolean
   edited: boolean
   picSiteId: string
+  /** 各来源绑定的本地分类路径（如「电影 / 动作片」）；只统计启用站点，未绑定时为空数组 */
+  localCategoryPaths?: string[]
 }
 
 interface VideoDetailResult {

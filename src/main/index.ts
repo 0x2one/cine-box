@@ -93,6 +93,7 @@ import {
   type PicCleanStatus,
   type SiteSearchTestResult,
   type VideoCollectStartInput,
+  type VideoDetailResult,
   type VideoListQuery,
   type VideoListItem,
   type VideoOnlineSearchResult,
@@ -198,6 +199,8 @@ const downloadHlsServer = createDownloadHlsServer({
 const lanCache = createLanCache(downloadStore)
 /** 缓存库初始化失败时不影响应用启动，视频相关 IPC 返回 CACHE_UNAVAILABLE */
 let videoCacheReady = false
+/** 当前禁用站点的 id：展示侧统计视频分类时要把这些来源排除掉 */
+let disabledSiteIds = new Set<string>()
 /** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
 const pendingCategoryRefresh = new Map<string, { categories: SiteCategoryInput[]; at: number }>()
 const PENDING_CATEGORY_TTL = 5 * 60 * 1000
@@ -319,12 +322,12 @@ function invalidateHomeFeed(): void {
  */
 function refreshDisabledSites(): void {
   if (!videoCacheReady) return
-  videoStore.setDisabledSites(
-    siteStore
-      .list()
-      .filter((site) => site.disabled)
-      .map((site) => site.id)
-  )
+  const ids = siteStore
+    .list()
+    .filter((site) => site.disabled)
+    .map((site) => site.id)
+  disabledSiteIds = new Set(ids)
+  videoStore.setDisabledSites(ids)
   invalidateHomeFeed()
 }
 
@@ -341,7 +344,11 @@ function readHomeFeed(view: HomeFeedView): HomeFeedResult {
       {
         config: homeStore.get(),
         categories: categoryStore.list(),
-        bindingsFor: (categoryId) => bindingStore.forCategory(categoryId),
+        // 展示端只认启用站点的绑定；控制台要能看到全部（含禁用站点）的分类配置
+        bindingsFor: (categoryId) => {
+          const bindings = bindingStore.forCategory(categoryId)
+          return view === 'console' ? bindings : filterEnabledSources(bindings)
+        },
         // 控制台要把禁用站点的条目也读出来（否则会显示成「视频已丢失」）；展示端按可见口径
         videosByIds: (videoIds) =>
           videoStore.listVideosByIds(videoIds, { includeDisabledSites: view === 'console' }),
@@ -1136,11 +1143,15 @@ function resolveVideoFilters(query: VideoListQuery | undefined): {
   // 显式传了空数组（没有任何可见分类）：直接空结果，不要退化成全库
   if (Array.isArray(rawCategoryIds) && categoryIds.length === 0) return { empty: true }
   if (categoryIds.length === 0) return { empty: false }
+  // 展示侧不能用禁用站点的绑定筛分类：否则一个启用来源 + 一个禁用来源的视频
+  // 会顺着禁用来源的在线分类混进来（找片看 / 局域网 / 首页轨道都走这里）
+  const includeDisabledSites = query?.includeDisabledSites === true
   const seen = new Set<string>()
   const filters: { siteId: string; categoryId: string }[] = []
   for (const categoryId of categoryIds) {
     // 选中的是父分类时，把它下面各级子分类的绑定一起算进来
     for (const binding of bindingStore.forCategories(categoryStore.subtreeIds(categoryId))) {
+      if (!includeDisabledSites && disabledSiteIds.has(binding.siteId)) continue
       const key = `${binding.siteId}\u0000${binding.sourceId}`
       if (seen.has(key)) continue
       seen.add(key)
@@ -1150,26 +1161,69 @@ function resolveVideoFilters(query: VideoListQuery | undefined): {
   return { filters, empty: filters.length === 0 }
 }
 
+/** 在线分类（站点 + 分类）→ 绑定的本地分类路径，列表和播放页详情共用 */
+function bindingPathMap(): Map<string, string> {
+  return new Map(
+    bindingStore
+      .pathsForSourceCategories()
+      .map((row) => [`${row.siteId}\u0000${row.sourceCategoryId}`, row.categoryPath])
+  )
+}
+
+/** 视频各来源的在线分类映射成本地分类路径（去重、按名称排序） */
+function localCategoryPathsOf(
+  bindingPaths: Map<string, string>,
+  sources: { siteId: string; categoryId: string }[]
+): string[] {
+  const paths: string[] = []
+  for (const source of sources) {
+    const path = bindingPaths.get(`${source.siteId}\u0000${source.categoryId}`)
+    if (path && !paths.includes(path)) paths.push(path)
+  }
+  return paths.sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'))
+}
+
+/** 展示侧只统计启用站点的来源：禁用站点虽然还留着缓存，但不再参与视频分类 */
+function filterEnabledSources<T extends { siteId: string }>(sources: T[]): T[] {
+  if (disabledSiteIds.size === 0) return sources
+  return sources.filter((source) => !disabledSiteIds.has(source.siteId))
+}
+
+/** 详情补上视频绑定的本地分类路径：详情缓存只认识来源的在线分类 */
+function withLocalCategoryPaths(result: VideoDetailResult): VideoDetailResult {
+  if (!result.ok || !result.video) return result
+  return {
+    ...result,
+    video: {
+      ...result.video,
+      localCategoryPaths: localCategoryPathsOf(
+        bindingPathMap(),
+        filterEnabledSources(result.video.sources)
+      )
+    }
+  }
+}
+
 /**
  * 给视频行补齐列表侧信息：绑定后的本地分类路径、可推荐的一级分类、
  * 是否在首页海报 / 分类推荐 / 搜索推荐里。控制台「视频」页与搜索页在线结果共用。
  * 都是按本页的 id 批量查，多查几条 SELECT，不影响主查询。
  */
-function enrichVideoItems(items: VideoListItem[]): VideoListItem[] {
+function enrichVideoItems(
+  items: VideoListItem[],
+  options?: { includeDisabledSites?: boolean }
+): VideoListItem[] {
   if (items.length === 0) return items
-  // 列表要显示「绑定后类型」：把本页视频各来源的在线分类映射成本地分类路径
-  const bindingPaths = new Map(
-    bindingStore
-      .pathsForSourceCategories()
-      .map((row) => [`${row.siteId}\u0000${row.sourceCategoryId}`, row.categoryPath])
-  )
-  const byVideo = new Map<number, string[]>()
-  for (const source of videoStore.listSourceCategories(items.map((item) => item.id))) {
-    const path = bindingPaths.get(`${source.siteId}\u0000${source.categoryId}`)
-    if (!path) continue
-    const paths = byVideo.get(source.videoId) ?? []
-    if (!paths.includes(path)) paths.push(path)
-    byVideo.set(source.videoId, paths)
+  // 列表要显示「绑定后类型」：把本页视频各来源的在线分类映射成本地分类路径。
+  // 展示侧只算启用站点的来源；控制台带 includeDisabledSites 时保留全部，方便管理禁用站点
+  const bindingPaths = bindingPathMap()
+  const allSources = videoStore.listSourceCategories(items.map((item) => item.id))
+  const sources = options?.includeDisabledSites ? allSources : filterEnabledSources(allSources)
+  const sourcesByVideo = new Map<number, { siteId: string; categoryId: string }[]>()
+  for (const source of sources) {
+    const list = sourcesByVideo.get(source.videoId) ?? []
+    list.push(source)
+    sourcesByVideo.set(source.videoId, list)
   }
 
   // 首页状态：已加进海报 / 已推荐到哪些分类，视频列表直接显示出来，不用再点开看
@@ -1202,9 +1256,7 @@ function enrichVideoItems(items: VideoListItem[]): VideoListItem[] {
 
   return items.map((item) => ({
     ...item,
-    localCategoryPaths: (byVideo.get(item.id) ?? []).sort((left, right) =>
-      left.localeCompare(right, 'zh-Hans-CN')
-    ),
+    localCategoryPaths: localCategoryPathsOf(bindingPaths, sourcesByVideo.get(item.id) ?? []),
     boundCategoryIds: boundTops.get(item.id) ?? [],
     inPoster: posterIds.has(item.id),
     homeSections: sectionsByVideo.get(item.id) ?? [],
@@ -1218,7 +1270,12 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   if (empty) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
   const result = videoStore.listVideos(query ?? {}, filters)
   if (!result.ok || result.items.length === 0) return result
-  return { ...result, items: enrichVideoItems(result.items) }
+  return {
+    ...result,
+    items: enrichVideoItems(result.items, {
+      includeDisabledSites: query?.includeDisabledSites === true
+    })
+  }
 })
 
 ipcMain.handle('videos:count', (_event, query: VideoListQuery) => {
@@ -1240,7 +1297,10 @@ ipcMain.handle(
   'videos:detail',
   async (_event, videoId: number, options?: { autoFetch?: boolean }) => {
     if (!videoCacheReady) return cacheUnavailable()
-    return detailCache.read(Number(videoId), options?.autoFetch !== false)
+    // 播放页「简介」要显示视频绑定的本地分类：详情里只有各来源的在线分类，这里按绑定关系补一次
+    return withLocalCategoryPaths(
+      await detailCache.read(Number(videoId), options?.autoFetch !== false)
+    )
   }
 )
 
@@ -1248,7 +1308,9 @@ ipcMain.handle(
   'videos:detail:refresh',
   async (_event, videoId: number, options?: { force?: boolean }) => {
     if (!videoCacheReady) return { ...cacheUnavailable(), refreshed: 0, failed: 0 }
-    return detailCache.refresh(Number(videoId), Boolean(options?.force))
+    return withLocalCategoryPaths(
+      await detailCache.refresh(Number(videoId), Boolean(options?.force))
+    )
   }
 )
 

@@ -12,7 +12,7 @@ interface PlayerInfoProps {
 }
 
 /**
- * 面板里的简介页：封面 + 片名 + 元信息 + 主演 / 导演 + 简介。
+ * 面板里的简介页：封面 + 片名 + 元信息 + 分类 + 主演 / 导演 + 简介。
  * 简介默认收六行，长文可以展开；整页由面板的滚动容器负责滚动。
  */
 function PlayerInfo({ detail, line, lineLabel, countLabel }: PlayerInfoProps): React.JSX.Element {
@@ -26,16 +26,22 @@ function PlayerInfo({ detail, line, lineLabel, countLabel }: PlayerInfoProps): R
   const director = meta?.director?.trim() ?? ''
 
   const sourceName = lineLabel || source?.siteName?.trim() || ''
+  const localCategories = detail?.localCategoryPaths ?? []
 
-  const chips = [
+  // 元信息分两行：年份 / 地区 / 类型 / 备注一行，集数与来源一行。
+  // 直接拼成字符串而不是逐个 chip 加分隔符，换行时不会把「·」甩到下一行开头
+  const metaPrimary = [
     meta?.year?.trim(),
     meta?.area?.trim(),
     source?.categoryName?.trim(),
-    detail?.note?.trim(),
-    countLabel,
-    // 播放页只播 m3u8，不再标注「线路 xxx」这种播放类型，只写资源站名
-    sourceName ? `来源 ${sourceName}` : ''
-  ].filter((item): item is string => Boolean(item))
+    detail?.note?.trim()
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join(' · ')
+  // 播放页只播 m3u8，不再标注「线路 xxx」这种播放类型，只写资源站名
+  const metaSecondary = [countLabel, sourceName ? `来源 ${sourceName}` : '']
+    .filter((item): item is string => Boolean(item))
+    .join(' · ')
 
   const expandable = intro.length > 140
 
@@ -51,16 +57,26 @@ function PlayerInfo({ detail, line, lineLabel, countLabel }: PlayerInfoProps): R
           <h2 className="player-info-title" title={title}>
             {title || '正在播放'}
           </h2>
-          {chips.length > 0 && (
+          {(metaPrimary || metaSecondary) && (
             <p className="player-info-meta">
-              {chips.map((item, index) => (
-                <span key={`${item}-${index}`}>{item}</span>
-              ))}
+              {metaPrimary && <span className="player-info-meta-line">{metaPrimary}</span>}
+              {metaSecondary && <span className="player-info-meta-line">{metaSecondary}</span>}
             </p>
           )}
         </div>
       </div>
 
+      {/* 本地分类：和元信息里的采集分类不是一回事 */}
+      <p className="player-info-actor">
+        <span className="player-info-label">分类</span>
+        {localCategories.length > 0 ? (
+          <span className="player-info-category" title={localCategories.join('、')}>
+            {localCategories.join('、')}
+          </span>
+        ) : (
+          <span className="player-info-category is-empty">暂无</span>
+        )}
+      </p>
       {actors && (
         <p className="player-info-actor">
           <span className="player-info-label">主演</span>
