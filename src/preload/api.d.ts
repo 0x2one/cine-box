@@ -110,6 +110,8 @@ interface AppSettings {
   downloadPath: string
   /** 同时下载的任务数（1–5） */
   downloadConcurrency: number
+  /** 单集内部同时下载的分片数（1–6） */
+  downloadSegmentConcurrency: number
 }
 
 interface SetShortcutResult {
@@ -1509,6 +1511,8 @@ interface DownloadsApi {
   setPath: (value: string) => Promise<DownloadPathResult>
   /** 设置同时下载的任务数（1–5），返回保存后的设置 */
   setConcurrency: (value: number) => Promise<AppSettings>
+  /** 设置单集内部的分片并发（1–6），返回保存后的设置 */
+  setSegmentConcurrency: (value: number) => Promise<AppSettings>
   /** 播放页缓存当前集 / 多选批量：主进程解析地址并入队 */
   cache: (input: DownloadCacheInput) => Promise<DownloadCacheResult>
   /** 某部视频已缓存 / 缓存中的集（播放页状态与优先缓存用） */

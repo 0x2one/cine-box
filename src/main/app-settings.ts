@@ -35,6 +35,24 @@ export function clampDownloadConcurrency(value: unknown): number {
   return Math.min(Math.max(Math.floor(parsed), MIN_DOWNLOAD_CONCURRENCY), MAX_DOWNLOAD_CONCURRENCY)
 }
 
+/** 单集内部同时下载的分片数：默认 3，最多 6 路（再高容易被站点限流 / 封 IP） */
+export const DEFAULT_DOWNLOAD_SEGMENT_CONCURRENCY = 3
+export const MIN_DOWNLOAD_SEGMENT_CONCURRENCY = 1
+export const MAX_DOWNLOAD_SEGMENT_CONCURRENCY = 6
+
+/** 把任意输入收敛到 1–6；缺失 / 空串 / 非法值回落到默认值 */
+export function clampDownloadSegmentConcurrency(value: unknown): number {
+  if (value === null || value === undefined || value === '') {
+    return DEFAULT_DOWNLOAD_SEGMENT_CONCURRENCY
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return DEFAULT_DOWNLOAD_SEGMENT_CONCURRENCY
+  return Math.min(
+    Math.max(Math.floor(parsed), MIN_DOWNLOAD_SEGMENT_CONCURRENCY),
+    MAX_DOWNLOAD_SEGMENT_CONCURRENCY
+  )
+}
+
 /**
  * 默认下载目录：系统「下载」下的「映盒剧场」子目录，不和用户自己的文件混在一起。
  * app.getPath('downloads') 在个别 Linux 环境会抛错，退回家目录下的 Downloads。
@@ -68,6 +86,8 @@ export interface AppSettings {
   downloadPath: string
   /** 同时下载的任务数（1–5） */
   downloadConcurrency: number
+  /** 单集内部同时下载的分片数（1–6） */
+  downloadSegmentConcurrency: number
 }
 
 interface StoreFile {
@@ -82,6 +102,7 @@ interface StoreFile {
   collectConcurrency?: number
   downloadPath?: string
   downloadConcurrency?: number
+  downloadSegmentConcurrency?: number
 }
 
 const DEFAULTS: AppSettings = {
@@ -95,7 +116,8 @@ const DEFAULTS: AppSettings = {
   collectConcurrency: DEFAULT_COLLECT_CONCURRENCY,
   // 读取配置时再落到系统下载目录（此时 app 已就绪），这里只占位
   downloadPath: '',
-  downloadConcurrency: DEFAULT_DOWNLOAD_CONCURRENCY
+  downloadConcurrency: DEFAULT_DOWNLOAD_CONCURRENCY,
+  downloadSegmentConcurrency: DEFAULT_DOWNLOAD_SEGMENT_CONCURRENCY
 }
 
 export interface AppSettingsStore {
@@ -114,6 +136,8 @@ export interface AppSettingsStore {
   setDownloadPath: (value: string | null) => AppSettings
   /** 同时下载的任务数（1–5）；下一次填槽生效，不打断在下载的任务 */
   setDownloadConcurrency: (value: number | null) => AppSettings
+  /** 单集内部的分片并发（1–6）；对之后开始的缓存任务生效 */
+  setDownloadSegmentConcurrency: (value: number | null) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -164,7 +188,10 @@ export function createAppSettingsStore(): AppSettingsStore {
           typeof data?.downloadPath === 'string' && data.downloadPath.trim()
             ? data.downloadPath.trim()
             : defaultDownloadPath(),
-        downloadConcurrency: clampDownloadConcurrency(data?.downloadConcurrency)
+        downloadConcurrency: clampDownloadConcurrency(data?.downloadConcurrency),
+        downloadSegmentConcurrency: clampDownloadSegmentConcurrency(
+          data?.downloadSegmentConcurrency
+        )
       }
     } catch {
       settings = { ...DEFAULTS, downloadPath: defaultDownloadPath() }
@@ -183,7 +210,8 @@ export function createAppSettingsStore(): AppSettingsStore {
       defaultPicSiteId: settings.defaultPicSiteId,
       collectConcurrency: settings.collectConcurrency,
       downloadPath: settings.downloadPath,
-      downloadConcurrency: settings.downloadConcurrency
+      downloadConcurrency: settings.downloadConcurrency,
+      downloadSegmentConcurrency: settings.downloadSegmentConcurrency
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -261,6 +289,11 @@ export function createAppSettingsStore(): AppSettingsStore {
     },
     setDownloadConcurrency: (value: number | null) => {
       settings = { ...settings, downloadConcurrency: clampDownloadConcurrency(value) }
+      persist()
+      return snapshot()
+    },
+    setDownloadSegmentConcurrency: (value: number | null) => {
+      settings = { ...settings, downloadSegmentConcurrency: clampDownloadSegmentConcurrency(value) }
       persist()
       return snapshot()
     }

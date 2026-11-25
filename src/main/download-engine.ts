@@ -119,8 +119,10 @@ export function createDownloadEngine(options: {
   store: DownloadStore
   /** 每次填槽读一次设置 */
   getConcurrency: () => number
+  /** 单集内部的分片并发；每个缓存任务开始时读一次 */
+  getSegmentConcurrency: () => number
 }): DownloadEngine {
-  const { store, getConcurrency } = options
+  const { store, getConcurrency, getSegmentConcurrency } = options
   const queue: string[] = []
   const active = new Map<string, ActiveTask>()
   let shuttingDown = false
@@ -144,6 +146,7 @@ export function createDownloadEngine(options: {
         dir,
         signal: task.controller.signal,
         fetchImpl,
+        concurrency: getSegmentConcurrency(),
         onProgress: (progress) => {
           const now = Date.now()
           if (now - lastReport < reportInterval) return

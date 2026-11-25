@@ -483,13 +483,14 @@ function formatShare(size: number, total: number): string {
 }
 
 /**
- * 下载相关设置：存储占用概览 + 保存位置 + 同时下载任务数。
- * 下载中心页只保留记录列表，这两项单独占一个设置分区，路径可以整行铺开。
+ * 下载相关设置：存储占用概览 + 保存位置 + 同时下载任务数 + 单集分片并发。
+ * 下载中心页只保留记录列表，这几项单独占一个设置分区，路径可以整行铺开。
  */
 function DownloadPanel(): React.JSX.Element {
   const { message } = App.useApp()
   const [path, setPath] = useState('')
   const [concurrency, setConcurrency] = useState(2)
+  const [segmentConcurrency, setSegmentConcurrency] = useState(3)
   const [usage, setUsage] = useState<DownloadUsage | null>(null)
   const [loading, setLoading] = useState(true)
   const [picking, setPicking] = useState(false)
@@ -513,6 +514,7 @@ function DownloadPanel(): React.JSX.Element {
       if (!alive) return
       setPath(settings.downloadPath)
       setConcurrency(settings.downloadConcurrency)
+      setSegmentConcurrency(settings.downloadSegmentConcurrency)
       setLoading(false)
     })
     return () => {
@@ -558,6 +560,17 @@ function DownloadPanel(): React.JSX.Element {
         message.success(`同时下载任务数已设为 ${saved.downloadConcurrency}`)
       })
       .catch(() => message.error('保存并发设置失败'))
+  }
+
+  const changeSegmentConcurrency = (next: string | number): void => {
+    const value = Number(next)
+    void window.api.downloads
+      .setSegmentConcurrency(value)
+      .then((saved) => {
+        setSegmentConcurrency(saved.downloadSegmentConcurrency)
+        message.success(`单集分片并发已设为 ${saved.downloadSegmentConcurrency}`)
+      })
+      .catch(() => message.error('保存分片并发设置失败'))
   }
 
   const openDirectory = async (): Promise<void> => {
@@ -676,6 +689,21 @@ function DownloadPanel(): React.JSX.Element {
             disabled={loading}
             onChange={changeConcurrency}
             options={[1, 2, 3, 4, 5].map((value) => ({
+              value,
+              label: `${value}`
+            }))}
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="单集分片并发数"
+          description="同一集内部同时下载的分片数，调高能加快单集缓存，但更容易被站点限流；对之后开始的缓存任务生效"
+        >
+          <Segmented
+            value={segmentConcurrency}
+            disabled={loading}
+            onChange={changeSegmentConcurrency}
+            options={[1, 2, 3, 4, 5, 6].map((value) => ({
               value,
               label: `${value}`
             }))}

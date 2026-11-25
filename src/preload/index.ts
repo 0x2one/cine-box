@@ -81,6 +81,9 @@ const api = {
       ipcRenderer.invoke('downloads:setPath', value),
     setConcurrency: (value: number): Promise<AppSettings> =>
       ipcRenderer.invoke('downloads:setConcurrency', value),
+    /** 单集内部的分片并发（1–6），对之后开始的缓存任务生效 */
+    setSegmentConcurrency: (value: number): Promise<AppSettings> =>
+      ipcRenderer.invoke('downloads:setSegmentConcurrency', value),
     /** 播放页缓存当前集 / 多选批量：主进程按详情解析地址并入队 */
     cache: (input: DownloadCacheInput): Promise<DownloadCacheResult> =>
       ipcRenderer.invoke('downloads:cache', input),

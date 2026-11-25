@@ -184,7 +184,8 @@ const downloadStore = createDownloadStore({
 // 离线缓存队列：并发读「设置 › 下载」，进度事件也广播给已打开的播放窗
 const downloadEngine = createDownloadEngine({
   store: downloadStore,
-  getConcurrency: () => appSettingsStore.get().downloadConcurrency
+  getConcurrency: () => appSettingsStore.get().downloadConcurrency,
+  getSegmentConcurrency: () => appSettingsStore.get().downloadSegmentConcurrency
 })
 // 缓存包导出 MP4：手动触发、串行执行，产物放在下载目录下的「导出」
 const mp4Export = createMp4Export({ store: downloadStore })
@@ -886,6 +887,11 @@ ipcMain.handle('downloads:setConcurrency', (_event, value: number) => {
   const settings = appSettingsStore.setDownloadConcurrency(value)
   downloadEngine.wake()
   return settings
+})
+
+ipcMain.handle('downloads:setSegmentConcurrency', (_event, value: number) => {
+  // 每个缓存任务开始时读一次：正在跑的任务不受影响，下一次开始缓存时用新值
+  return appSettingsStore.setDownloadSegmentConcurrency(value)
 })
 
 ipcMain.handle(
