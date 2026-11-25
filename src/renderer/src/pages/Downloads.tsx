@@ -845,14 +845,6 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
     })
   }
 
-  const openGroupFolder = async (group: DownloadGroup): Promise<void> => {
-    const target =
-      group.records.find((record) => record.status === 'done' && record.exists) ??
-      group.records.find((record) => record.exists) ??
-      group.records[0]
-    await openDirectory(target?.id)
-  }
-
   const clearFinished = (): void => {
     if (counts.finished === 0) return
     modal.confirm({
@@ -984,15 +976,6 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
                   >
                     整组转 MP4
                   </Button>
-                  <Tooltip title="打开所在文件夹">
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={<FolderOpenOutlined />}
-                      aria-label="打开所在文件夹"
-                      onClick={() => void openGroupFolder(openGroup)}
-                    />
-                  </Tooltip>
                   <Button
                     danger
                     size="small"
@@ -1092,18 +1075,6 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
                       )}
                     </div>
                     <div className="download-group-actions">
-                      <Tooltip title="打开所在文件夹">
-                        <Button
-                          size="small"
-                          type="text"
-                          icon={<FolderOpenOutlined />}
-                          aria-label="打开所在文件夹"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            void openGroupFolder(group)
-                          }}
-                        />
-                      </Tooltip>
                       <Tooltip title="删除整组缓存">
                         <Button
                           size="small"
