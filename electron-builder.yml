@@ -17,6 +17,8 @@ files:
 
 asarUnpack:
   - resources/**
+  # 导出 MP4 用的 ffmpeg 是可执行文件，不能塞在 asar 里；运行时按 app.asar.unpacked 找
+  - node_modules/ffmpeg-static/**
 
 # 国内网络直连 GitHub 拉 Electron 二进制很慢，统一切到镜像（CI 上同样可用）
 electronDownload:
@@ -52,6 +54,9 @@ nsis:
 mac:
   icon: build/icon.icns
   category: public.app-category.entertainment
+  # ffmpeg 在 asar.unpacked 里，是独立可执行文件，签名时要单独点名
+  binaries:
+    - Resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg
   # dmg 供人工安装，zip 是 macOS 自动更新（Squirrel.Mac）必需产物
   target:
     - dmg

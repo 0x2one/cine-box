@@ -1,2 +1,4 @@
 allowBuilds:
   electron-winstaller: true
+  # 安装时下载对应平台的 ffmpeg 二进制（导出 MP4 用）
+  ffmpeg-static: true
