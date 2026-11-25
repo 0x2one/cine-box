@@ -36,7 +36,10 @@ interface CachedEpisodeEntry {
 
 type CacheTone = 'done' | 'active' | 'paused' | 'failed'
 
-/** 当前这一集这一次播放的源选择：决定一次，播放过程中不因为缓存刚下完而切源 */
+/**
+ * 当前这一集的播放源：选集 / 切线路时先落一次；之后只有「本集缓存刚下完」
+ * 会把它从在线改成本机（见下面的提升逻辑），别的集下完不动。
+ */
 interface PlaybackDecision {
   /** `${sourceId}:${lineIndex}:${episodeIndex}` */
   key: string
@@ -105,7 +108,8 @@ interface PlayerSessionProps {
  *
  * 离线缓存：
  * - 详情加载的同时取该视频的缓存集；两者都就绪后才决定每一集播本机还是在线。
- * - 选集 / 切线路时做一次「优先缓存」决策，播放过程中缓存刚下完不会把正在看的流切走。
+ * - 选集 / 切线路时按「优先缓存」落一次决策；本集还在缓存时，等它下完再按当前进度
+ *   原地切到本机播放（别的集下完不动），切不过去就继续在线播。
  * - 当前集的缓存状态走右上角 chip；剧集面板按状态标记并支持多选批量入队。
  */
 function PlayerSession({
@@ -132,10 +136,16 @@ function PlayerSession({
   const [cacheReady, setCacheReady] = useState(false)
   const [cacheBusy, setCacheBusy] = useState(false)
   const [decision, setDecision] = useState<PlaybackDecision>({ key: '', mode: 'remote' })
-  const [localUrl, setLocalUrl] = useState<{ key: string; url: string } | null>(null)
+  const [localUrl, setLocalUrl] = useState<{
+    key: string
+    recordId: string
+    url: string
+  } | null>(null)
   const [cacheBroken, setCacheBroken] = useState<Set<string>>(new Set())
   const stageRef = useRef<HTMLDivElement>(null)
   const decisionRef = useRef<PlaybackDecision>({ key: '', mode: 'remote' })
+  /** 已经试过「本集下完就切本地」的记录 id：一条只试一次，失败也不反复折腾 */
+  const promoteTriedRef = useRef<Set<string>>(new Set())
   const noticeRef = useRef<(text: string) => void>(() => {})
   const cacheCurrentRef = useRef<() => void>(() => {})
 
@@ -291,9 +301,9 @@ function PlayerSession({
   const currentCache = episodeKey ? cacheEntries.get(episodeKey) : undefined
 
   /**
-   * 优先缓存：只在「选集 / 切线路」那一刻决策一次。
-   * cacheEntries 变化（别的集下完了 / 当前集刚下完）不会改写 decision，
-   * 所以不会出现看到一半突然切成本地流。
+   * 优先缓存：换集 / 换线路那一刻落一次决策。
+   * 这里只定「起点」——该集已经缓存好就直接播本机，否则先在线；
+   * 正在缓存的那集下完之后要不要切源，交给下面的提升 effect，不会在别的集下完时乱切。
    */
   useLayoutEffect(() => {
     if (!episodeKey || !cacheReady) return
@@ -313,6 +323,8 @@ function PlayerSession({
     const recordId = decision.recordId
     const key = decision.key
     if (!recordId) return
+    // 刚从在线切过来的那次已经在切之前取好了，不重复请求
+    if (localUrl?.key === key && localUrl.recordId === recordId) return
     let alive = true
     const fallback = (): void => {
       setCacheBroken((prev) => {
@@ -329,7 +341,7 @@ function PlayerSession({
       .then((result) => {
         if (!alive) return
         if (result.ok && result.url) {
-          setLocalUrl({ key, url: result.url })
+          setLocalUrl({ key, recordId, url: result.url })
           return
         }
         fallback()
@@ -340,16 +352,21 @@ function PlayerSession({
     return () => {
       alive = false
     }
-  }, [decision])
+  }, [decision, localUrl])
 
-  const usingCache = decision.mode === 'cache' && localUrl?.key === episodeKey
+  /** 已经取到、且确实属于当前决策那一集（记录 id 也对得上）的缓存地址 */
+  const resolvedLocalUrl =
+    localUrl && localUrl.key === episodeKey && localUrl.recordId === decision.recordId
+      ? localUrl.url
+      : undefined
+  const usingCache = decision.mode === 'cache' && Boolean(resolvedLocalUrl)
   let playUrl: string | undefined
   if (!episode || decision.key !== episodeKey) {
     playUrl = undefined
   } else if (decision.mode === 'remote') {
     playUrl = episode.url
   } else {
-    playUrl = localUrl?.key === episodeKey ? localUrl.url : undefined
+    playUrl = resolvedLocalUrl
   }
   const preparing = phase === 'ready' && !playUrl && !playError
 
@@ -453,7 +470,7 @@ function PlayerSession({
     cacheCurrentRef.current = cacheCurrent
   }, [cacheCurrent])
 
-  const { retry, notice } = useArtPlayer({
+  const { retry, notice, switchSource, position } = useArtPlayer({
     containerRef: stageRef,
     // 重试 / 重新加载时旧剧集还在，先别把播放器拆掉，等新数据到了再切
     url: playUrl,
@@ -468,6 +485,54 @@ function PlayerSession({
   useEffect(() => {
     noticeRef.current = notice
   }, [notice])
+
+  /**
+   * 本集缓存刚下完：按当前进度把正在播的在线流原地切到本机缓存。
+   * - 只认当前这一集，别的集下完不动；一条记录只试一次，失败也不反复折腾。
+   * - 进度 / 播放状态 / 倍速由 switchQuality 接上，切不过去就退回在线流继续播。
+   * - 已经快播完（剩不到 3 秒）就不切了，省得在结尾闪一下。
+   */
+  useEffect(() => {
+    if (!episode || !episodeKey || !currentCache) return
+    if (currentCache.status !== 'done' || cacheBroken.has(currentCache.recordId)) return
+    // 已经在本机播，或者决策还停在上一集（换集的第一帧）
+    if (decision.mode === 'cache' || decision.key !== episodeKey) return
+    const recordId = currentCache.recordId
+    if (promoteTriedRef.current.has(recordId)) return
+    const now = position()
+    if (now && now.duration > 0 && now.duration - now.currentTime <= 3) return
+    promoteTriedRef.current.add(recordId)
+    const remoteUrl = episode.url
+    // 这里不挂 cleanup：缓存进度推送会让这个 effect 反复重跑，用「用户是否已经换集」
+    // （decisionRef 里的 key）判断这次切换还算不算数，比 alive 标志更稳
+    window.api.downloads
+      .playbackUrl(recordId)
+      .then(async (result) => {
+        if (!result.ok || !result.url) return
+        // 取地址这段时间里用户可能已经换集 / 切线路，这次切换就作废
+        if (decisionRef.current.key !== episodeKey) return
+        const local = result.url
+        // 先切播放器（内部同步记下已应用的地址），再让状态跟上：
+        // playUrl 变成同一个地址时，useArtPlayer 不会再来一遍从头开始的切换
+        const switched = switchSource(local, remoteUrl)
+        const next: PlaybackDecision = { key: episodeKey, mode: 'cache', recordId }
+        decisionRef.current = next
+        setLocalUrl({ key: episodeKey, recordId, url: local })
+        setDecision(next)
+        if (await switched) {
+          // 在线流刚才可能报过「播放失败」，切回本机就把它撤掉
+          setPlayError('')
+          noticeRef.current('本集已缓存完，已按当前进度切到本地播放')
+          return
+        }
+        if (decisionRef.current.key !== episodeKey) return
+        const back: PlaybackDecision = { key: episodeKey, mode: 'remote' }
+        decisionRef.current = back
+        setDecision(back)
+        noticeRef.current('本机缓存播放失败，继续在线播放')
+      })
+      .catch(() => {})
+  }, [episode, episodeKey, currentCache, cacheBroken, decision, position, switchSource])
 
   const reload = useCallback(() => {
     setPhase('loading')

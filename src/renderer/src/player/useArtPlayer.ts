@@ -74,6 +74,14 @@ export interface ArtPlayerHandle {
   retry: () => void
   /** 播放器右下角的轻提示（缓存入队 / 已缓存等） */
   notice: (text: string) => void
+  /**
+   * 同一集内部换源（在线流 → 本机缓存）：按当前进度原地切过去，不重建实例。
+   * 播放中 / 倍速 / 画面比例由 ArtPlayer 的 switchQuality 自己接上；
+   * 切不过去就回落到 fallbackUrl（一样保住进度），返回 false。
+   */
+  switchSource: (nextUrl: string, fallbackUrl?: string) => Promise<boolean>
+  /** 当前播放位置：切源前用来判断「是不是已经快播完了」 */
+  position: () => { currentTime: number; duration: number } | null
 }
 
 /**
@@ -324,5 +332,68 @@ export function useArtPlayer({
     instance.notice.show = text
   }, [])
 
-  return { retry, notice }
+  /**
+   * 同一集内部换源：走 ArtPlayer 的 switchQuality —— 它把当前 currentTime 带过去，
+   * 在 loadedmetadata 时 seek，canplay 时恢复倍速 / 画面比例并按原来的播放状态续播，
+   * 所以在线播到一半切本机缓存不会回到 0、也不会因为「切源」把用户按下的暂停顶掉。
+   *
+   * 先把地址记进 appliedRef：调用方随即会把状态里的 url 换成同一个地址，
+   * 那个 effect 看到「已经应用过」就不会再走一遍从头开始的 switchUrl。
+   */
+  const switchSource = useCallback(
+    async (nextUrl: string, fallbackUrl?: string): Promise<boolean> => {
+      if (!nextUrl) return false
+      const instance = artRef.current
+      // 播放器还没建起来（或者已经销毁）：改状态就够了，创建时会直接用新地址
+      if (!instance) return true
+      const before = Math.max(0, instance.currentTime)
+      const wasPlaying = instance.playing
+      /**
+       * 带超时的切换：坏掉的地址不一定让 switchQuality reject（hls.js 的致命错误往往只走
+       * 自己的 error 回调），不加这道兜底，「切本机」会一直挂在这里
+       */
+      const apply = (target: string): Promise<boolean> =>
+        new Promise<boolean>((resolve) => {
+          let settled = false
+          const finish = (ok: boolean): void => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            resolve(ok)
+          }
+          const timer = setTimeout(() => finish(false), 6000)
+          instance.switchQuality(target).then(
+            () => finish(true),
+            () => finish(false)
+          )
+        })
+
+      appliedRef.current = nextUrl
+      if (await apply(nextUrl)) {
+        // 个别流在 loadedmetadata 时还拿不到时长，switchQuality 的 seek 会被夹回 0，这里补一次
+        if (before > 1 && Math.abs(instance.currentTime - before) > 1.5) {
+          instance.currentTime = before
+        }
+        return true
+      }
+      if (fallbackUrl && fallbackUrl !== nextUrl) {
+        // 回退也走 switchQuality：尽量保住原来的进度；它在切换时会先暂停，播回去要自己补
+        appliedRef.current = fallbackUrl
+        await apply(fallbackUrl)
+        if (wasPlaying) await instance.play().catch(() => {})
+      } else {
+        appliedRef.current = null
+      }
+      return false
+    },
+    []
+  )
+
+  const position = useCallback(() => {
+    const instance = artRef.current
+    if (!instance) return null
+    return { currentTime: instance.currentTime, duration: instance.duration }
+  }, [])
+
+  return { retry, notice, switchSource, position }
 }
