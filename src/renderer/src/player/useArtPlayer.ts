@@ -19,6 +19,17 @@ const EPISODES_ICON =
   '<rect x="8" y="16.3" width="13" height="2.4" rx="0.4"/>' +
   '</svg>'
 
+/**
+ * 控制条「缓存本集」的图标：一根下箭头落进托盘，和标题栏的下载图标同一造型。
+ * 22×22 跟 ArtPlayer 自带图标一致，外层会套 `.art-icon`。
+ */
+const CACHE_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M12 3v11"/>' +
+  '<path d="m7.5 9.5 4.5 4.5 4.5-4.5"/>' +
+  '<path d="M4 16.5v2.2c0 1.3.9 2.3 2.2 2.3h11.6c1.3 0 2.2-1 2.2-2.3v-2.2"/>' +
+  '</svg>'
+
 function readVolume(): number {
   const stored = Number(localStorage.getItem(VOLUME_KEY))
   return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.8
@@ -51,11 +62,15 @@ export interface UseArtPlayerOptions {
   onEpisodes?: (fromFullscreen: boolean) => void
   /** 有没有剧集面板：本机单文件播放没有，不挂「选集」按钮 */
   showEpisodes?: boolean
+  /** 控制条「缓存本集」：不传就不挂这颗按钮（本机文件播放） */
+  onCache?: () => void
 }
 
 export interface ArtPlayerHandle {
   /** 当前这集彻底放不出来时重建播放器 */
   retry: () => void
+  /** 播放器右下角的轻提示（缓存入队 / 已缓存等） */
+  notice: (text: string) => void
 }
 
 /**
@@ -72,7 +87,8 @@ export function useArtPlayer({
   onEnded,
   onError,
   onEpisodes,
-  showEpisodes = true
+  showEpisodes = true,
+  onCache
 }: UseArtPlayerOptions): ArtPlayerHandle {
   const artRef = useRef<Artplayer | null>(null)
   const urlRef = useRef(url)
@@ -81,6 +97,7 @@ export function useArtPlayer({
   const endedRef = useRef(onEnded)
   const errorRef = useRef(onError)
   const episodesRef = useRef(onEpisodes)
+  const cacheRef = useRef(onCache)
   const typeRef = useRef(type)
   const showEpisodesRef = useRef(showEpisodes)
   /**
@@ -100,6 +117,7 @@ export function useArtPlayer({
     endedRef.current = onEnded
     errorRef.current = onError
     episodesRef.current = onEpisodes
+    cacheRef.current = onCache
     typeRef.current = type
     showEpisodesRef.current = showEpisodes
   })
@@ -112,7 +130,9 @@ export function useArtPlayer({
     const instance = new Artplayer({
       container,
       url: firstUrl,
-      poster: posterRef.current,
+      // ArtPlayer 5 的 option 校验要求 poster 必须是 string：没有封面时传空串，
+      // 不能留 undefined（下载中心播本机文件就是这种情况）
+      poster: posterRef.current ?? '',
       // 本机文件（mp4 等）按扩展名交给原生 <video>，不走 hls.js
       type: typeRef.current === 'auto' ? 'auto' : 'm3u8',
       lang: 'zh-cn',
@@ -140,7 +160,8 @@ export function useArtPlayer({
       moreVideoAttr: { preload: 'auto' },
       // 自定义图标挂在 ArtPlayer 的 icons 上，取出来是带 .art-icon 的元素
       icons: {
-        episodes: EPISODES_ICON
+        episodes: EPISODES_ICON,
+        cache: CACHE_ICON
       },
       cssVar: {
         '--art-control-height': '42px',
@@ -232,6 +253,18 @@ export function useArtPlayer({
       }))
     }
 
+    // 控制条「缓存本集」：只放图标，和「选集」同一套 .art-icon 样式
+    if (cacheRef.current) {
+      instance.controls.add((art) => ({
+        name: 'cinebox-cache',
+        html: art.icons.cache,
+        position: 'right',
+        index: 24,
+        tooltip: '缓存本集',
+        click: () => cacheRef.current?.()
+      }))
+    }
+
     instance.on('video:ended', () => endedRef.current?.())
     instance.on('video:volumechange', () => {
       localStorage.setItem(VOLUME_KEY, String(instance.volume))
@@ -282,5 +315,11 @@ export function useArtPlayer({
     setGeneration((value) => value + 1)
   }, [])
 
-  return { retry }
+  const notice = useCallback((text: string) => {
+    const instance = artRef.current
+    if (!instance) return
+    instance.notice.show = text
+  }, [])
+
+  return { retry, notice }
 }

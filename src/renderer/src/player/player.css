@@ -1174,3 +1174,271 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── 离线缓存：当前集 chip、剧集格状态、多选批量 ── */
+
+.player-cache-chip {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #0c0f13 72%, transparent);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.5;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.player-cache-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.player-cache-chip.is-done {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: var(--accent);
+}
+
+.player-cache-chip.is-active .player-cache-dot {
+  animation: player-cache-pulse 1.4s ease-in-out infinite;
+}
+
+.player-cache-chip.is-failed {
+  border-color: color-mix(in srgb, #f0563e 40%, transparent);
+  color: #ff9b8a;
+}
+
+.player-cache-chip.is-failed .player-cache-dot {
+  background: #f0563e;
+}
+
+.player-cache-chip.is-paused {
+  border-color: color-mix(in srgb, #e6a23c 40%, transparent);
+  color: #f0c078;
+}
+
+.player-cache-chip.is-paused .player-cache-dot {
+  background: #e6a23c;
+}
+
+@keyframes player-cache-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+}
+
+/* 格子右下角的缓存状态点：已缓存 / 缓存中 / 失败 */
+.episode-cell.is-cache-done::after,
+.episode-cell.is-cache-active::after,
+.episode-cell.is-cache-paused::after,
+.episode-cell.is-cache-failed::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.episode-cell.is-cache-active::after {
+  animation: player-cache-pulse 1.4s ease-in-out infinite;
+}
+
+.episode-cell.is-cache-paused::after {
+  background: #e6a23c;
+}
+
+.episode-cell.is-cache-failed::after {
+  background: #f0563e;
+}
+
+.episode-cell.is-active.is-cache-done::after,
+.episode-cell.is-active.is-cache-active::after,
+.episode-cell.is-active.is-cache-paused::after {
+  background: #0b0d10;
+}
+
+/* 多选：选中态只加描边 / 底色，不改字重，避免格子宽度跳动 */
+.episode-cell.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.episode-cell.is-selected.is-active {
+  background: var(--accent);
+  color: #0b0d10;
+}
+
+.episode-cell.is-cache-locked {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.episode-check {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  background: color-mix(in srgb, #0c0f13 55%, transparent);
+}
+
+.episode-check.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.episode-check.is-on::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: #0b0d10;
+}
+
+.episode-cell.is-cache-locked .episode-check {
+  display: none;
+}
+
+/* 批量缓存工具条：在区间锚点与剧集网格之间，不挤压底部播放源条 */
+.episode-selectbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  font-size: 11.5px;
+}
+
+.episode-select-count {
+  flex: none;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.episode-select-count b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 有选中时把计数和整条工具条点亮一档，反馈比只看数字更直接 */
+.episode-selectbar.has-selection {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.episode-selectbar.has-selection .episode-select-count b {
+  color: var(--accent);
+}
+
+/* 全选 / 取消全选 做成文字按钮：工具条里只留一颗实心主按钮 */
+.episode-select-all {
+  display: inline-flex;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.episode-select-all:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
+.episode-select-all:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.episode-select-submit {
+  display: inline-flex;
+  height: 26px;
+  min-width: 100px;
+  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.episode-select-submit .anticon {
+  font-size: 12px;
+}
+
+.episode-select-submit:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 58%, transparent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.episode-select-exit {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.episode-select-exit:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
+/* 一集没选时退回普通禁用样式：去掉强调色底和文字，避免和可点状态混淆 */
+.episode-select-submit:disabled {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 1;
+}

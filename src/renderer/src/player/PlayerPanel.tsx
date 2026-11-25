@@ -28,6 +28,12 @@ interface PlayerPanelProps {
   category: string
   /** 头部 / 简介里的集数文案：「共 12 期」「单集」「共 2 个版本」 */
   countLabel: string
+  /** 当前线路每一集的缓存状态（原始 episodes 下标） */
+  cacheStates: Map<number, 'done' | 'active' | 'paused' | 'failed'>
+  /** 批量入队请求进行中 */
+  cacheBusy: boolean
+  /** 多选批量缓存：一次提交当前线路的若干集 */
+  onCacheEpisodes: (indexes: number[]) => void
 }
 
 /**
@@ -49,7 +55,10 @@ function PlayerPanel({
   lineLabel,
   naming,
   category,
-  countLabel
+  countLabel,
+  cacheStates,
+  cacheBusy,
+  onCacheEpisodes
 }: PlayerPanelProps): React.JSX.Element {
   return (
     <aside className="player-panel" aria-label="剧集与简介">
@@ -82,6 +91,9 @@ function PlayerPanel({
             onAutoNext={onAutoNext}
             naming={naming}
             category={category}
+            cacheStates={cacheStates}
+            cacheBusy={cacheBusy}
+            onCacheEpisodes={onCacheEpisodes}
           />
         ) : (
           <PlayerInfo detail={detail} line={line} lineLabel={lineLabel} countLabel={countLabel} />

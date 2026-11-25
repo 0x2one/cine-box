@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LeftOutlined, ReloadOutlined, RightOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import { applyPlayerAppearance, findAccent } from '../theme/appearance'
+import { formatBytes } from '../utils/format'
 import PlayerPanel, { type PlayerPanelTab } from './PlayerPanel'
 import PlayerTitleBar from './PlayerTitleBar'
 import {
@@ -23,6 +24,49 @@ const PANEL_TAB_KEY = 'player-panel-tab'
 const LEGACY_LAYOUT_KEY = 'player-layout'
 
 type Phase = 'loading' | 'ready' | 'error'
+
+/** 播放页上一条缓存记录（由 downloads:cachedEpisodes 拿到的精简形状） */
+interface CachedEpisodeEntry {
+  recordId: string
+  status: DownloadStatus
+  progress: number
+  /** 当前下载速度（字节 / 秒） */
+  speed: number
+}
+
+type CacheTone = 'done' | 'active' | 'paused' | 'failed'
+
+/** 当前这一集这一次播放的源选择：决定一次，播放过程中不因为缓存刚下完而切源 */
+interface PlaybackDecision {
+  /** `${sourceId}:${lineIndex}:${episodeIndex}` */
+  key: string
+  mode: 'cache' | 'remote'
+  recordId?: string
+}
+
+function cacheKey(sourceId: number, lineIndex: number, episodeIndex: number): string {
+  return `${sourceId}:${lineIndex}:${episodeIndex}`
+}
+
+function cacheTone(status: DownloadStatus): CacheTone {
+  if (status === 'done') return 'done'
+  if (status === 'paused') return 'paused'
+  if (status === 'failed' || status === 'canceled') return 'failed'
+  return 'active'
+}
+
+function isCacheActive(status: DownloadStatus): boolean {
+  return status === 'waiting' || status === 'downloading' || status === 'paused'
+}
+
+function cacheErrorText(error?: string): string {
+  if (error === 'CACHE_UNAVAILABLE') return '视频缓存库不可用'
+  if (error === 'NOT_FOUND') return '视频信息已失效，请重新打开'
+  if (error === 'NO_EPISODE') return '找不到这一集，换条线路试试'
+  if (error === 'NOT_M3U8') return '这条线路不是 m3u8，暂不支持缓存'
+  if (error === 'NOT_WRITABLE') return '写入下载目录失败，检查设置里的保存位置'
+  return '加入缓存队列失败'
+}
 
 function readAutoNext(): boolean {
   return localStorage.getItem(AUTO_NEXT_KEY) !== '0'
@@ -58,6 +102,11 @@ interface PlayerSessionProps {
  * 一部视频的播放会话：按 videoId 取详情、摊平线路、维护当前集数。
  * 外层按 payload.token 给它换 key，换片时整块重挂载，播放器不会残留上一部的状态。
  * 面板的开合状态放在外层，换片不会把用户收起的面板重新弹出来。
+ *
+ * 离线缓存：
+ * - 详情加载的同时取该视频的缓存集；两者都就绪后才决定每一集播本机还是在线。
+ * - 选集 / 切线路时做一次「优先缓存」决策，播放过程中缓存刚下完不会把正在看的流切走。
+ * - 当前集的缓存状态走右上角 chip；剧集面板按状态标记并支持多选批量入队。
  */
 function PlayerSession({
   payload,
@@ -79,7 +128,16 @@ function PlayerSession({
   const [playError, setPlayError] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
   const [autoNext, setAutoNext] = useState(readAutoNext)
+  const [cacheEntries, setCacheEntries] = useState<Map<string, CachedEpisodeEntry>>(new Map())
+  const [cacheReady, setCacheReady] = useState(false)
+  const [cacheBusy, setCacheBusy] = useState(false)
+  const [decision, setDecision] = useState<PlaybackDecision>({ key: '', mode: 'remote' })
+  const [localUrl, setLocalUrl] = useState<{ key: string; url: string } | null>(null)
+  const [cacheBroken, setCacheBroken] = useState<Set<string>>(new Set())
   const stageRef = useRef<HTMLDivElement>(null)
+  const decisionRef = useRef<PlaybackDecision>({ key: '', mode: 'remote' })
+  const noticeRef = useRef<(text: string) => void>(() => {})
+  const cacheCurrentRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     let alive = true
@@ -141,6 +199,70 @@ function PlayerSession({
     }
   }, [videoId, payload, reloadToken])
 
+  // 缓存集：进入播放页拉一次，之后结构变化重拉、进度事件就地打补丁
+  useEffect(() => {
+    let alive = true
+    const load = async (): Promise<void> => {
+      try {
+        const result = await window.api.downloads.cachedEpisodes(videoId)
+        if (!alive || !result.ok) return
+        const map = new Map<string, CachedEpisodeEntry>()
+        for (const item of result.items) {
+          map.set(cacheKey(item.sourceId, item.lineIndex, item.episodeIndex), {
+            recordId: item.recordId,
+            status: item.status,
+            progress: item.progress,
+            speed: item.speed
+          })
+        }
+        setCacheEntries(map)
+      } catch {
+        // 缓存库不可用时按「没有缓存」处理，不影响在线播放
+      } finally {
+        if (alive) setCacheReady(true)
+      }
+    }
+    void load()
+    const offChanged = window.api.downloads.onChange(() => {
+      if (alive) void load()
+    })
+    const offProgress = window.api.downloads.onProgress((record) => {
+      if (!alive || record.videoId !== videoId) return
+      const { sourceId, lineIndex, episodeIndex: episode } = record
+      if (
+        typeof sourceId !== 'number' ||
+        typeof lineIndex !== 'number' ||
+        typeof episode !== 'number'
+      ) {
+        return
+      }
+      setCacheEntries((prev) => {
+        const next = new Map(prev)
+        next.set(cacheKey(sourceId, lineIndex, episode), {
+          recordId: record.id,
+          status: record.status,
+          progress: record.progress,
+          speed: record.speed
+        })
+        return next
+      })
+      // 重新缓存成功：把这个 id 的「缓存文件缺失」标记摘掉
+      if (record.status === 'done') {
+        setCacheBroken((prev) => {
+          if (!prev.has(record.id)) return prev
+          const next = new Set(prev)
+          next.delete(record.id)
+          return next
+        })
+      }
+    })
+    return () => {
+      alive = false
+      offChanged()
+      offProgress()
+    }
+  }, [videoId])
+
   const line = useMemo(
     () => lines.find((item) => item.key === lineKey) ?? lines[0] ?? null,
     [lines, lineKey]
@@ -165,7 +287,107 @@ function PlayerSession({
     ? episodeTitle(episode.name, episodeIndex)
     : (payload.episodeName?.trim() ?? '')
 
-  // 任务栏 / 窗口标题跟着片名和集数走
+  const episodeKey = line && episode ? cacheKey(line.sourceId, line.index, episode.index) : ''
+  const currentCache = episodeKey ? cacheEntries.get(episodeKey) : undefined
+
+  /**
+   * 优先缓存：只在「选集 / 切线路」那一刻决策一次。
+   * cacheEntries 变化（别的集下完了 / 当前集刚下完）不会改写 decision，
+   * 所以不会出现看到一半突然切成本地流。
+   */
+  useLayoutEffect(() => {
+    if (!episodeKey || !cacheReady) return
+    if (decisionRef.current.key === episodeKey) return
+    const entry = cacheEntries.get(episodeKey)
+    const next: PlaybackDecision =
+      entry?.status === 'done'
+        ? { key: episodeKey, mode: 'cache', recordId: entry.recordId }
+        : { key: episodeKey, mode: 'remote' }
+    decisionRef.current = next
+    setDecision(next)
+  }, [episodeKey, cacheReady, cacheEntries])
+
+  // 决策为缓存时取本机地址；取不到就标缺失并回退在线地址
+  useEffect(() => {
+    if (decision.mode === 'remote') return
+    const recordId = decision.recordId
+    const key = decision.key
+    if (!recordId) return
+    let alive = true
+    const fallback = (): void => {
+      setCacheBroken((prev) => {
+        const next = new Set(prev)
+        next.add(recordId)
+        return next
+      })
+      const remote: PlaybackDecision = { key, mode: 'remote' }
+      decisionRef.current = remote
+      setDecision(remote)
+    }
+    window.api.downloads
+      .playbackUrl(recordId)
+      .then((result) => {
+        if (!alive) return
+        if (result.ok && result.url) {
+          setLocalUrl({ key, url: result.url })
+          return
+        }
+        fallback()
+      })
+      .catch(() => {
+        if (alive) fallback()
+      })
+    return () => {
+      alive = false
+    }
+  }, [decision])
+
+  const usingCache = decision.mode === 'cache' && localUrl?.key === episodeKey
+  let playUrl: string | undefined
+  if (!episode || decision.key !== episodeKey) {
+    playUrl = undefined
+  } else if (decision.mode === 'remote') {
+    playUrl = episode.url
+  } else {
+    playUrl = localUrl?.key === episodeKey ? localUrl.url : undefined
+  }
+  const preparing = phase === 'ready' && !playUrl && !playError
+
+  const cacheChip = useMemo(() => {
+    if (!currentCache) return null
+    if (cacheBroken.has(currentCache.recordId)) {
+      return { tone: 'failed' as CacheTone, text: '缓存文件缺失' }
+    }
+    if (currentCache.status === 'done') {
+      return { tone: 'done' as CacheTone, text: usingCache ? '已缓存 · 本地播放' : '已缓存' }
+    }
+    if (currentCache.status === 'paused') {
+      return {
+        tone: 'paused' as CacheTone,
+        text: `已暂停 ${Math.round(currentCache.progress)}%`
+      }
+    }
+    if (currentCache.status === 'failed' || currentCache.status === 'canceled') {
+      return { tone: 'failed' as CacheTone, text: '缓存失败' }
+    }
+    const speed = currentCache.speed > 0 ? ` · ↓ ${formatBytes(currentCache.speed)}/s` : ''
+    return {
+      tone: 'active' as CacheTone,
+      text: `正在缓存 ${Math.round(currentCache.progress)}%${speed}`
+    }
+  }, [currentCache, cacheBroken, usingCache])
+
+  const lineCacheStates = useMemo(() => {
+    const map = new Map<number, CacheTone>()
+    if (!line) return map
+    for (const item of line.episodes) {
+      const entry = cacheEntries.get(cacheKey(line.sourceId, line.index, item.index))
+      if (entry) map.set(item.index, cacheTone(entry.status))
+    }
+    return map
+  }, [line, cacheEntries])
+
+  // 任务详情 / 窗口标题跟着片名和集数走
   useEffect(() => {
     document.title = episodeName ? `${title} · ${episodeName} — 映盒剧场` : `${title} — 映盒剧场`
   }, [title, episodeName])
@@ -176,16 +398,76 @@ function PlayerSession({
     if (episodeIndex + 1 < line.episodes.length) setEpisodeIndex(episodeIndex + 1)
   }, [autoNext, line, episodeIndex])
 
-  const { retry } = useArtPlayer({
+  /** 缓存若干集（当前集 / 多选批量都走这里） */
+  const cacheEpisodes = useCallback(
+    (indexes: number[]): void => {
+      if (!line || indexes.length === 0) return
+      setCacheBusy(true)
+      window.api.downloads
+        .cache({
+          videoId,
+          sourceId: line.sourceId,
+          lineIndex: line.index,
+          episodeIndexes: indexes
+        })
+        .then((result) => {
+          if (!result.ok) {
+            noticeRef.current(cacheErrorText(result.error))
+            return
+          }
+          const parts: string[] = []
+          if (result.queued) parts.push(`已加入 ${result.queued} 集`)
+          if (result.restarted) parts.push(`重新缓存 ${result.restarted} 集`)
+          if (result.existing) parts.push(`跳过 ${result.existing} 集已缓存`)
+          noticeRef.current(parts.length > 0 ? parts.join('，') : '这些集已经在缓存中')
+        })
+        .catch(() => noticeRef.current('加入缓存队列失败'))
+        .finally(() => setCacheBusy(false))
+    },
+    [line, videoId]
+  )
+
+  const cacheCurrent = useCallback((): void => {
+    if (!episode) return
+    const entry = episodeKey ? cacheEntries.get(episodeKey) : undefined
+    if (entry?.status === 'done' && !cacheBroken.has(entry.recordId)) {
+      noticeRef.current('本集已缓存，可在下载中心播放')
+      return
+    }
+    if (entry?.status === 'paused') {
+      void window.api.downloads
+        .resume(entry.recordId)
+        .then((result) => noticeRef.current(result.ok ? '已继续缓存' : '继续缓存失败'))
+        .catch(() => noticeRef.current('继续缓存失败'))
+      return
+    }
+    if (entry && isCacheActive(entry.status)) {
+      noticeRef.current(`本集正在缓存中（${Math.round(entry.progress)}%）`)
+      return
+    }
+    // 失败 / 已取消 / 缓存文件缺失：重新入队（后端会重开同一条记录）
+    cacheEpisodes([episode.index])
+  }, [episode, episodeKey, cacheEntries, cacheBroken, cacheEpisodes])
+
+  useEffect(() => {
+    cacheCurrentRef.current = cacheCurrent
+  }, [cacheCurrent])
+
+  const { retry, notice } = useArtPlayer({
     containerRef: stageRef,
     // 重试 / 重新加载时旧剧集还在，先别把播放器拆掉，等新数据到了再切
-    url: episode?.url,
+    url: playUrl,
     poster: detail?.pic,
     accent,
     onEnded: goNext,
     onError: (message) => setPlayError(message),
-    onEpisodes
+    onEpisodes,
+    onCache: () => cacheCurrentRef.current()
   })
+
+  useEffect(() => {
+    noticeRef.current = notice
+  }, [notice])
 
   const reload = useCallback(() => {
     setPhase('loading')
@@ -237,6 +519,13 @@ function PlayerSession({
           {/* ArtPlayer 的挂载点：尺寸由外层 section 决定 */}
           <div className="player-stage-art" ref={stageRef} />
 
+          {cacheChip && (
+            <div className={`player-cache-chip is-${cacheChip.tone}`} role="status">
+              <span className="player-cache-dot" aria-hidden="true" />
+              {cacheChip.text}
+            </div>
+          )}
+
           {phase === 'loading' && (
             <div className="player-state">
               <span className="player-spinner" aria-hidden="true" />
@@ -253,6 +542,15 @@ function PlayerSession({
                 <ReloadOutlined />
                 重新加载
               </button>
+            </div>
+          )}
+
+          {preparing && (
+            <div className="player-state">
+              <span className="player-spinner" aria-hidden="true" />
+              <p className="player-state-title">
+                {decision.mode === 'cache' ? '正在读取本集缓存…' : '正在准备播放…'}
+              </p>
             </div>
           )}
 
@@ -293,6 +591,9 @@ function PlayerSession({
             naming={naming}
             category={category}
             countLabel={countLabel}
+            cacheStates={lineCacheStates}
+            cacheBusy={cacheBusy}
+            onCacheEpisodes={cacheEpisodes}
           />
         )}
 
@@ -315,7 +616,8 @@ function PlayerSession({
 
 /**
  * 本机文件播放（下载中心点「播放」）：不查详情、没有线路和剧集面板，
- * 直接把 cine-file:// 地址交给 ArtPlayer 原生播。播放失败时只给重试。
+ * 直接把 cine-file:// 地址交给 ArtPlayer 原生播；离线缓存包是 m3u8，走 hls.js。
+ * 播放失败时只给重试。
  */
 function LocalSession({
   payload,
@@ -328,6 +630,7 @@ function LocalSession({
   const stageRef = useRef<HTMLDivElement>(null)
   const title = payload.title?.trim() || payload.fileName?.trim() || '本机视频'
   const episode = payload.episodeName?.trim() ?? ''
+  const hls = payload.hls === true
 
   useEffect(() => {
     document.title = episode ? `${title} · ${episode} — 映盒剧场` : `${title} — 映盒剧场`
@@ -336,7 +639,7 @@ function LocalSession({
   const { retry } = useArtPlayer({
     containerRef: stageRef,
     url: payload.fileUrl,
-    type: 'auto',
+    type: hls ? 'm3u8' : 'auto',
     accent,
     showEpisodes: false,
     onError: (message) => setPlayError(message)
@@ -349,7 +652,7 @@ function LocalSession({
 
   return (
     <div className="player-app">
-      <PlayerTitleBar title={title} episode={episode} countLabel="本机文件" />
+      <PlayerTitleBar title={title} episode={episode} countLabel={hls ? '离线缓存' : '本机文件'} />
 
       <div className="player-body">
         <section className="player-stage">
