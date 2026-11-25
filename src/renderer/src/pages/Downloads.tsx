@@ -949,7 +949,7 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
             <div className="downloads-group-view">
               <button type="button" className="downloads-group-back" onClick={closeGroupDetail}>
                 <ArrowLeftOutlined />
-                <span>返回下载中心</span>
+                <span>返回列表</span>
               </button>
 
               <div className="downloads-group-head">
