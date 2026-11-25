@@ -21,13 +21,16 @@ const EPISODES_ICON =
 
 /**
  * 控制条「缓存本集」的图标：一根下箭头落进托盘，和标题栏的下载图标同一造型。
- * 22×22 跟 ArtPlayer 自带图标一致，外层会套 `.art-icon`。
+ * 画布 22×22，墨迹横向 3.5–18.5、纵向 2.4–19.6，和 ArtPlayer 自带图标（齿轮 / 画中画 /
+ * 全屏）一样大、一样上下居中，外层还会套 `.art-icon` 统一缩放。
+ * 托盘那条必须自己写 fill="none"：ArtPlayer 注入的 `.art-video-player svg{fill:…}`
+ * 会盖掉 `<svg fill="none">` 上的表现属性，path 一被填实，箭头就成了实心三角、
+ * 托盘成了实心横条，比旁边的图标高出一截，看着不在同一条线上。
  */
 const CACHE_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-  '<path d="M12 3v11"/>' +
-  '<path d="m7.5 9.5 4.5 4.5 4.5-4.5"/>' +
-  '<path d="M4 16.5v2.2c0 1.3.9 2.3 2.2 2.3h11.6c1.3 0 2.2-1 2.2-2.3v-2.2"/>' +
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">' +
+  '<path d="M10 2.4h2v7h4L11 14.4l-5-5h4z" fill="currentColor"/>' +
+  '<path d="M4.5 16.1v.8a1.7 1.7 0 0 0 1.7 1.7h9.6a1.7 1.7 0 0 0 1.7-1.7v-.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
   '</svg>'
 
 function readVolume(): number {
