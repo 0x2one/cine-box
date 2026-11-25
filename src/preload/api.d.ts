@@ -1337,6 +1337,9 @@ type DownloadStatus = 'waiting' | 'downloading' | 'paused' | 'done' | 'failed' |
 /** 记录类型：单个文件 / 本地 HLS 缓存包 */
 type DownloadKind = 'file' | 'hls'
 
+/** 缓存包导出 MP4 的状态 */
+type DownloadMp4Status = 'idle' | 'queued' | 'converting' | 'done' | 'failed'
+
 interface DownloadRecord {
   id: string
   /** 来源视频 id；纯直链下载时没有 */
@@ -1376,6 +1379,19 @@ interface DownloadRecord {
   updatedAt: string
   /** 完成时间，未完成时为空串 */
   completedAt: string
+  /** 导出 MP4 的绝对路径；没导出过为空串 */
+  mp4Path: string
+  /** 导出 MP4 的字节数 */
+  mp4Size: number
+  mp4Status: DownloadMp4Status
+  /** MP4 导出进度 0–100 */
+  mp4Progress: number
+  /** 导出失败原因 */
+  mp4Error: string
+  /** 导出提示（如 HEVC 兼容性提醒） */
+  mp4Note: string
+  /** 导出完成时间 */
+  mp4UpdatedAt: string
 }
 
 /** 列表里的记录：多带磁盘上的真实状态（文件可能被手动删掉 / 挪走） */
@@ -1383,6 +1399,8 @@ interface DownloadRecordView extends DownloadRecord {
   exists: boolean
   /** 磁盘上的实际大小；文件不在时为 0 */
   size: number
+  /** 导出的 MP4 是否还在原路径 */
+  mp4Exists: boolean
 }
 
 /** 播放页缓存当前集 / 多选批量：只传下标，地址由主进程解析 */
@@ -1435,6 +1453,17 @@ interface DownloadRetryResult {
   ok: boolean
   /** NOT_FOUND / NOT_RETRYABLE / NO_URL */
   error?: string
+}
+
+/** 把缓存导出成 MP4 的入队结果 */
+interface DownloadExportResult {
+  ok: boolean
+  /** 本次新入队的集数 */
+  queued: number
+  /** 已导出 / 已在队列中的集数 */
+  existing: number
+  /** 缓存未完成 / 文件缺失而跳过的集数 */
+  skipped: number
 }
 
 interface DownloadRemoveResult {
@@ -1494,6 +1523,14 @@ interface DownloadsApi {
   resume: (id: string) => Promise<{ ok: boolean; error?: string }>
   /** 用记录里保存的地址重试 */
   retry: (id: string) => Promise<DownloadRetryResult>
+  /** 把已完成的缓存包导出成 MP4；force 覆盖已导出的文件 */
+  exportMp4: (input: { ids: string[]; force?: boolean }) => Promise<DownloadExportResult>
+  /** 取消排队 / 转换中的 MP4 导出 */
+  cancelExport: (ids: string[]) => Promise<{ ok: boolean }>
+  /** 在文件管理器里定位导出的 MP4 */
+  openMp4Folder: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 删除导出的 MP4，缓存包保留 */
+  removeMp4: (id: string) => Promise<{ ok: boolean; error?: string }>
   /** 记录结构变化（增 / 删 / 清空）时通知，重拉列表 */
   onChange: (callback: () => void) => () => void
   /** 进度 / 状态更新：按记录 id 就地打补丁 */

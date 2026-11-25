@@ -388,3 +388,24 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* 导出的 MP4：成功后也用强调色，转换中压暗一档 */
+.download-record-mp4 {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.download-record-mp4.is-active {
+  color: var(--text-muted);
+}
+
+/* HEVC 提示：只给一个短标签，完整说明在 Tooltip 里 */
+.download-record-mp4-note {
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--warning, #e6a23c) 45%, transparent);
+  border-radius: 4px;
+  color: var(--warning, #e6a23c);
+  font-size: 10px;
+  line-height: 14px;
+}

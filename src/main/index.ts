@@ -12,7 +12,7 @@ import {
   globalShortcut,
   screen
 } from 'electron'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, unlinkSync } from 'fs'
 import { isAbsolute, join } from 'path'
 import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -35,6 +35,7 @@ import { createDownloadEngine } from './download-engine'
 import { createDownloadHlsServer } from './download-hls-server'
 import { createDownloadStore } from './download-store'
 import type { DownloadRecord, DownloadStatus } from './download-store'
+import { createMp4Export } from './mp4-export'
 import { readDownloadUsage } from './download-usage'
 import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
@@ -185,6 +186,8 @@ const downloadEngine = createDownloadEngine({
   store: downloadStore,
   getConcurrency: () => appSettingsStore.get().downloadConcurrency
 })
+// 缓存包导出 MP4：手动触发、串行执行，产物放在下载目录下的「导出」
+const mp4Export = createMp4Export({ store: downloadStore })
 // 缓存包的本机播放服务：hls.js 走普通 http，避免自定义协议在 CORS 上的版本差异
 const downloadHlsServer = createDownloadHlsServer({
   findRecord: (id) => downloadStore.find(id)
@@ -889,15 +892,25 @@ ipcMain.handle(
   'downloads:remove',
   async (_event, input: { ids?: string[]; deleteFiles?: boolean }) => {
     const ids = Array.isArray(input?.ids) ? input.ids.map(String) : []
-    // 先让在跑的任务停下来、把文件句柄放掉，再删记录和缓存包
+    // 先让导出 / 在跑的任务停下来、把文件句柄放掉，再删记录和文件
+    await mp4Export.cancel(ids)
     await downloadEngine.cancelMany(ids)
     return downloadStore.remove(ids, { deleteFiles: Boolean(input?.deleteFiles) })
   }
 )
 
-ipcMain.handle('downloads:clearFinished', (_event, input?: { deleteFiles?: boolean }) =>
-  downloadStore.clearFinished({ deleteFiles: Boolean(input?.deleteFiles) })
-)
+ipcMain.handle('downloads:clearFinished', async (_event, input?: { deleteFiles?: boolean }) => {
+  // 已结束的记录里可能还有正在导出的：先取消，避免删完记录 ffmpeg 还在写
+  const finishedIds = downloadStore
+    .list()
+    .filter(
+      (record) =>
+        record.status === 'done' || record.status === 'failed' || record.status === 'canceled'
+    )
+    .map((record) => record.id)
+  await mp4Export.cancel(finishedIds)
+  return downloadStore.clearFinished({ deleteFiles: Boolean(input?.deleteFiles) })
+})
 
 ipcMain.handle('downloads:openFolder', async (_event, id?: string) => {
   const record = id ? downloadStore.find(String(id)) : null
@@ -1029,6 +1042,54 @@ ipcMain.handle('downloads:retry', async (_event, id: string) => {
     await refreshDownloadUrl(record)
   }
   return downloadEngine.restart(record.id)
+})
+
+/* ── IPC：缓存导出 MP4 ── */
+
+ipcMain.handle('downloads:exportMp4', (_event, input?: { ids?: string[]; force?: boolean }) => {
+  const ids = Array.isArray(input?.ids) ? input.ids.map(String) : []
+  return mp4Export.enqueue(ids, { force: Boolean(input?.force) })
+})
+
+ipcMain.handle('downloads:exportMp4:cancel', async (_event, ids?: string[]) => {
+  await mp4Export.cancel(Array.isArray(ids) ? ids.map(String) : [])
+  return { ok: true }
+})
+
+ipcMain.handle('downloads:openMp4Folder', async (_event, id: string) => {
+  const record = downloadStore.find(String(id))
+  if (!record?.mp4Path || !existsSync(record.mp4Path)) {
+    return { ok: false, error: 'FILE_MISSING' }
+  }
+  shell.showItemInFolder(record.mp4Path)
+  return { ok: true }
+})
+
+ipcMain.handle('downloads:removeMp4', async (_event, id: string) => {
+  const record = downloadStore.find(String(id))
+  if (!record) return { ok: false, error: 'NOT_FOUND' }
+  await mp4Export.cancel([record.id])
+  if (record.mp4Path) {
+    try {
+      if (existsSync(record.mp4Path)) unlinkSync(record.mp4Path)
+    } catch {
+      return { ok: false, error: 'DELETE_FAILED' }
+    }
+  }
+  downloadStore.update(
+    record.id,
+    {
+      mp4Status: 'idle',
+      mp4Path: '',
+      mp4Size: 0,
+      mp4Progress: 0,
+      mp4Error: '',
+      mp4Note: '',
+      mp4UpdatedAt: ''
+    },
+    { persist: true }
+  )
+  return { ok: true }
 })
 
 /* ── IPC：缓存管理 ── */
@@ -2566,6 +2627,7 @@ if (!gotTheLock) {
     await downloadStore.init().catch((error) => console.error('下载记录初始化失败', error))
     // 上次退出时没跑完的缓存任务：转失败并清掉半成品包
     await downloadEngine.init().catch((error) => console.error('缓存任务初始化失败', error))
+    await mp4Export.init().catch((error) => console.error('MP4 导出初始化失败', error))
     // 自定义图片：cine-img://home/<文件名> → userData/Data/Home/images/<文件名>
     protocol.handle('cine-img', (request) => {
       try {
@@ -2636,6 +2698,8 @@ if (!gotTheLock) {
     collector.shutdown()
     // 缓存任务直接中止；中断的记录由下次启动的 downloadEngine.init() 统一收尾
     downloadEngine.shutdown()
+    // MP4 导出也直接中止，.part 由下次启动的 init() 清掉
+    mp4Export.shutdown()
     downloadStore.flush()
     // 本机播放服务只在缓存播放时用，退出时关掉监听
     downloadHlsServer.dispose()

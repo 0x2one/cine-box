@@ -100,6 +100,18 @@ const api = {
       ipcRenderer.invoke('downloads:resume', id),
     /** 用记录里保存的地址重试失败 / 已取消的任务 */
     retry: (id: string): Promise<DownloadRetryResult> => ipcRenderer.invoke('downloads:retry', id),
+    /** 把已完成的缓存包导出成 MP4（只换容器，不重编码）；force 覆盖已导出的文件 */
+    exportMp4: (input: { ids: string[]; force?: boolean }): Promise<DownloadExportResult> =>
+      ipcRenderer.invoke('downloads:exportMp4', input),
+    /** 取消排队 / 转换中的 MP4 导出 */
+    cancelExport: (ids: string[]): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('downloads:exportMp4:cancel', ids),
+    /** 在文件管理器里定位导出的 MP4 */
+    openMp4Folder: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('downloads:openMp4Folder', id),
+    /** 删除导出的 MP4，缓存包保留 */
+    removeMp4: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('downloads:removeMp4', id),
     /** 记录有增删改时通知（进度不推，避免高频刷新列表） */
     onChange: (callback: () => void): (() => void) => {
       const handler = (): void => callback()

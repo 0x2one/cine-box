@@ -29,6 +29,11 @@ export type DownloadStatus = 'waiting' | 'downloading' | 'paused' | 'done' | 'fa
 /** 记录类型：单个文件 / 本地 HLS 缓存包 */
 export type DownloadKind = 'file' | 'hls'
 
+/** 缓存包导出 MP4 的状态；不影响下载状态本身 */
+export type DownloadMp4Status = 'idle' | 'queued' | 'converting' | 'done' | 'failed'
+
+const MP4_STATUSES: DownloadMp4Status[] = ['idle', 'queued', 'converting', 'done', 'failed']
+
 const STATUSES: DownloadStatus[] = [
   'waiting',
   'downloading',
@@ -81,6 +86,20 @@ export interface DownloadRecord {
   updatedAt: string
   /** 完成时间，未完成时为空串 */
   completedAt: string
+  /** 导出 MP4 的绝对路径；没导出过为空串 */
+  mp4Path: string
+  /** 导出 MP4 的字节数；没有时为 0 */
+  mp4Size: number
+  /** MP4 导出状态 */
+  mp4Status: DownloadMp4Status
+  /** MP4 导出进度 0–100 */
+  mp4Progress: number
+  /** 导出失败原因（只对 failed 有意义） */
+  mp4Error: string
+  /** 导出提示（如 HEVC 兼容性提醒），不影响成功状态 */
+  mp4Note: string
+  /** 导出完成时间，未完成时为空串 */
+  mp4UpdatedAt: string
 }
 
 /** 给渲染层的记录：额外带上磁盘上的真实状态（文件可能被用户手动删掉 / 挪走） */
@@ -89,6 +108,8 @@ export interface DownloadRecordView extends DownloadRecord {
   exists: boolean
   /** 磁盘上的实际大小；文件不在时为 0 */
   size: number
+  /** 导出的 MP4 是否还在原路径 */
+  mp4Exists: boolean
 }
 
 export interface DownloadInput {
@@ -126,6 +147,14 @@ export interface DownloadPatch {
   url?: string
   title?: string
   episodeName?: string
+  /** MP4 导出相关：由 mp4-export 队列写入 */
+  mp4Path?: string
+  mp4Size?: number
+  mp4Status?: DownloadMp4Status
+  mp4Progress?: number
+  mp4Error?: string
+  mp4Note?: string
+  mp4UpdatedAt?: string
 }
 
 /** 播放页按「视频 + 来源 + 线路 + 集」定位一条缓存记录 */
@@ -202,6 +231,10 @@ function isStatus(value: unknown): value is DownloadStatus {
   return typeof value === 'string' && STATUSES.includes(value as DownloadStatus)
 }
 
+function isMp4Status(value: unknown): value is DownloadMp4Status {
+  return typeof value === 'string' && MP4_STATUSES.includes(value as DownloadMp4Status)
+}
+
 function toText(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
@@ -238,6 +271,8 @@ function normalizeRecord(raw: unknown): DownloadRecord | null {
         : dirname(resolve(path))
       : ''
   const videoId = Number(data.videoId)
+  const mp4Status = isMp4Status(data.mp4Status) ? data.mp4Status : 'idle'
+  const mp4Path = toText(data.mp4Path).trim()
   return {
     id,
     videoId: Number.isInteger(videoId) && videoId > 0 ? videoId : undefined,
@@ -261,7 +296,14 @@ function normalizeRecord(raw: unknown): DownloadRecord | null {
     error: toText(data.error),
     createdAt,
     updatedAt: toText(data.updatedAt) || createdAt,
-    completedAt: toText(data.completedAt)
+    completedAt: toText(data.completedAt),
+    mp4Path: mp4Path && isAbsolute(mp4Path) ? resolve(mp4Path) : '',
+    mp4Size: Math.max(toNumber(data.mp4Size), 0),
+    mp4Status,
+    mp4Progress: mp4Status === 'done' ? 100 : toProgress(data.mp4Progress),
+    mp4Error: toText(data.mp4Error),
+    mp4Note: toText(data.mp4Note),
+    mp4UpdatedAt: toText(data.mp4UpdatedAt)
   }
 }
 
@@ -291,7 +333,14 @@ function recordFromInput(input: DownloadInput, now: string): DownloadRecord {
     error: '',
     createdAt: now,
     updatedAt: now,
-    completedAt: input.status === 'done' ? now : ''
+    completedAt: input.status === 'done' ? now : '',
+    mp4Path: '',
+    mp4Size: 0,
+    mp4Status: 'idle',
+    mp4Progress: 0,
+    mp4Error: '',
+    mp4Note: '',
+    mp4UpdatedAt: ''
   }
 }
 
@@ -344,19 +393,27 @@ export function createDownloadStore(options: {
   }
 
   function view(record: DownloadRecord): DownloadRecordView {
+    // MP4 是导出产物，可能被用户挪走：单独给一个 mp4Exists，不影响缓存包本身的 exists
+    const mp4Exists = Boolean(record.mp4Path && existsSync(record.mp4Path))
     if (record.kind === 'hls') {
       // playlist 存在才算可播；进度期间 totalBytes 还是 0，用已下载字节兜底
       return {
         ...record,
         exists: existsSync(record.path),
-        size: record.totalBytes > 0 ? record.totalBytes : record.receivedBytes
+        size: record.totalBytes > 0 ? record.totalBytes : record.receivedBytes,
+        mp4Exists
       }
     }
     try {
       const info = statSync(record.path)
-      return { ...record, exists: info.isFile(), size: info.isFile() ? info.size : 0 }
+      return {
+        ...record,
+        exists: info.isFile(),
+        size: info.isFile() ? info.size : 0,
+        mp4Exists
+      }
     } catch {
-      return { ...record, exists: false, size: 0 }
+      return { ...record, exists: false, size: 0, mp4Exists }
     }
   }
 
@@ -382,21 +439,33 @@ export function createDownloadStore(options: {
    * 只动当前下载目录内的文件；文件本来就不在时也算完成（用户的目的已经达到）。
    */
   function deleteFile(record: DownloadRecord): boolean {
+    let deleted = true
     try {
       if (record.kind === 'hls') {
         const dir = record.packageDir || dirname(record.path)
-        if (!isInsideDirectory(directory(), dir)) return false
-        if (!existsSync(dir)) return true
-        discardPackage(dir)
-        return true
+        if (!isInsideDirectory(directory(), dir)) deleted = false
+        else if (existsSync(dir)) discardPackage(dir)
+      } else if (!isInsideDirectory(directory(), record.path)) {
+        deleted = false
+      } else if (existsSync(record.path)) {
+        unlinkSync(record.path)
       }
-      if (!isInsideDirectory(directory(), record.path)) return false
-      if (!existsSync(record.path)) return true
-      unlinkSync(record.path)
-      return true
     } catch {
-      return false
+      deleted = false
     }
+    // 导出的 MP4 跟着记录一起删；不在当前下载目录时只保留，不冒险删
+    if (record.mp4Path) {
+      if (!isInsideDirectory(directory(), record.mp4Path)) {
+        if (existsSync(record.mp4Path)) deleted = false
+      } else {
+        try {
+          if (existsSync(record.mp4Path)) unlinkSync(record.mp4Path)
+        } catch {
+          deleted = false
+        }
+      }
+    }
+    return deleted
   }
 
   function removeRecords(ids: Set<string>, deleteFiles: boolean): DownloadRemoveResult {
@@ -505,6 +574,20 @@ export function createDownloadStore(options: {
       if (patch.url !== undefined) record.url = patch.url.slice(0, 4096)
       if (patch.title !== undefined) record.title = patch.title.trim() || record.title
       if (patch.episodeName !== undefined) record.episodeName = patch.episodeName
+      if (patch.mp4Path !== undefined) {
+        const nextPath = patch.mp4Path.trim()
+        record.mp4Path = nextPath && isAbsolute(nextPath) ? resolve(nextPath) : ''
+      }
+      if (patch.mp4Size !== undefined) record.mp4Size = Math.max(0, Math.round(patch.mp4Size))
+      if (patch.mp4Progress !== undefined) record.mp4Progress = toProgress(patch.mp4Progress)
+      if (patch.mp4Error !== undefined) record.mp4Error = patch.mp4Error.slice(0, 500)
+      if (patch.mp4Note !== undefined) record.mp4Note = patch.mp4Note.slice(0, 200)
+      if (patch.mp4UpdatedAt !== undefined) record.mp4UpdatedAt = patch.mp4UpdatedAt
+      if (patch.mp4Status !== undefined && isMp4Status(patch.mp4Status)) {
+        record.mp4Status = patch.mp4Status
+        // 完成时统一把进度补满，避免最后一次进度事件落后在 99%
+        if (patch.mp4Status === 'done') record.mp4Progress = 100
+      }
       record.updatedAt = new Date().toISOString()
       if (updateOptions?.persist !== false) persist()
       const next = view(record)

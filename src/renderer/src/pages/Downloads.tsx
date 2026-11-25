@@ -18,6 +18,7 @@ import {
   CloseCircleOutlined,
   CloudDownloadOutlined,
   DeleteOutlined,
+  ExportOutlined,
   FolderOpenOutlined,
   MinusCircleOutlined,
   MoreOutlined,
@@ -108,6 +109,8 @@ interface DownloadGroup {
   active: number
   paused: number
   failed: number
+  /** 已经导出 MP4 的集数（用来在卡片上显示） */
+  mp4Done: number
   activeRecord: DownloadRecordView | null
   percent: number
 }
@@ -149,6 +152,9 @@ function buildGroups(records: DownloadRecordView[]): DownloadGroup[] {
     const failed = sorted.filter(
       (record) => record.status === 'failed' || record.status === 'canceled'
     ).length
+    const mp4Done = sorted.filter(
+      (record) => record.mp4Status === 'done' && record.mp4Exists
+    ).length
     const latestAt = sorted.reduce(
       (latest, record) => (record.updatedAt > latest ? record.updatedAt : latest),
       sorted[0].updatedAt
@@ -174,6 +180,7 @@ function buildGroups(records: DownloadRecordView[]): DownloadGroup[] {
       active,
       paused,
       failed,
+      mp4Done,
       activeRecord:
         sorted.find((record) => record.status === 'downloading') ??
         sorted.find((record) => record.status === 'waiting') ??
@@ -226,6 +233,10 @@ interface RecordRowProps {
   onResume: (record: DownloadRecordView) => void
   onCancel: (record: DownloadRecordView) => void
   onRetry: (record: DownloadRecordView) => void
+  onExport: (record: DownloadRecordView) => void
+  onCancelExport: (record: DownloadRecordView) => void
+  onOpenMp4: (record: DownloadRecordView) => void
+  onRemoveMp4: (record: DownloadRecordView) => void
 }
 
 function RecordRow({
@@ -237,7 +248,11 @@ function RecordRow({
   onPause,
   onResume,
   onCancel,
-  onRetry
+  onRetry,
+  onExport,
+  onCancelExport,
+  onOpenMp4,
+  onRemoveMp4
 }: RecordRowProps): React.JSX.Element {
   const meta = STATUS_META[record.status]
   const sizeText = record.exists ? formatBytes(record.size) : ''
@@ -276,6 +291,30 @@ function RecordRow({
           {record.status === 'downloading' && record.speed > 0 && (
             <span className="download-record-speed">↓ {formatSpeed(record.speed)}</span>
           )}
+          {record.mp4Status === 'done' && record.mp4Exists && (
+            <span className="download-record-mp4">MP4 已导出 · {formatBytes(record.mp4Size)}</span>
+          )}
+          {record.mp4Status === 'done' && record.mp4Exists && record.mp4Note && (
+            <Tooltip title={record.mp4Note}>
+              <span className="download-record-mp4-note">HEVC</span>
+            </Tooltip>
+          )}
+          {record.mp4Status === 'done' && !record.mp4Exists && (
+            <Text type="warning">MP4 已丢失</Text>
+          )}
+          {record.mp4Status === 'queued' && (
+            <span className="download-record-mp4 is-active">MP4 排队中</span>
+          )}
+          {record.mp4Status === 'converting' && (
+            <span className="download-record-mp4 is-active">
+              MP4 转换中 {Math.round(record.mp4Progress)}%
+            </span>
+          )}
+          {record.mp4Status === 'failed' && (
+            <Tooltip title={record.mp4Error || 'MP4 转换失败'}>
+              <Text type="warning">MP4 转换失败</Text>
+            </Tooltip>
+          )}
           {record.status === 'failed' && record.error && (
             <Tooltip title={record.error}>
               <Text type="warning">查看失败原因</Text>
@@ -300,6 +339,15 @@ function RecordRow({
             showInfo={false}
           />
         )}
+        {record.mp4Status === 'converting' && (
+          <Progress
+            className="download-record-progress is-mp4"
+            percent={Math.round(record.mp4Progress)}
+            size="small"
+            status="active"
+            showInfo={false}
+          />
+        )}
       </div>
 
       <div className="download-record-actions">
@@ -308,6 +356,28 @@ function RecordRow({
             播放
           </Button>
         )}
+        {record.kind === 'hls' &&
+          record.status === 'done' &&
+          record.exists &&
+          (record.mp4Status === 'queued' || record.mp4Status === 'converting' ? (
+            <Button
+              size="small"
+              type="text"
+              loading={pending}
+              onClick={() => onCancelExport(record)}
+            >
+              取消转换
+            </Button>
+          ) : (
+            <Button
+              size="small"
+              icon={<ExportOutlined />}
+              loading={pending}
+              onClick={() => onExport(record)}
+            >
+              {record.mp4Status === 'done' && record.mp4Exists ? '重新导出' : '转 MP4'}
+            </Button>
+          ))}
         {canPause && (
           <Button
             size="small"
@@ -338,20 +408,31 @@ function RecordRow({
             重试
           </Button>
         )}
-        <Tooltip title="打开所在文件夹">
-          <Button
-            size="small"
-            type="text"
-            icon={<FolderOpenOutlined />}
-            aria-label="打开所在文件夹"
-            onClick={() => onOpenFolder(record)}
-          />
-        </Tooltip>
         <Dropdown
           trigger={['click']}
           placement="bottomRight"
           menu={{
             items: [
+              {
+                key: 'folder',
+                icon: <FolderOpenOutlined />,
+                label: '打开所在文件夹'
+              },
+              { type: 'divider' },
+              {
+                key: 'mp4-folder',
+                icon: <FolderOpenOutlined />,
+                label: '打开 MP4 所在文件夹',
+                disabled: !record.mp4Exists
+              },
+              {
+                key: 'mp4-remove',
+                icon: <DeleteOutlined />,
+                label: '删除 MP4',
+                danger: true,
+                disabled: !record.mp4Exists
+              },
+              { type: 'divider' },
               {
                 key: 'remove',
                 icon: <MinusCircleOutlined />,
@@ -366,7 +447,21 @@ function RecordRow({
                 disabled: record.kind === 'hls' ? false : !record.exists
               }
             ],
-            onClick: ({ key }) => onRemove(record, key === 'delete')
+            onClick: ({ key }) => {
+              if (key === 'folder') {
+                onOpenFolder(record)
+                return
+              }
+              if (key === 'mp4-folder') {
+                onOpenMp4(record)
+                return
+              }
+              if (key === 'mp4-remove') {
+                onRemoveMp4(record)
+                return
+              }
+              onRemove(record, key === 'delete')
+            }
           }}
         >
           <Button
@@ -588,6 +683,94 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
     }
   }
 
+  const exportRecord = async (record: DownloadRecordView): Promise<void> => {
+    markPending(record.id, true)
+    try {
+      const force = record.mp4Status === 'done' && record.mp4Exists
+      const result = await window.api.downloads.exportMp4({ ids: [record.id], force })
+      if (result.queued > 0) {
+        message.success(force ? '已开始重新导出 MP4' : '已加入 MP4 导出队列')
+      } else if (result.existing > 0) {
+        message.info('这一集已经导出过 MP4')
+      } else {
+        message.warning('缓存还没完成，不能导出 MP4')
+      }
+    } catch {
+      message.error('导出 MP4 失败')
+    } finally {
+      markPending(record.id, false)
+    }
+  }
+
+  const cancelExportRecord = async (record: DownloadRecordView): Promise<void> => {
+    markPending(record.id, true)
+    try {
+      await window.api.downloads.cancelExport([record.id])
+      message.success('已取消 MP4 转换')
+    } catch {
+      message.error('取消 MP4 转换失败')
+    } finally {
+      markPending(record.id, false)
+    }
+  }
+
+  const openMp4 = async (record: DownloadRecordView): Promise<void> => {
+    try {
+      const result = await window.api.downloads.openMp4Folder(record.id)
+      if (!result.ok) {
+        message.warning('MP4 已被删除或移动')
+        await loadRecords()
+      }
+    } catch {
+      message.error('打开 MP4 所在文件夹失败')
+    }
+  }
+
+  const removeMp4 = (record: DownloadRecordView): void => {
+    modal.confirm({
+      title: '删除导出的 MP4',
+      content: `将删除「${record.title} ${record.episodeName}」的 MP4 文件，缓存包会保留，需要时可以重新导出。`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const result = await window.api.downloads.removeMp4(record.id)
+          if (!result.ok) {
+            message.error('删除 MP4 失败')
+            return
+          }
+          await loadRecords()
+          message.success('已删除 MP4')
+        } catch {
+          message.error('删除 MP4 失败')
+        }
+      }
+    })
+  }
+
+  const exportGroup = async (group: DownloadGroup): Promise<void> => {
+    const ids = group.records
+      .filter((record) => record.kind === 'hls' && record.status === 'done' && record.exists)
+      .map((record) => record.id)
+    if (ids.length === 0) {
+      message.info('这组还没有可导出的缓存')
+      return
+    }
+    try {
+      const result = await window.api.downloads.exportMp4({ ids })
+      if (result.queued > 0) {
+        message.success(`已加入 ${result.queued} 集 MP4 导出队列`)
+      } else if (result.existing > 0) {
+        message.info('这些集已经导出过 MP4')
+      } else {
+        message.warning('没有可导出的集')
+      }
+    } catch {
+      message.error('导出 MP4 失败')
+    }
+  }
+
   const removeRecord = (record: DownloadRecordView, deleteFile: boolean): void => {
     const run = async (): Promise<void> => {
       try {
@@ -597,7 +780,11 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
         })
         setRecords(result.records)
         if (!deleteFile) {
-          message.success('已移除记录，缓存文件仍保留在下载目录')
+          message.success(
+            record.mp4Exists
+              ? '已移除记录，缓存和 MP4 文件仍保留在下载目录'
+              : '已移除记录，缓存文件仍保留在下载目录'
+          )
         } else if (result.keptFiles > 0) {
           message.warning('记录已移除，文件没能删除（不在当前下载目录或正被占用）')
         } else {
@@ -616,7 +803,9 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
       title: record.kind === 'hls' ? '删除这一集缓存' : '删除文件',
       content:
         record.kind === 'hls'
-          ? `将同时删除「${record.title} ${record.episodeName}」的缓存和记录，删除后不可恢复。`
+          ? `将同时删除「${record.title} ${record.episodeName}」的缓存和记录${
+              record.mp4Exists ? '，已导出的 MP4 也会一起删除' : ''
+            }，删除后不可恢复。`
           : `将同时删除「${record.fileName}」和它的下载记录，删除后不可恢复。`,
       okText: '删除',
       okButtonProps: { danger: true },
@@ -629,8 +818,8 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
     modal.confirm({
       title: '删除整组缓存',
       content: `将删除「${group.title}」的 ${group.records.length} 集缓存和对应文件${
-        group.active > 0 ? '，正在缓存的会先取消' : ''
-      }。删除后不可恢复。`,
+        group.mp4Done > 0 ? '（含已导出的 MP4）' : ''
+      }${group.active > 0 ? '，正在缓存的会先取消' : ''}。删除后不可恢复。`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -701,6 +890,10 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
       onResume={(item) => void resumeRecord(item)}
       onCancel={(item) => void cancelRecord(item)}
       onRetry={(item) => void retryRecord(item)}
+      onExport={(item) => void exportRecord(item)}
+      onCancelExport={(item) => void cancelExportRecord(item)}
+      onOpenMp4={(item) => void openMp4(item)}
+      onRemoveMp4={removeMp4}
     />
   )
 
@@ -772,11 +965,25 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
                   <h2 className="downloads-group-title">{openGroup.title}</h2>
                   <p className="downloads-group-sub">
                     <span>{groupStatusText(openGroup)}</span>
+                    {openGroup.mp4Done > 0 && <span>已导出 {openGroup.mp4Done} 集 MP4</span>}
                     <span>{formatBytes(openGroup.totalSize)}</span>
                     <span>最近更新 {formatDateTime(openGroup.latestAt)}</span>
                   </p>
                 </div>
                 <div className="downloads-group-head-actions">
+                  <Button
+                    size="small"
+                    icon={<ExportOutlined />}
+                    disabled={
+                      !openGroup.records.some(
+                        (record) =>
+                          record.kind === 'hls' && record.status === 'done' && record.exists
+                      )
+                    }
+                    onClick={() => void exportGroup(openGroup)}
+                  >
+                    整组转 MP4
+                  </Button>
                   <Tooltip title="打开所在文件夹">
                     <Button
                       size="small"
@@ -869,6 +1076,7 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
                       </div>
                       <div className="download-group-meta">
                         <span>{groupStatusText(group)}</span>
+                        {group.mp4Done > 0 && <span>已导出 {group.mp4Done} 集 MP4</span>}
                         {activeText && <span>{activeText}</span>}
                         <span>{formatBytes(group.totalSize)}</span>
                         <span>{formatDateTime(group.latestAt)}</span>
