@@ -31,7 +31,10 @@ import { createCollectLogStore } from './collect-log-store'
 import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
 import { downloadMediaUrl, DOWNLOAD_MEDIA_SCHEME, serveDownloadFile } from './download-media'
+import { createDownloadEngine } from './download-engine'
+import { createDownloadHlsServer } from './download-hls-server'
 import { createDownloadStore } from './download-store'
+import type { DownloadRecord, DownloadStatus } from './download-store'
 import { readDownloadUsage } from './download-usage'
 import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
@@ -173,7 +176,18 @@ const homeStore = createHomeStore(join(app.getPath('userData'), 'Data', 'Home'))
 // 下载中心的记录固定存 userData/Data/Downloads，媒体文件放在设置里的下载目录
 const downloadStore = createDownloadStore({
   directory: () => appSettingsStore.get().downloadPath,
-  onChange: () => sendToRenderer('downloads:changed')
+  // 结构变化（增 / 删）才重拉列表；进度走轻量的 downloads:progress，避免整页重排
+  onChange: () => broadcastRenderer('downloads:changed'),
+  onProgress: (record) => broadcastRenderer('downloads:progress', record)
+})
+// 离线缓存队列：并发读「设置 › 下载」，进度事件也广播给已打开的播放窗
+const downloadEngine = createDownloadEngine({
+  store: downloadStore,
+  getConcurrency: () => appSettingsStore.get().downloadConcurrency
+})
+// 缓存包的本机播放服务：hls.js 走普通 http，避免自定义协议在 CORS 上的版本差异
+const downloadHlsServer = createDownloadHlsServer({
+  findRecord: (id) => downloadStore.find(id)
 })
 /** 缓存库初始化失败时不影响应用启动，视频相关 IPC 返回 CACHE_UNAVAILABLE */
 let videoCacheReady = false
@@ -191,6 +205,14 @@ const playerWindows = createPlayerWindowManager({
 function sendToRenderer(channel: string, ...args: unknown[]): void {
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.webContents.send(channel, ...args)
+}
+
+/** 同时发给主窗口和播放窗：下载进度、缓存增删都要让播放页的缓存状态跟上 */
+function broadcastRenderer(channel: string, ...args: unknown[]): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue
+    window.webContents.send(channel, ...args)
+  }
 }
 
 function siteNameMap(): Map<string, string> {
@@ -712,6 +734,112 @@ ipcMain.handle('settings:setCollectConcurrency', (_event, value: number) => {
 
 /* ── IPC：下载中心 ── */
 
+interface CacheEpisodeInput {
+  videoId?: number
+  sourceId?: number
+  lineIndex?: number
+  episodeIndexes?: number[]
+}
+
+interface CacheEpisodeItem {
+  videoId: number
+  title: string
+  episodeName: string
+  sourceId: number
+  sourceName: string
+  lineIndex: number
+  episodeIndex: number
+  url: string
+}
+
+/**
+ * 播放页只传「视频 + 来源 + 线路 + 集下标」，真正的 m3u8 地址由主进程按详情缓存解析：
+ * 渲染层不能借缓存接口下载任意 URL；多选批量一次解析多集。
+ */
+async function resolveCacheEpisodes(
+  input: CacheEpisodeInput | undefined
+): Promise<{ ok: true; items: CacheEpisodeItem[] } | { ok: false; error: string }> {
+  const videoId = Number(input?.videoId)
+  const sourceId = Number(input?.sourceId)
+  const lineIndex = Number(input?.lineIndex)
+  const rawIndexes = Array.isArray(input?.episodeIndexes) ? input.episodeIndexes : []
+  const indexes = [
+    ...new Set(
+      rawIndexes
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value >= 0)
+    )
+  ]
+  if (
+    !Number.isInteger(videoId) ||
+    videoId <= 0 ||
+    !Number.isInteger(sourceId) ||
+    sourceId <= 0 ||
+    !Number.isInteger(lineIndex) ||
+    lineIndex < 0 ||
+    indexes.length === 0
+  ) {
+    return { ok: false, error: 'INVALID_INPUT' }
+  }
+  if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
+
+  const detail = await detailCache.read(videoId, true)
+  if (!detail.ok || !detail.video) return { ok: false, error: detail.error ?? 'NOT_FOUND' }
+  const source = detail.video.sources.find((item) => item.id === sourceId)
+  const line = source?.detail?.playLines?.[lineIndex]
+  if (!source || !line) return { ok: false, error: 'NO_EPISODE' }
+
+  const title = detail.video.name?.trim() || source.name?.trim() || '未命名视频'
+  const sourceName = source.siteName?.trim() ?? ''
+  const items: CacheEpisodeItem[] = []
+  for (const index of indexes) {
+    const episode = line.episodes[index]
+    if (!episode) continue
+    const url = episode.url.trim()
+    if (!isHlsUrl(url)) continue
+    items.push({
+      videoId,
+      title,
+      episodeName: episode.name.trim() || `第 ${index + 1} 集`,
+      sourceId,
+      sourceName,
+      lineIndex,
+      episodeIndex: index,
+      url
+    })
+  }
+  if (items.length === 0) return { ok: false, error: 'NOT_M3U8' }
+  return { ok: true, items }
+}
+
+/**
+ * 暂停 / 失败后继续下载前，尽量拿一次新鲜地址：站点的 m3u8 常带时效签名，
+ * 拿着几小时前的旧地址续传会直接 403。解析失败仍用记录里的旧地址兜底。
+ */
+async function refreshDownloadUrl(record: DownloadRecord): Promise<void> {
+  if (
+    typeof record.videoId !== 'number' ||
+    typeof record.sourceId !== 'number' ||
+    typeof record.lineIndex !== 'number' ||
+    typeof record.episodeIndex !== 'number'
+  ) {
+    return
+  }
+  try {
+    const resolved = await resolveCacheEpisodes({
+      videoId: record.videoId,
+      sourceId: record.sourceId,
+      lineIndex: record.lineIndex,
+      episodeIndexes: [record.episodeIndex]
+    })
+    if (resolved.ok && resolved.items[0]) {
+      downloadStore.update(record.id, { url: resolved.items[0].url }, { persist: true })
+    }
+  } catch {
+    // 详情缓存拿不到就继续用旧地址
+  }
+}
+
 ipcMain.handle('downloads:list', () => downloadStore.list())
 
 // 目录占用 + 磁盘容量：设置页的「下载」分区用它画概览，扫描放在 IPC 里不堵界面
@@ -750,15 +878,21 @@ ipcMain.handle('downloads:setPath', (_event, value: string) => {
   return { ok: true, settings: appSettingsStore.setDownloadPath(next) }
 })
 
-ipcMain.handle('downloads:setConcurrency', (_event, value: number) =>
-  // 下载引擎每次填槽都读一次设置，这里只落盘，不打断正在下载的任务
-  appSettingsStore.setDownloadConcurrency(value)
-)
+ipcMain.handle('downloads:setConcurrency', (_event, value: number) => {
+  // 下载引擎每次填槽都读一次设置：这里落盘后立刻补槽，不打断正在下载的任务
+  const settings = appSettingsStore.setDownloadConcurrency(value)
+  downloadEngine.wake()
+  return settings
+})
 
-ipcMain.handle('downloads:remove', (_event, input: { ids?: string[]; deleteFiles?: boolean }) =>
-  downloadStore.remove(Array.isArray(input?.ids) ? input.ids.map(String) : [], {
-    deleteFiles: Boolean(input?.deleteFiles)
-  })
+ipcMain.handle(
+  'downloads:remove',
+  async (_event, input: { ids?: string[]; deleteFiles?: boolean }) => {
+    const ids = Array.isArray(input?.ids) ? input.ids.map(String) : []
+    // 先让在跑的任务停下来、把文件句柄放掉，再删记录和缓存包
+    await downloadEngine.cancelMany(ids)
+    return downloadStore.remove(ids, { deleteFiles: Boolean(input?.deleteFiles) })
+  }
 )
 
 ipcMain.handle('downloads:clearFinished', (_event, input?: { deleteFiles?: boolean }) =>
@@ -767,10 +901,18 @@ ipcMain.handle('downloads:clearFinished', (_event, input?: { deleteFiles?: boole
 
 ipcMain.handle('downloads:openFolder', async (_event, id?: string) => {
   const record = id ? downloadStore.find(String(id)) : null
-  // 文件还在就定位到它；被删 / 挪走则退回下载目录
+  // 文件还在就定位到它；hls 缓存包在写 playlist 之前先打开包目录
   if (record && existsSync(record.path)) {
     shell.showItemInFolder(record.path)
     return { ok: true }
+  }
+  if (record?.kind === 'hls' && record.packageDir && existsSync(record.packageDir)) {
+    try {
+      const error = await shell.openPath(record.packageDir)
+      return { ok: error === '' }
+    } catch {
+      return { ok: false }
+    }
   }
   try {
     const error = await shell.openPath(downloadStore.ensureDirectory())
@@ -780,10 +922,22 @@ ipcMain.handle('downloads:openFolder', async (_event, id?: string) => {
   }
 })
 
-ipcMain.handle('downloads:play', (_event, id: string) => {
+ipcMain.handle('downloads:play', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record) return { ok: false, error: 'NOT_FOUND' }
   if (!existsSync(record.path)) return { ok: false, error: 'FILE_MISSING' }
+  if (record.kind === 'hls') {
+    // 缓存包走本机 http 服务，播放页按 HLS 播
+    const url = await downloadHlsServer.urlFor(record.id)
+    if (!url) return { ok: false, error: 'SERVICE_FAILED' }
+    return playerWindows.open({
+      fileUrl: url,
+      hls: true,
+      fileName: record.fileName,
+      title: record.title,
+      episodeName: record.episodeName
+    })
+  }
   // 本机文件在播放窗里直接播，不按 videoId 取详情
   return playerWindows.open({
     fileUrl: downloadMediaUrl(record.path),
@@ -791,6 +945,90 @@ ipcMain.handle('downloads:play', (_event, id: string) => {
     title: record.title,
     episodeName: record.episodeName
   })
+})
+
+/* ── IPC：播放页离线缓存 ── */
+
+ipcMain.handle('downloads:cache', async (_event, input: CacheEpisodeInput) => {
+  const resolved = await resolveCacheEpisodes(input)
+  if (!resolved.ok) return resolved
+  try {
+    const result = await downloadEngine.enqueueMany(resolved.items)
+    return { ok: true, ...result }
+  } catch (error) {
+    console.error('加入缓存队列失败', error)
+    return { ok: false, error: 'NOT_WRITABLE' }
+  }
+})
+
+// 播放页按视频取已缓存 / 缓存中的集：只查内存，不逐条 stat
+ipcMain.handle('downloads:cachedEpisodes', (_event, videoId: number) => {
+  const id = Number(videoId)
+  if (!Number.isInteger(id) || id <= 0) return { ok: false, items: [] }
+  const items: {
+    recordId: string
+    sourceId: number
+    lineIndex: number
+    episodeIndex: number
+    status: DownloadStatus
+    progress: number
+    speed: number
+  }[] = []
+  for (const record of downloadStore.listByVideo(id)) {
+    if (record.kind !== 'hls') continue
+    if (
+      typeof record.sourceId !== 'number' ||
+      typeof record.lineIndex !== 'number' ||
+      typeof record.episodeIndex !== 'number'
+    ) {
+      continue
+    }
+    items.push({
+      recordId: record.id,
+      sourceId: record.sourceId,
+      lineIndex: record.lineIndex,
+      episodeIndex: record.episodeIndex,
+      status: record.status,
+      progress: record.progress,
+      speed: record.speed
+    })
+  }
+  return { ok: true, items }
+})
+
+// 播放页「优先缓存」：拿到本机 playlist 地址；不可播时让页面回退在线地址
+ipcMain.handle('downloads:playbackUrl', async (_event, id: string) => {
+  const record = downloadStore.find(String(id))
+  if (!record || record.kind !== 'hls') return { ok: false, error: 'NOT_FOUND' }
+  if (record.status !== 'done') return { ok: false, error: 'NOT_READY' }
+  if (!existsSync(record.path)) return { ok: false, error: 'FILE_MISSING' }
+  const url = await downloadHlsServer.urlFor(record.id)
+  return url ? { ok: true, url } : { ok: false, error: 'SERVICE_FAILED' }
+})
+
+ipcMain.handle('downloads:cancel', async (_event, id: string) => {
+  await downloadEngine.cancel(String(id))
+  return { ok: true }
+})
+
+ipcMain.handle('downloads:pause', (_event, id: string) => downloadEngine.pause(String(id)))
+
+ipcMain.handle('downloads:resume', async (_event, id: string) => {
+  const record = downloadStore.find(String(id))
+  if (!record) return { ok: false, error: 'NOT_FOUND' }
+  if (record.status !== 'paused') return { ok: false, error: 'NOT_PAUSED' }
+  await refreshDownloadUrl(record)
+  return downloadEngine.resume(record.id)
+})
+
+ipcMain.handle('downloads:retry', async (_event, id: string) => {
+  const record = downloadStore.find(String(id))
+  if (!record) return { ok: false, error: 'NOT_FOUND' }
+  // 失败 / 取消的记录重试前也刷一次地址；已暂停走 resume，不走这里
+  if (record.status === 'failed' || record.status === 'canceled') {
+    await refreshDownloadUrl(record)
+  }
+  return downloadEngine.restart(record.id)
 })
 
 /* ── IPC：缓存管理 ── */
@@ -2326,6 +2564,8 @@ if (!gotTheLock) {
     await backupStore.init().catch(() => {})
     await homeStore.init().catch((error) => console.error('首页配置初始化失败', error))
     await downloadStore.init().catch((error) => console.error('下载记录初始化失败', error))
+    // 上次退出时没跑完的缓存任务：转失败并清掉半成品包
+    await downloadEngine.init().catch((error) => console.error('缓存任务初始化失败', error))
     // 自定义图片：cine-img://home/<文件名> → userData/Data/Home/images/<文件名>
     protocol.handle('cine-img', (request) => {
       try {
@@ -2394,6 +2634,11 @@ if (!gotTheLock) {
     destroyTray()
     scheduler.stop()
     collector.shutdown()
+    // 缓存任务直接中止；中断的记录由下次启动的 downloadEngine.init() 统一收尾
+    downloadEngine.shutdown()
+    downloadStore.flush()
+    // 本机播放服务只在缓存播放时用，退出时关掉监听
+    downloadHlsServer.dispose()
     // 先关掉局域网监听，别让网页端在数据库关闭后还发请求进来
     lanService.dispose()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护

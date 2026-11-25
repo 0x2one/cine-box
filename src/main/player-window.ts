@@ -22,6 +22,11 @@ export interface PlayerOpenInput {
   fileUrl?: string
   /** 本机文件名，详情加载前先当标题用 */
   fileName?: string
+  /**
+   * fileUrl 是离线缓存包里的 m3u8（下载中心 / 播放页优先缓存）：
+   * 播放页按 HLS 处理，而不是当普通视频文件原生播放。
+   */
+  hls?: boolean
 }
 
 export interface PlayerPayload extends PlayerOpenInput {
@@ -168,6 +173,7 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
     payload = isLocal
       ? {
           fileUrl,
+          hls: input?.hls === true,
           fileName: typeof input?.fileName === 'string' ? input.fileName : undefined,
           title: typeof input?.title === 'string' ? input.title : undefined,
           episodeName: typeof input?.episodeName === 'string' ? input.episodeName : undefined,

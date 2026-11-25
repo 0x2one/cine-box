@@ -639,7 +639,7 @@ function DownloadPanel(): React.JSX.Element {
         <SettingRow
           stacked
           title="保存位置"
-          description="新下载的文件保存到这个目录；更改后已有文件与记录不受影响"
+          description="新下载 / 缓存的视频保存到这个目录；更改后已有文件与记录不受影响"
         >
           <div className="settings-path-row">
             <span className="settings-path" title={path || undefined}>

@@ -59,6 +59,8 @@ interface PlayerPayload extends Omit<PlayerOpenInput, 'videoId'> {
   fileUrl?: string
   /** 本机文件名，详情加载前先当标题用 */
   fileName?: string
+  /** fileUrl 是离线缓存包里的 m3u8：播放页按 HLS 处理 */
+  hls?: boolean
 }
 
 interface PlayerOpenResult {
@@ -1332,21 +1334,40 @@ interface UpdaterApi {
 /** 下载任务状态：等待 / 下载中 / 暂停 / 完成 / 失败 / 取消 */
 type DownloadStatus = 'waiting' | 'downloading' | 'paused' | 'done' | 'failed' | 'canceled'
 
+/** 记录类型：单个文件 / 本地 HLS 缓存包 */
+type DownloadKind = 'file' | 'hls'
+
 interface DownloadRecord {
   id: string
   /** 来源视频 id；纯直链下载时没有 */
   videoId?: number
+  /** 记录类型；老记录按 file 处理 */
+  kind: DownloadKind
   title: string
   /** 集名 / 版本名，单集下载为空串 */
   episodeName: string
-  /** 文件名 */
+  /** 文件名 / 缓存包名 */
   fileName: string
-  /** 保存的绝对路径 */
+  /** 保存的绝对路径；hls 记录是包里的 index.m3u8 */
   path: string
+  /** hls 缓存包目录；file 记录为空串 */
+  packageDir: string
+  /** 来源视频 id（VideoDetailSource.id），播放页按它定位当前集 */
+  sourceId?: number
+  /** 来源站显示名 */
+  sourceName: string
+  /** 来源里的线路下标（playLines 原始下标） */
+  lineIndex?: number
+  /** 线路里的集数下标（episodes 原始下标） */
+  episodeIndex?: number
+  /** 入队时解析出的 m3u8 地址，重试用 */
+  url: string
   status: DownloadStatus
   /** 0–100 */
   progress: number
   receivedBytes: number
+  /** 当前下载速度（字节 / 秒，仅下载中有值） */
+  speed: number
   totalBytes: number
   /** 失败原因 */
   error: string
@@ -1364,9 +1385,61 @@ interface DownloadRecordView extends DownloadRecord {
   size: number
 }
 
+/** 播放页缓存当前集 / 多选批量：只传下标，地址由主进程解析 */
+interface DownloadCacheInput {
+  videoId: number
+  sourceId: number
+  lineIndex: number
+  /** 原始 episodes 下标，可多集；主进程去重后入队 */
+  episodeIndexes: number[]
+}
+
+interface DownloadCacheResult {
+  ok: boolean
+  /** INVALID_INPUT / CACHE_UNAVAILABLE / NOT_FOUND / NO_EPISODE / NOT_M3U8 / NOT_WRITABLE */
+  error?: string
+  /** 本次新建的记录数 */
+  queued?: number
+  /** 已缓存 / 缓存中而跳过的集数 */
+  existing?: number
+  /** 失败 / 缺失后重新入队的集数 */
+  restarted?: number
+}
+
+/** 播放页的集缓存状态 */
+interface DownloadCachedEpisode {
+  recordId: string
+  sourceId: number
+  lineIndex: number
+  episodeIndex: number
+  status: DownloadStatus
+  progress: number
+  /** 当前下载速度（字节 / 秒） */
+  speed: number
+}
+
+interface DownloadCachedEpisodesResult {
+  ok: boolean
+  items: DownloadCachedEpisode[]
+}
+
+interface DownloadPlaybackResult {
+  ok: boolean
+  /** 本机 http://127.0.0.1 …/index.m3u8 */
+  url?: string
+  /** NOT_FOUND / NOT_READY / FILE_MISSING / SERVICE_FAILED */
+  error?: string
+}
+
+interface DownloadRetryResult {
+  ok: boolean
+  /** NOT_FOUND / NOT_RETRYABLE / NO_URL */
+  error?: string
+}
+
 interface DownloadRemoveResult {
   records: DownloadRecordView[]
-  /** 真的删掉的文件数 */
+  /** 真的从磁盘删掉的文件 / 缓存包数 */
   deletedFiles: number
   /** 想删但没删的文件数（不在下载目录 / 删除失败） */
   keptFiles: number
@@ -1407,7 +1480,24 @@ interface DownloadsApi {
   setPath: (value: string) => Promise<DownloadPathResult>
   /** 设置同时下载的任务数（1–5），返回保存后的设置 */
   setConcurrency: (value: number) => Promise<AppSettings>
+  /** 播放页缓存当前集 / 多选批量：主进程解析地址并入队 */
+  cache: (input: DownloadCacheInput) => Promise<DownloadCacheResult>
+  /** 某部视频已缓存 / 缓存中的集（播放页状态与优先缓存用） */
+  cachedEpisodes: (videoId: number) => Promise<DownloadCachedEpisodesResult>
+  /** 缓存的 hls 包取本机播放地址 */
+  playbackUrl: (id: string) => Promise<DownloadPlaybackResult>
+  /** 取消等待 / 下载中 / 暂停的任务，返回时任务已停下 */
+  cancel: (id: string) => Promise<{ ok: boolean }>
+  /** 暂停下载；已下载分片保留，继续时从断点接着下 */
+  pause: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 继续暂停的任务 */
+  resume: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 用记录里保存的地址重试 */
+  retry: (id: string) => Promise<DownloadRetryResult>
+  /** 记录结构变化（增 / 删 / 清空）时通知，重拉列表 */
   onChange: (callback: () => void) => () => void
+  /** 进度 / 状态更新：按记录 id 就地打补丁 */
+  onProgress: (callback: (record: DownloadRecordView) => void) => () => void
 }
 
 interface Api {

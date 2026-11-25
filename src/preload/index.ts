@@ -81,12 +81,40 @@ const api = {
       ipcRenderer.invoke('downloads:setPath', value),
     setConcurrency: (value: number): Promise<AppSettings> =>
       ipcRenderer.invoke('downloads:setConcurrency', value),
+    /** 播放页缓存当前集 / 多选批量：主进程按详情解析地址并入队 */
+    cache: (input: DownloadCacheInput): Promise<DownloadCacheResult> =>
+      ipcRenderer.invoke('downloads:cache', input),
+    /** 某部视频已缓存 / 缓存中的集（播放页状态与优先缓存用） */
+    cachedEpisodes: (videoId: number): Promise<DownloadCachedEpisodesResult> =>
+      ipcRenderer.invoke('downloads:cachedEpisodes', videoId),
+    /** 缓存的 hls 包取本机播放地址；文件缺失 / 服务失败时 ok 为假 */
+    playbackUrl: (id: string): Promise<DownloadPlaybackResult> =>
+      ipcRenderer.invoke('downloads:playbackUrl', id),
+    /** 取消一条等待 / 下载中 / 暂停的任务，返回时任务已停下 */
+    cancel: (id: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('downloads:cancel', id),
+    /** 暂停下载；已下载的分片保留，继续时从断点接着下 */
+    pause: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('downloads:pause', id),
+    /** 继续暂停的任务，从断点接着下 */
+    resume: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('downloads:resume', id),
+    /** 用记录里保存的地址重试失败 / 已取消的任务 */
+    retry: (id: string): Promise<DownloadRetryResult> => ipcRenderer.invoke('downloads:retry', id),
     /** 记录有增删改时通知（进度不推，避免高频刷新列表） */
     onChange: (callback: () => void): (() => void) => {
       const handler = (): void => callback()
       ipcRenderer.on('downloads:changed', handler)
       return () => {
         ipcRenderer.removeListener('downloads:changed', handler)
+      }
+    },
+    /** 进度 / 状态更新：按记录 id 就地打补丁，不整页重拉 */
+    onProgress: (callback: (record: DownloadRecordView) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, record: DownloadRecordView): void =>
+        callback(record)
+      ipcRenderer.on('downloads:progress', handler)
+      return () => {
+        ipcRenderer.removeListener('downloads:progress', handler)
       }
     }
   },
