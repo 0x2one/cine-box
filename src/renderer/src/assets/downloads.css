@@ -5,8 +5,31 @@
   align-items: center;
 }
 
+/* 页面头：简介与刷新 / 清空同一行，动作贴着右端（卡片头只留筛选） */
+.downloads-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 2px;
+}
+
+.downloads-headline .page-subtitle {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+}
+
+.downloads-head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .downloads-body {
-  margin-top: 18px;
+  margin-top: 14px;
 }
 
 /* ── 记录卡片头 ── */
@@ -174,7 +197,194 @@
 .download-record-actions {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px;
   padding-top: 1px;
+}
+
+/* 来源站：同一视频可能从不同线路缓存的集，用小胶囊区分 */
+.download-record-source {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+/* ── 分组卡（同一视频 ≥2 集） ── */
+
+.download-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.download-record + .download-group,
+.download-group + .download-record,
+.download-group + .download-group {
+  border-top: 1px solid var(--border);
+}
+
+.download-group:hover {
+  background: var(--surface-muted);
+}
+
+.download-group:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.download-group-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 15px;
+}
+
+.download-group-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.download-group-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.download-group-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-group-title .ant-tag {
+  flex: none;
+  margin-inline-end: 0;
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.download-group-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.download-group-progress {
+  max-width: 380px;
+  margin-top: 2px;
+}
+
+.download-group-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding-top: 1px;
+}
+
+.download-group-arrow {
+  margin-left: 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* ── 分组详情 ── */
+
+.downloads-group-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 16px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.downloads-group-back:hover {
+  color: var(--text);
+}
+
+.downloads-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 12px;
+  padding: 8px 16px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.downloads-group-head-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.downloads-group-title {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downloads-group-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.downloads-group-head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.downloads-group-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.downloads-empty.is-inner {
+  padding: 32px 20px 36px;
+}
+
+/* 下载中每个任务的速度：单独一档强调色，和大小 / 百分比区分开 */
+.download-record-speed {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
