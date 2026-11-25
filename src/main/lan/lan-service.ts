@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createReadStream } from 'node:fs'
 import {
   createLanConfigStore,
   isValidLanHost,
@@ -9,6 +10,7 @@ import {
 import { createMediaProxy } from './lan-proxy'
 import { LAN_ASSETS, LAN_HTML, type LanAsset } from './lan-web-assets'
 import type {
+  LanCacheFile,
   LanFetch,
   LanSearchPayload,
   LanServiceDeps,
@@ -163,6 +165,69 @@ export function createLanService(options: CreateLanServiceOptions): LanService {
     res.end(req.method === 'HEAD' ? undefined : buffer)
   }
 
+  /**
+   * 下发本机缓存包里的文件：分片一般整取，播放器偶尔会发 Range（mp4 init / 拖动预览），
+   * 所以按单段 Range 处理，超出范围回 416。缓存内容会随删除 / 重新缓存变化，一律 no-store。
+   */
+  const sendCacheFile = (req: IncomingMessage, res: ServerResponse, file: LanCacheFile): void => {
+    const size = file.size
+    let start = 0
+    let end = size - 1
+    let partial = false
+    const range = req.headers.range
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim())
+      const startText = match?.[1] ?? ''
+      const endText = match?.[2] ?? ''
+      if (!match || (startText === '' && endText === '')) {
+        res.writeHead(416, { 'Content-Range': `bytes */${size}` })
+        res.end()
+        return
+      }
+      if (startText === '') {
+        // bytes=-N：最后 N 个字节
+        const length = Number(endText)
+        if (!Number.isFinite(length) || length <= 0) {
+          res.writeHead(416, { 'Content-Range': `bytes */${size}` })
+          res.end()
+          return
+        }
+        start = Math.max(0, size - Math.trunc(length))
+      } else {
+        start = Math.trunc(Number(startText))
+        end = endText === '' ? size - 1 : Math.trunc(Number(endText))
+      }
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) {
+        res.writeHead(416, { 'Content-Range': `bytes */${size}` })
+        res.end()
+        return
+      }
+      end = Math.min(end, size - 1)
+      partial = true
+    }
+
+    const headers: Record<string, string | number> = {
+      'Content-Type': file.contentType,
+      'Content-Length': size === 0 ? 0 : end - start + 1,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer'
+    }
+    if (partial) headers['Content-Range'] = `bytes ${start}-${end}/${size}`
+    res.writeHead(partial ? 206 : 200, headers)
+    if (req.method === 'HEAD' || size === 0) {
+      res.end()
+      return
+    }
+    const stream = createReadStream(file.file, { start, end })
+    stream.on('error', () => {
+      // 读盘失败（文件刚被删 / 被占用）：已经发了响应头，只能掐断连接
+      res.destroy()
+    })
+    stream.pipe(res)
+  }
+
   const handleSearch = async (
     req: IncomingMessage,
     res: ServerResponse,
@@ -255,6 +320,41 @@ export function createLanService(options: CreateLanServiceOptions): LanService {
     }
     if (pathname === '/api/search') {
       await handleSearch(req, res, url)
+      return
+    }
+    if (pathname === '/api/downloads') {
+      const raw = url.searchParams.get('video')
+      let videoId: number | undefined
+      if (raw !== null && raw.trim() !== '') {
+        const parsed = Number(raw)
+        if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+          sendJson(req, res, 400, { ok: false, error: 'INVALID_INPUT' })
+          return
+        }
+        videoId = parsed
+      }
+      try {
+        sendJson(req, res, 200, deps.downloads(videoId))
+      } catch {
+        sendJson(req, res, 500, { ok: false, error: 'DOWNLOADS_FAILED' })
+      }
+      return
+    }
+    const cachedMatch = /^\/api\/cached\/([0-9a-f]{32})\/(.+)$/i.exec(pathname)
+    if (cachedMatch) {
+      let relativePath: string
+      try {
+        relativePath = decodeURIComponent(cachedMatch[2])
+      } catch {
+        sendJson(req, res, 400, { ok: false, error: 'BAD_REQUEST' })
+        return
+      }
+      const file = await deps.cachedFile(cachedMatch[1], relativePath)
+      if (!file) {
+        sendJson(req, res, 404, { ok: false, error: 'NOT_FOUND' })
+        return
+      }
+      sendCacheFile(req, res, file)
       return
     }
     const detailMatch = /^\/api\/video\/(\d+)$/.exec(pathname)

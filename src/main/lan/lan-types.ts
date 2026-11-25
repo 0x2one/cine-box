@@ -172,6 +172,40 @@ export interface LanDetailPayload {
   video?: LanVideoDetail
 }
 
+/**
+ * 下载中心里的「本机缓存」：网页端只读，一个条目就是一条已完成的缓存记录。
+ * 同一部视频的多集由网页端按 videoId 聚合成分组。
+ */
+export interface LanCacheItem {
+  /** 下载记录 id（32 位十六进制） */
+  id: string
+  videoId: number
+  title: string
+  episodeName: string
+  sourceName: string
+  lineIndex: number
+  episodeIndex: number
+  /** 缓存包总字节数 */
+  size: number
+  updatedAt: string
+  /** 网页播放器用的播放列表地址，和页面同源 */
+  playUrl: string
+}
+
+export interface LanDownloadsPayload {
+  ok: boolean
+  error?: string
+  items: LanCacheItem[]
+}
+
+/** 网页端取缓存包里的一个文件（playlist / 分片 / 密钥 / init） */
+export interface LanCacheFile {
+  /** 磁盘上的绝对路径 */
+  file: string
+  contentType: string
+  size: number
+}
+
 /** 由主进程注入的数据读取器：HTTP 服务本身不碰 SQLite，方便单独测试 */
 export interface LanServiceDeps {
   /** 本地片库搜索（主进程负责隐藏 / 禁用站点的过滤） */
@@ -186,6 +220,10 @@ export interface LanServiceDeps {
   browse: (query: LanBrowseQuery) => LanBrowsePayload
   /** 播放页详情：详情缓存优先，缺的时候由主进程负责抓取 */
   detail: (videoId: number) => Promise<LanDetailPayload>
+  /** 下载中心：本机已缓存完成的剧集（传 videoId 只取这一部） */
+  downloads: (videoId?: number) => LanDownloadsPayload
+  /** 读取缓存包里的文件；记录不可播 / 路径非法时返回 null */
+  cachedFile: (recordId: string, relativePath: string) => Promise<LanCacheFile | null>
   /** 服务状态变化（启动 / 停止 / 意外退出）时通知控制台 */
   onChange?: (state: LanServiceState) => void
 }

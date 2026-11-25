@@ -41,6 +41,7 @@ import { buildHomeFeed, buildSearchSection } from './home-feed'
 import { boundTopCategories, syncRecommendations } from './home-recommend'
 import { createHomeStore } from './home-store'
 import { createLanService } from './lan/lan-service'
+import { createLanCache } from './lan/lan-cache'
 import { isHlsUrl } from './lan/lan-media-url'
 import type {
   LanBrowsePayload,
@@ -193,6 +194,8 @@ const mp4Export = createMp4Export({ store: downloadStore })
 const downloadHlsServer = createDownloadHlsServer({
   findRecord: (id) => downloadStore.find(id)
 })
+// 局域网影院「下载中心」：把已完成的缓存包暴露给网页端，只读
+const lanCache = createLanCache(downloadStore)
 /** 缓存库初始化失败时不影响应用启动，视频相关 IPC 返回 CACHE_UNAVAILABLE */
 let videoCacheReady = false
 /** 「重新获取」的抓取结果，等用户选择增量 / 全量后再写库，保证确认内容与实际写入一致 */
@@ -1917,6 +1920,14 @@ const lanService = createLanService({
     categories: lanCategories,
     browse: lanBrowse,
     detail: lanVideoDetail,
+    downloads: (videoId) => {
+      try {
+        return { ok: true, items: lanCache.list(videoId) }
+      } catch {
+        return { ok: false, error: 'DOWNLOADS_FAILED', items: [] }
+      }
+    },
+    cachedFile: (recordId, relativePath) => lanCache.resolveFile(recordId, relativePath),
     onChange: (state) => sendToRenderer('lan:changed', state)
   }
 })

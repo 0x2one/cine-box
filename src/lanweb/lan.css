@@ -1573,6 +1573,205 @@ p {
   }
 }
 
+/* ── 下载中心（本机缓存） ── */
+
+.downloads-hero {
+  padding: 18px 0 22px;
+}
+
+.downloads-hero h1 {
+  margin: 12px 0 10px;
+  font-size: clamp(26px, 5vw, 38px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.downloads-hero .hero-desc {
+  margin-bottom: 10px;
+}
+
+.downloads-meta {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.cache-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 2px 0 14px;
+  padding: 6px 12px 6px 4px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12.5px;
+  transition:
+    color 0.18s ease,
+    background 0.18s ease;
+}
+
+.cache-back svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cache-back:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.cache-group-head {
+  margin: 4px 0 18px;
+}
+
+.cache-group-head h1 {
+  margin: 0 0 8px;
+  font-size: clamp(22px, 4.4vw, 30px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.cache-group-head .cache-meta {
+  margin: 0;
+}
+
+.cache-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 列表是一行一条的宽卡，桌面端限制一下宽度，别让文字离右侧箭头太远 */
+.page-downloads .cache-list,
+.page-downloads .cache-group-head {
+  max-width: 880px;
+}
+
+.cache-row,
+.cache-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(22, 29, 39, 0.75), rgba(16, 22, 30, 0.75));
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
+}
+
+.cache-row:hover,
+.cache-group:hover {
+  border-color: rgba(58, 169, 232, 0.35);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+}
+
+.cache-play {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cache-play svg {
+  width: 16px;
+  height: 16px;
+}
+
+.cache-cover {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: linear-gradient(135deg, var(--surface-3), var(--surface));
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.cache-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cache-title {
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: break-word;
+}
+
+.cache-ep {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.cache-meta {
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.cache-group-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.cache-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cache-hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cache-go {
+  display: flex;
+  flex: none;
+  align-items: center;
+  color: var(--faint);
+}
+
+.cache-go svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (min-width: 720px) {
+  .cache-row,
+  .cache-group {
+    gap: 18px;
+    padding: 14px 18px;
+  }
+}
+
 /* ── 页脚 / 提示 ── */
 
 .page-foot {

@@ -42,6 +42,7 @@
     CATEGORIES_FAILED: '读取分类失败，请稍后重试',
     BROWSE_FAILED: '读取视频列表失败，请稍后重试',
     DETAIL_FAILED: '读取播放信息失败',
+    DOWNLOADS_FAILED: '读取下载中心失败，请稍后重试',
     NOT_FOUND: '这个视频不在片库里',
     INVALID_INPUT: '请输入关键词',
     FORBIDDEN: '播放地址没有被授权，请重新打开播放页',
@@ -285,6 +286,7 @@
     if (path === '/' || path === '') return { name: 'home', params: params }
     if (path === '/search') return { name: 'search', params: params }
     if (path === '/browse') return { name: 'browse', params: params }
+    if (path === '/downloads') return { name: 'downloads', params: params }
     var match = /^\/play\/(\d+)$/.exec(path)
     if (match) return { name: 'play', id: Number(match[1]), params: params }
     return { name: 'notfound', params: params }
@@ -314,6 +316,7 @@
     if (route.name === 'home') renderHome(token)
     else if (route.name === 'search') renderSearch(route, token)
     else if (route.name === 'browse') renderBrowse(route, token)
+    else if (route.name === 'downloads') renderDownloads(route, token)
     else if (route.name === 'play') renderPlay(route, token)
     else renderNotFound()
   }
@@ -368,6 +371,21 @@
 
   /* ── 通用片段 ── */
 
+  function navLinkHtml(view, href, label, current) {
+    var active = view === current
+    return (
+      '<a class="topbar-nav-link' +
+      (active ? ' is-active' : '') +
+      '" href="' +
+      href +
+      '"' +
+      (active ? ' aria-current="page"' : '') +
+      '>' +
+      label +
+      '</a>'
+    )
+  }
+
   function topbarHtml(options) {
     var back =
       options && options.back
@@ -375,23 +393,16 @@
           icon('back') +
           '</button>'
         : ''
-    // 导航只在推荐 / 找片看两个展示页出现：搜索 / 播放页左边已经有「返回」，
-    // 手机上再塞两个入口会把标题栏挤爆。
-    var nav =
-      options && options.nav
-        ? '<nav class="topbar-nav" aria-label="浏览">' +
-          '<a class="topbar-nav-link' +
-          (options.nav === 'home' ? ' is-active' : '') +
-          '" href="#/"' +
-          (options.nav === 'home' ? ' aria-current="page"' : '') +
-          '>推荐</a>' +
-          '<a class="topbar-nav-link' +
-          (options.nav === 'browse' ? ' is-active' : '') +
-          '" href="#/browse"' +
-          (options.nav === 'browse' ? ' aria-current="page"' : '') +
-          '>找片看</a>' +
-          '</nav>'
-        : ''
+    // 导航只在推荐 / 找片看 / 下载中心这三个展示页出现：搜索 / 播放页左边已经有「返回」，
+    // 手机上再塞几个入口会把标题栏挤爆。
+    var current = options && options.nav ? options.nav : ''
+    var nav = current
+      ? '<nav class="topbar-nav" aria-label="浏览">' +
+        navLinkHtml('home', '#/', '推荐', current) +
+        navLinkHtml('browse', '#/browse', '找片看', current) +
+        navLinkHtml('downloads', '#/downloads', '下载', current) +
+        '</nav>'
+      : ''
     return (
       '<header class="topbar"><div class="topbar-left">' +
       back +
@@ -1423,6 +1434,237 @@
     void load(1, false)
   }
 
+  /* ── 下载中心（本机缓存） ── */
+
+  /** 字节数：缓存包普遍是几百 MB，GB 以上再给两位小数 */
+  function formatSize(bytes) {
+    var value = Number(bytes) || 0
+    if (value <= 0) return '未知大小'
+    if (value >= 1024 * 1024 * 1024) return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
+    if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + ' MB'
+    return Math.max(1, Math.round(value / 1024)) + ' KB'
+  }
+
+  function cacheInitial(title) {
+    var text = String(title || '').trim()
+    return text ? text.slice(0, 1) : '缓'
+  }
+
+  /** 按 videoId 聚合成组：同一部视频的多集收成一张卡，单集直接平铺 */
+  function cacheGroups(items) {
+    var groups = []
+    var byVideo = {}
+    items.forEach(function (item) {
+      var key = String(item.videoId)
+      var group = byVideo[key]
+      if (!group) {
+        group = { videoId: item.videoId, title: item.title, items: [] }
+        byVideo[key] = group
+        groups.push(group)
+      }
+      group.items.push(item)
+    })
+    groups.forEach(function (group) {
+      // 线路 + 集号：同一部剧从多条线路缓存时也按线路归拢，播放页的缓存线路用同一顺序
+      group.items.sort(function (a, b) {
+        return (
+          (a.lineIndex || 0) - (b.lineIndex || 0) || (a.episodeIndex || 0) - (b.episodeIndex || 0)
+        )
+      })
+      group.size = group.items.reduce(function (sum, item) {
+        return sum + (Number(item.size) || 0)
+      }, 0)
+      group.latest = group.items.reduce(function (latest, item) {
+        return item.updatedAt > latest ? item.updatedAt : latest
+      }, '')
+      group.newest = group.items.reduce(function (newest, item) {
+        return item.updatedAt > newest.updatedAt ? item : newest
+      }, group.items[0])
+    })
+    return groups
+  }
+
+  function cacheEpisodeOf(item) {
+    var episode = String(item.episodeName || '').trim()
+    return episode && episode !== item.title ? episode : ''
+  }
+
+  function cacheMetaOf(item) {
+    return unique([item.sourceName, formatSize(item.size), formatDate(item.updatedAt)]).join(' · ')
+  }
+
+  function cachePlayHref(item) {
+    return '#/play/' + item.videoId + '?cache=' + encodeURIComponent(item.id)
+  }
+
+  function cacheRowHtml(item, grouped) {
+    var title = grouped ? item.episodeName || '正片' : item.title
+    var episode = grouped ? '' : cacheEpisodeOf(item)
+    return (
+      '<a class="cache-row" href="' +
+      cachePlayHref(item) +
+      '">' +
+      '<span class="cache-play" aria-hidden="true">' +
+      icon('play') +
+      '</span>' +
+      '<span class="cache-body"><span class="cache-title">' +
+      esc(title) +
+      (episode ? '<span class="cache-ep"> · ' + esc(episode) + '</span>' : '') +
+      '</span><span class="cache-meta">' +
+      esc(cacheMetaOf(item)) +
+      '</span></span>' +
+      '<span class="cache-go" aria-hidden="true">' +
+      icon('chevron') +
+      '</span></a>'
+    )
+  }
+
+  function cacheGroupCardHtml(group) {
+    return (
+      '<a class="cache-group" href="#/downloads?video=' +
+      group.videoId +
+      '">' +
+      '<span class="cache-cover" aria-hidden="true">' +
+      esc(cacheInitial(group.title)) +
+      '</span>' +
+      '<span class="cache-body"><span class="cache-group-title-row"><span class="cache-title">' +
+      esc(group.title) +
+      '</span><span class="cache-badge">共 ' +
+      formatCount(group.items.length) +
+      ' 集</span></span><span class="cache-meta">' +
+      esc(unique([formatSize(group.size), '最近更新 ' + formatDate(group.latest)]).join(' · ')) +
+      '</span><span class="cache-hint">最近缓存：' +
+      esc(group.newest.episodeName || '正片') +
+      '</span></span>' +
+      '<span class="cache-go" aria-hidden="true">' +
+      icon('chevron') +
+      '</span></a>'
+    )
+  }
+
+  function cacheEmptyHtml(title, desc, action) {
+    return stateBoxHtml({ icon: 'film', title: title, desc: desc, action: action })
+  }
+
+  function renderDownloads(route, token) {
+    document.title = '下载中心 · ' + APP_TITLE
+    var rawVideo = route.params.get('video')
+    var videoId = rawVideo === null ? 0 : Number(rawVideo)
+    var grouped = Number.isSafeInteger(videoId) && videoId > 0
+    app.innerHTML =
+      topbarHtml({ nav: 'downloads' }) +
+      '<main class="page page-downloads">' +
+      (grouped
+        ? '<a class="cache-back" href="#/downloads">' + icon('back') + ' 返回列表</a>'
+        : '<section class="downloads-hero"><p class="eyebrow">本机缓存</p><h1>下载中心</h1>' +
+          '<p class="hero-desc">已经缓存到这台电脑的剧集，点开就能直接播放，占用的是局域网带宽，不走外网。</p>' +
+          '<p class="downloads-meta" id="downloads-meta">正在读取缓存记录…</p></section>') +
+      '<div id="downloads-body"><div class="state-box"><span class="spinner"></span><p>正在读取缓存记录…</p></div></div>' +
+      '</main>'
+
+    var body = document.getElementById('downloads-body')
+    if (!body) return
+    var meta = document.getElementById('downloads-meta')
+
+    getJson('/api/downloads', grouped ? { video: videoId } : null)
+      .then(function (data) {
+        if (token !== renderSeq) return
+        var items = Array.isArray(data.items) ? data.items : []
+        if (grouped) {
+          renderCacheGroup(body, items)
+          return
+        }
+        if (items.length === 0) {
+          body.innerHTML = cacheEmptyHtml(
+            '还没有缓存任何视频',
+            '在桌面版播放页点「缓存本集」，缓存完成后这里就能直接播放。',
+            { id: 'downloads-home', label: '回到首页' }
+          )
+          var homeButton = document.getElementById('downloads-home')
+          if (homeButton) {
+            homeButton.addEventListener('click', function () {
+              navigate('/')
+            })
+          }
+          if (meta) meta.textContent = '共 0 部 · 0 集'
+          return
+        }
+        var groups = cacheGroups(items)
+        var totalBytes = groups.reduce(function (sum, group) {
+          return sum + group.size
+        }, 0)
+        body.innerHTML =
+          '<div class="cache-list">' +
+          groups
+            .map(function (group) {
+              return group.items.length >= 2
+                ? cacheGroupCardHtml(group)
+                : cacheRowHtml(group.items[0], false)
+            })
+            .join('') +
+          '</div>'
+        if (meta) {
+          meta.textContent =
+            '共 ' +
+            formatCount(groups.length) +
+            ' 部 · ' +
+            formatCount(items.length) +
+            ' 集 · ' +
+            formatSize(totalBytes)
+        }
+      })
+      .catch(function (error) {
+        if (token !== renderSeq) return
+        body.innerHTML = cacheEmptyHtml(
+          '读取下载中心失败',
+          errorText(error, '请确认桌面版的局域网影院仍在运行，然后重试。'),
+          { id: 'downloads-retry', label: '重新读取' }
+        )
+        var retry = document.getElementById('downloads-retry')
+        if (retry) {
+          retry.addEventListener('click', function () {
+            renderDownloads(route, ++renderSeq)
+          })
+        }
+        if (meta) meta.textContent = ''
+      })
+  }
+
+  function renderCacheGroup(body, items) {
+    if (items.length === 0) {
+      body.innerHTML = cacheEmptyHtml(
+        '这个视频的缓存已经不在了',
+        '它可能在电脑上被删除，或者下载记录被清理了。',
+        { id: 'downloads-back', label: '返回列表' }
+      )
+      var backButton = document.getElementById('downloads-back')
+      if (backButton) {
+        backButton.addEventListener('click', function () {
+          navigate('/downloads')
+        })
+      }
+      return
+    }
+    var group = cacheGroups(items)[0]
+    document.title = group.title + ' · 下载中心 · ' + APP_TITLE
+    body.innerHTML =
+      '<section class="cache-group-head"><h1>' +
+      esc(group.title) +
+      '</h1><p class="cache-meta">共 ' +
+      formatCount(group.items.length) +
+      ' 集 · ' +
+      formatSize(group.size) +
+      ' · 最近更新 ' +
+      esc(formatDate(group.latest)) +
+      '</p></section><div class="cache-list">' +
+      group.items
+        .map(function (item) {
+          return cacheRowHtml(item, true)
+        })
+        .join('') +
+      '</div>'
+  }
+
   /* ── 播放页 ── */
 
   function episodeLabel(name, index) {
@@ -1440,21 +1682,33 @@
       topbarHtml({ back: true }) +
       '<main class="page page-play"><div class="state-box" id="play-loading"><span class="spinner"></span><p>正在读取播放信息…</p></div></main>'
     bindBack()
-    getJson('/api/video/' + route.id)
+    // 详情和本机缓存分开取：视频已经从片库消失、但电脑上还留着缓存时，也能直接播缓存
+    var detail = getJson('/api/video/' + route.id)
       .then(function (data) {
-        if (token !== renderSeq) return
-        if (!data.video) throw new Error('NOT_FOUND')
-        renderPlayDetail(route, data.video)
+        return data.video || null
       })
-      .catch(function (error) {
-        if (token !== renderSeq) return
+      .catch(function () {
+        return null
+      })
+    var cached = getJson('/api/downloads', { video: route.id })
+      .then(function (data) {
+        return Array.isArray(data.items) ? data.items : []
+      })
+      .catch(function () {
+        return []
+      })
+    Promise.all([detail, cached]).then(function (results) {
+      if (token !== renderSeq) return
+      var video = results[0]
+      var items = results[1]
+      if (!video && items.length === 0) {
         app.innerHTML =
           topbarHtml({ back: true }) +
           '<main class="page page-play">' +
           stateBoxHtml({
             icon: 'film',
             title: '无法打开这个视频',
-            desc: errorText(error, '它可能已经被删除，或者片库正在清理缓存。'),
+            desc: '它可能已经被删除，或者片库正在清理缓存。',
             action: { id: 'play-back', label: '回到首页' }
           }) +
           '</main>'
@@ -1465,10 +1719,29 @@
             navigate('/')
           })
         }
-      })
+        return
+      }
+      if (!video) {
+        video = {
+          id: route.id,
+          name: (items[0] && items[0].title) || '本机缓存',
+          pic: '',
+          picCandidates: [],
+          note: '本机缓存',
+          intro: '',
+          vodActor: '',
+          vodClass: '',
+          year: '',
+          area: '',
+          sourceCount: 0,
+          sources: []
+        }
+      }
+      renderPlayDetail(route, video, items)
+    })
   }
 
-  function renderPlayDetail(route, video) {
+  function renderPlayDetail(route, video, cachedItems) {
     var lines = []
     ;(video.sources || []).forEach(function (source) {
       ;(source.lines || []).forEach(function (line, lineIndex) {
@@ -1485,6 +1758,37 @@
         })
       })
     })
+
+    // 本机缓存排在最前面：缓存过的集直接读电脑上的缓存包，比走外网稳
+    var cachedEpisodes = (cachedItems || [])
+      .slice()
+      .sort(function (a, b) {
+        return (
+          (a.lineIndex || 0) - (b.lineIndex || 0) || (a.episodeIndex || 0) - (b.episodeIndex || 0)
+        )
+      })
+      .filter(function (item) {
+        return (
+          item && typeof item.playUrl === 'string' && item.playUrl.indexOf('/api/cached/') === 0
+        )
+      })
+      .map(function (item) {
+        return {
+          name: item.episodeName || '正片',
+          url: item.playUrl,
+          local: true,
+          recordId: item.id
+        }
+      })
+    if (cachedEpisodes.length > 0) {
+      lines.unshift({
+        key: 'cache',
+        sourceName: '本机缓存',
+        flag: '本地缓存',
+        episodes: cachedEpisodes,
+        local: true
+      })
+    }
 
     if (lines.length === 0) {
       app.innerHTML =
@@ -1508,16 +1812,33 @@
     }
 
     var requestedKey = route.params.get('line') || ''
+    var requestedCache = route.params.get('cache') || ''
     var requestedEpRaw = route.params.get('ep')
     var requestedEp = requestedEpRaw === null ? 0 : Number(requestedEpRaw)
+    var cacheIndex = function (item) {
+      if (!requestedCache || !item || !item.episodes) return -1
+      for (var position = 0; position < item.episodes.length; position += 1) {
+        if (item.episodes[position].recordId === requestedCache) return position
+      }
+      return -1
+    }
     var line = lines.find(function (item) {
       return item.key === requestedKey
     })
+    if (!line && requestedCache) {
+      // 下载中心点进来：直接落到这条缓存集所属的线路
+      line = lines.find(function (item) {
+        return cacheIndex(item) >= 0
+      })
+    }
     if (!line) line = lines[0]
     var index =
       Number.isInteger(requestedEp) && requestedEp >= 0 && requestedEp < line.episodes.length
         ? requestedEp
         : 0
+    // 同一集可能来自不同线路，按记录 id 定位比按集号可靠
+    var cachedPosition = cacheIndex(line)
+    if (cachedPosition >= 0) index = cachedPosition
     var autoNext = readAutoNext()
     var poster = picOf(video)
     var intro = String(video.intro || '')
@@ -1603,6 +1924,7 @@
     var failureCount = 0
 
     var lineLabel = function (item) {
+      if (item.local) return '本机缓存'
       var base = item.flag || '默认线路'
       var count = lines.filter(function (other) {
         return (other.flag || '默认线路') === base
@@ -1636,7 +1958,9 @@
 
     var updateSubtitle = function () {
       var episode = line.episodes[index]
-      var extra = unique([video.note, episode && episode.name]).join(' · ')
+      var extra = unique([video.note, episode && episode.name, line.local ? '本机缓存' : '']).join(
+        ' · '
+      )
       if (playSub) playSub.textContent = extra || metaParts.join(' · ')
       document.title =
         video.name + (episode && episode.name ? ' · ' + episode.name : '') + ' · ' + APP_TITLE
@@ -1736,11 +2060,13 @@
       videoEl.removeAttribute('src')
       videoEl.load()
       updateSubtitle()
-      if (!isHls(episode.url)) {
+      var local = Boolean(episode.local) && episode.url.indexOf('/api/cached/') === 0
+      if (!local && !isHls(episode.url)) {
         showError('这条线路不是 m3u8，暂时无法播放。')
         return
       }
-      var src = '/api/play.m3u8?u=' + encodeURIComponent(episode.url)
+      // 本机缓存包直接按同源地址取，不用再走第三方代理
+      var src = local ? episode.url : '/api/play.m3u8?u=' + encodeURIComponent(episode.url)
       // 注意：Chromium 对 canPlayType('application/vnd.apple.mpegurl') 也返回 'maybe'，
       // 但实际播不了 HLS，所以先用 hls.js 的 MSE 能力判断，原生 HLS 只做兜底。
       loadHls().then(function (Hls) {
