@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, App, Button, InputNumber, QRCode, Select, Spin } from 'antd'
 import {
   AppstoreOutlined,
-  CloudDownloadOutlined,
   CopyOutlined,
   ExportOutlined,
   MobileOutlined,
@@ -353,15 +352,8 @@ function LanServicePanel({ title, desc }: { title: string; desc: string }): Reac
         <div className="lan-feature">
           <PlayCircleOutlined />
           <div>
-            <strong>列表直达播放</strong>
-            <span>点开就是播放页，只保留 m3u8 线路与选集</span>
-          </div>
-        </div>
-        <div className="lan-feature">
-          <CloudDownloadOutlined />
-          <div>
-            <strong>本机缓存直接播</strong>
-            <span>电脑上下载好的剧集在「下载」里点开即播，同片多集会分组</span>
+            <strong>点开即播</strong>
+            <span>列表点开就是播放页，只留 m3u8 线路与选集；电脑缓存好的剧集同片分组，直接播</span>
           </div>
         </div>
       </div>
