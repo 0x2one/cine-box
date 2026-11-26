@@ -203,6 +203,44 @@ button {
   -webkit-app-region: no-drag;
 }
 
+/* 标题栏的「强制刷新」：只重拉详情，不动窗口，所以做成小号胶囊而不是窗口按钮 */
+.player-refresh-btn {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.player-refresh-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.player-refresh-btn:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+/* macOS 没有右侧窗口按钮，给刷新按钮留出窗口边缘的呼吸位 */
+.player-titlebar.is-mac .player-titlebar-actions {
+  padding-right: 12px;
+}
+
 .player-win-btn {
   display: inline-flex;
   width: 46px;
@@ -1118,8 +1156,15 @@ button {
   line-height: 1.7;
 }
 
+/* 强制刷新失败 / 没刷到线路：暖色提示，和普通说明区分开 */
+.player-state-hint.is-warn {
+  color: #f0c078;
+}
+
 .player-state-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }
 
@@ -1159,6 +1204,15 @@ button {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+.player-btn:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+
+.player-btn:disabled:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .player-btn.is-ghost {
   border-color: var(--border-strong);
   background: transparent;
@@ -1168,6 +1222,11 @@ button {
 .player-btn.is-ghost:hover {
   border-color: var(--text-faint);
   color: var(--text);
+}
+
+.player-btn.is-ghost:disabled:hover {
+  border-color: var(--border-strong);
+  color: var(--text-muted);
 }
 
 @media (max-width: 1080px) {

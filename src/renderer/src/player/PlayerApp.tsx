@@ -13,6 +13,7 @@ import {
   groupBySource,
   lineName,
   readEpisodeOrder,
+  type PlayerEpisode,
   type PlayerLine
 } from './player-data'
 import { useArtPlayer } from './useArtPlayer'
@@ -83,6 +84,71 @@ function readPanelTab(): PlayerPanelTab {
   return localStorage.getItem(PANEL_TAB_KEY) === 'info' ? 'info' : 'episodes'
 }
 
+/**
+ * 强制刷新后尽量停在原来的位置：线路先按 key（来源 + 线路下标）找，
+ * 找不到就退回同一来源的第一条，最后才用第一条线路。
+ */
+function matchRefreshedLine(lines: PlayerLine[], previous: PlayerLine | null): PlayerLine {
+  if (!previous) return lines[0]
+  return (
+    lines.find((item) => item.key === previous.key) ??
+    lines.find((item) => item.sourceId === previous.sourceId) ??
+    lines[0]
+  )
+}
+
+/**
+ * 刷新后仍停在同一集：集名比下标稳（站点可能在前面插集），
+ * 集名对不上再按线路里的原始下标找，最后按旧位置夹到新列表里。
+ */
+function matchRefreshedEpisode(
+  line: PlayerLine,
+  previous: PlayerEpisode | null,
+  previousIndex: number
+): number {
+  if (line.episodes.length === 0) return 0
+  if (previous) {
+    if (previous.name) {
+      const byName = line.episodes.findIndex((item) => item.name === previous.name)
+      if (byName >= 0) return byName
+    }
+    const byIndex = line.episodes.findIndex((item) => item.index === previous.index)
+    if (byIndex >= 0) return byIndex
+  }
+  return Math.max(0, Math.min(previousIndex, line.episodes.length - 1))
+}
+
+/**
+ * 页面第一次拿到详情时的起播位置：优先播放载荷指定的来源 / 线路 / 集数，
+ * 没指定就按集数排序播第一格（倒序 = 最新一集，正序 = 第 1 集）。
+ * 强制刷新时如果之前没有可播数据（整页错误态），也走这一套，别从第 0 格乱起播。
+ */
+function initialSelection(
+  built: PlayerLine[],
+  video: VideoDetail,
+  payload: PlayerPayload
+): { line: PlayerLine; episodeIndex: number } {
+  const preferred =
+    built.find((item) => item.sourceId === payload.sourceId && item.index === payload.lineIndex) ??
+    built.find((item) => item.sourceId === payload.sourceId) ??
+    built[0]
+  // 集名风格跟着当前线路所属来源的分类走：综艺按「期」、电影是「国语 / 正片」这类版本名
+  const category = video.sources.find((item) => item.id === preferred.sourceId)?.categoryName ?? ''
+  const naming = analyzeNaming(
+    preferred.episodes.map((item) => item.name),
+    category
+  )
+  const fallbackIndex = firstEpisodeIndex(preferred.episodes, readEpisodeOrder(), naming)
+  const specified =
+    typeof payload.episodeIndex === 'number'
+      ? preferred.episodes.find((item) => item.index === payload.episodeIndex)
+      : undefined
+  return {
+    line: preferred,
+    episodeIndex: specified ? preferred.episodes.indexOf(specified) : fallbackIndex
+  }
+}
+
 interface PlayerSessionProps {
   payload: PlayerPayload
   /** 库里的视频 id（本机文件不走这里） */
@@ -135,6 +201,9 @@ function PlayerSession({
   const [cacheEntries, setCacheEntries] = useState<Map<string, CachedEpisodeEntry>>(new Map())
   const [cacheReady, setCacheReady] = useState(false)
   const [cacheBusy, setCacheBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  /** 强制刷新的结果 / 失败原因：详情加载失败的整页状态里没有播放器，不能用 notice */
+  const [refreshNote, setRefreshNote] = useState('')
   const [decision, setDecision] = useState<PlaybackDecision>({ key: '', mode: 'remote' })
   const [localUrl, setLocalUrl] = useState<{
     key: string
@@ -144,6 +213,10 @@ function PlayerSession({
   const [cacheBroken, setCacheBroken] = useState<Set<string>>(new Set())
   const stageRef = useRef<HTMLDivElement>(null)
   const decisionRef = useRef<PlaybackDecision>({ key: '', mode: 'remote' })
+  /** 详情请求令牌：强制刷新与初始读取并发时，后发起的那个说了算 */
+  const detailRequestRef = useRef(0)
+  /** 强制刷新进行中（state 是异步的，用 ref 挡住连点） */
+  const refreshingRef = useRef(false)
   /** 已经试过「本集下完就切本地」的记录 id：一条只试一次，失败也不反复折腾 */
   const promoteTriedRef = useRef<Set<string>>(new Set())
   const noticeRef = useRef<(text: string) => void>(() => {})
@@ -151,10 +224,11 @@ function PlayerSession({
 
   useEffect(() => {
     let alive = true
+    const requestId = ++detailRequestRef.current
     window.api.videos
       .detail(videoId)
       .then((result) => {
-        if (!alive) return
+        if (!alive || requestId !== detailRequestRef.current) return
         if (!result.ok || !result.video) {
           setPhase('error')
           setErrorText(result.error === 'CACHE_UNAVAILABLE' ? '视频缓存不可用' : '读取视频详情失败')
@@ -170,35 +244,13 @@ function PlayerSession({
           setErrorHint('播放页只接受 HLS（.m3u8）格式，mp4 / flv 线路不会出现在这里')
           return
         }
-        const preferred =
-          built.find(
-            (item) => item.sourceId === payload.sourceId && item.index === payload.lineIndex
-          ) ??
-          built.find((item) => item.sourceId === payload.sourceId) ??
-          built[0]
-        setLineKey(preferred.key)
-        // 没指定具体集数时按集数排序播第一格：倒序 = 最新一集，正序 = 第 1 集。
-        // 集名日期乱序的线路交给解析结果挑真正最晚的那集，别信列表顺序
-        const preferredCategory =
-          result.video.sources.find((item) => item.id === preferred.sourceId)?.categoryName ?? ''
-        const preferredNaming = analyzeNaming(
-          preferred.episodes.map((item) => item.name),
-          preferredCategory
-        )
-        const fallbackIndex = firstEpisodeIndex(
-          preferred.episodes,
-          readEpisodeOrder(),
-          preferredNaming
-        )
-        const specified =
-          typeof payload.episodeIndex === 'number'
-            ? preferred.episodes.find((item) => item.index === payload.episodeIndex)
-            : undefined
-        setEpisodeIndex(specified ? preferred.episodes.indexOf(specified) : fallbackIndex)
+        const selection = initialSelection(built, result.video, payload)
+        setLineKey(selection.line.key)
+        setEpisodeIndex(selection.episodeIndex)
         setPhase('ready')
       })
       .catch(() => {
-        if (!alive) return
+        if (!alive || requestId !== detailRequestRef.current) return
         setPhase('error')
         setErrorText('读取视频详情失败')
         setErrorHint('检查网络后重新加载')
@@ -487,6 +539,127 @@ function PlayerSession({
   }, [notice])
 
   /**
+   * 强制刷新：绕过详情缓存，重新向这个视频的所有来源站点要一次详情，
+   * 写回详情文件后用新数据重渲染。
+   * - 成功后尽量停在原来的线路 / 集数（线路按 key、集名匹配）。
+   * - 正在播在线流时用 switchSource 原地切到刷新后的地址，进度 / 倍速由 switchQuality 接上；
+   *   正在播本机缓存则不动，详情刷新不该打断本地文件。
+   * - 从整页错误状态点进来时没有播放器实例，换完数据重新进入 ready 就会自动起播。
+   */
+  const refreshDetails = useCallback(async (): Promise<void> => {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
+    setRefreshing(true)
+    setRefreshNote('')
+    // 和初始读取共用一个令牌：谁后发起听谁的，等待期间被 reload 顶掉就丢弃本次结果
+    const requestId = ++detailRequestRef.current
+    const previousLine = line
+    const previousEpisode = episode
+    const previousIndex = episodeIndex
+    const previousUrl = playUrl
+    const localPlayback = decision.mode === 'cache'
+    const wasReady = phase === 'ready'
+
+    const fail = (message: string): void => {
+      setRefreshNote(message)
+      if (wasReady) noticeRef.current(message)
+    }
+
+    try {
+      const result = await window.api.videos.refreshDetail(videoId, { force: true })
+      if (requestId !== detailRequestRef.current) return
+      if (!result.ok || !result.video) {
+        fail(
+          result.error === 'CACHE_UNAVAILABLE'
+            ? '视频缓存库不可用，无法强制刷新'
+            : result.error === 'NOT_FOUND'
+              ? '这部视频已不在缓存里，无法强制刷新'
+              : '强制刷新失败，请检查网络后重试'
+        )
+        return
+      }
+
+      const built = buildLines(result.video.sources)
+      const summary =
+        result.refreshed > 0
+          ? `已刷新 ${result.refreshed} 个来源的详情${result.failed > 0 ? `，${result.failed} 个失败` : ''}`
+          : result.failed > 0
+            ? `强制刷新失败：${result.failed} 个来源都没有取到最新详情`
+            : '没有可刷新的来源'
+
+      if (built.length === 0) {
+        // 原来还有可播线路：刷新出空数据时不要把正在播的画面抽掉
+        if (lines.length > 0) {
+          const message = '刷新完成，但没有找到可播放的 m3u8 线路，继续使用当前线路'
+          setRefreshNote(message)
+          noticeRef.current(message)
+          return
+        }
+        setDetail(result.video)
+        setPhase('error')
+        setErrorText('这个视频没有 m3u8 播放源')
+        setErrorHint('已经重新获取全部来源的详情，仍然没有 HLS（.m3u8）线路')
+        setRefreshNote('刷新完成，但所有来源里都没有可播放的 m3u8 线路')
+        return
+      }
+      const nextLine = previousLine ? matchRefreshedLine(built, previousLine) : null
+      let nextIndex: number
+      let resolvedLine: PlayerLine
+      if (previousLine && nextLine) {
+        resolvedLine = nextLine
+        nextIndex = matchRefreshedEpisode(nextLine, previousEpisode, previousIndex)
+      } else {
+        // 之前没有可播数据（整页错误态）：按播放载荷重新挑起播位置
+        const selection = initialSelection(built, result.video, payload)
+        resolvedLine = selection.line
+        nextIndex = selection.episodeIndex
+      }
+      const nextEpisode = resolvedLine.episodes[nextIndex]
+      // 只有在线流才切。本机缓存的地址不随详情变化，刷新时保持原样
+      if (
+        wasReady &&
+        !localPlayback &&
+        previousUrl &&
+        nextEpisode &&
+        nextEpisode.url !== previousUrl
+      ) {
+        const expectedKey = cacheKey(resolvedLine.sourceId, resolvedLine.index, nextEpisode.index)
+        void switchSource(nextEpisode.url, undefined, 20_000).then((ok) => {
+          // 等待切换的这几秒里用户可能已经换集 / 切线路，别再用旧线路的错误盖上来
+          if (!ok && decisionRef.current.key === expectedKey) {
+            setPlayError('刷新后的播放地址加载超时，请重试或换线路')
+          }
+        })
+      }
+
+      setDetail(result.video)
+      setLines(built)
+      setLineKey(resolvedLine.key)
+      setEpisodeIndex(nextIndex)
+      setPhase('ready')
+      setPlayError('')
+      if (wasReady) noticeRef.current(summary)
+    } catch {
+      if (requestId !== detailRequestRef.current) return
+      fail('强制刷新失败，请检查网络后重试')
+    } finally {
+      refreshingRef.current = false
+      setRefreshing(false)
+    }
+  }, [
+    videoId,
+    payload,
+    line,
+    episode,
+    episodeIndex,
+    playUrl,
+    decision.mode,
+    phase,
+    lines.length,
+    switchSource
+  ])
+
+  /**
    * 本集缓存刚下完：按当前进度把正在播的在线流原地切到本机缓存。
    * - 只认当前这一集，别的集下完不动；一条记录只试一次，失败也不反复折腾。
    * - 进度 / 播放状态 / 倍速由 switchQuality 接上，切不过去就退回在线流继续播。
@@ -537,6 +710,7 @@ function PlayerSession({
   const reload = useCallback(() => {
     setPhase('loading')
     setPlayError('')
+    setRefreshNote('')
     setReloadToken((value) => value + 1)
   }, [])
 
@@ -577,7 +751,13 @@ function PlayerSession({
 
   return (
     <div className="player-app">
-      <PlayerTitleBar title={title} episode={episodeName} countLabel={countLabel} />
+      <PlayerTitleBar
+        title={title}
+        episode={episodeName}
+        countLabel={countLabel}
+        onRefresh={() => void refreshDetails()}
+        refreshing={refreshing}
+      />
 
       <div className={`player-body${line && panelOpen ? ' has-panel' : ''}`}>
         <section className="player-stage">
@@ -603,10 +783,27 @@ function PlayerSession({
               <VideoCameraOutlined className="player-state-icon" />
               <p className="player-state-title">{errorText}</p>
               {errorHint && <p className="player-state-hint">{errorHint}</p>}
-              <button type="button" className="player-btn" onClick={reload}>
-                <ReloadOutlined />
-                重新加载
-              </button>
+              {refreshNote && <p className="player-state-hint is-warn">{refreshNote}</p>}
+              <div className="player-state-actions">
+                <button
+                  type="button"
+                  className="player-btn is-ghost"
+                  onClick={reload}
+                  disabled={refreshing}
+                >
+                  <ReloadOutlined />
+                  重新加载
+                </button>
+                <button
+                  type="button"
+                  className="player-btn"
+                  onClick={() => void refreshDetails()}
+                  disabled={refreshing}
+                >
+                  <ReloadOutlined spin={refreshing} />
+                  {refreshing ? '刷新中…' : '强制刷新'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -622,6 +819,7 @@ function PlayerSession({
           {phase === 'ready' && playError && (
             <div className="player-state is-overlay">
               <p className="player-state-title">{playError}</p>
+              <p className="player-state-hint">线路地址可能已经过期，可以强制刷新详情后重试</p>
               <div className="player-state-actions">
                 <button type="button" className="player-btn" onClick={retryPlayback}>
                   重试
@@ -635,6 +833,15 @@ function PlayerSession({
                     换线路
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="player-btn is-ghost"
+                  onClick={() => void refreshDetails()}
+                  disabled={refreshing}
+                >
+                  <ReloadOutlined spin={refreshing} />
+                  {refreshing ? '刷新中…' : '强制刷新'}
+                </button>
               </div>
             </div>
           )}

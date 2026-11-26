@@ -78,8 +78,9 @@ export interface ArtPlayerHandle {
    * 同一集内部换源（在线流 → 本机缓存）：按当前进度原地切过去，不重建实例。
    * 播放中 / 倍速 / 画面比例由 ArtPlayer 的 switchQuality 自己接上；
    * 切不过去就回落到 fallbackUrl（一样保住进度），返回 false。
+   * timeoutMs 默认 6s；在线流换源（强制刷新）可能更慢，调用方可以放宽。
    */
-  switchSource: (nextUrl: string, fallbackUrl?: string) => Promise<boolean>
+  switchSource: (nextUrl: string, fallbackUrl?: string, timeoutMs?: number) => Promise<boolean>
   /** 当前播放位置：切源前用来判断「是不是已经快播完了」 */
   position: () => { currentTime: number; duration: number } | null
 }
@@ -341,7 +342,7 @@ export function useArtPlayer({
    * 那个 effect 看到「已经应用过」就不会再走一遍从头开始的 switchUrl。
    */
   const switchSource = useCallback(
-    async (nextUrl: string, fallbackUrl?: string): Promise<boolean> => {
+    async (nextUrl: string, fallbackUrl?: string, timeoutMs = 6000): Promise<boolean> => {
       if (!nextUrl) return false
       const instance = artRef.current
       // 播放器还没建起来（或者已经销毁）：改状态就够了，创建时会直接用新地址
@@ -361,7 +362,7 @@ export function useArtPlayer({
             clearTimeout(timer)
             resolve(ok)
           }
-          const timer = setTimeout(() => finish(false), 6000)
+          const timer = setTimeout(() => finish(false), timeoutMs)
           instance.switchQuality(target).then(
             () => finish(true),
             () => finish(false)

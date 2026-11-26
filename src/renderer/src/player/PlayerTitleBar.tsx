@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { BorderOutlined, CloseOutlined, CompressOutlined, MinusOutlined } from '@ant-design/icons'
+import {
+  BorderOutlined,
+  CloseOutlined,
+  CompressOutlined,
+  MinusOutlined,
+  ReloadOutlined
+} from '@ant-design/icons'
 import logoUrl from '../assets/logo.svg'
 
 const IS_MAC = window.electron?.process?.platform === 'darwin'
@@ -10,13 +16,26 @@ interface PlayerTitleBarProps {
   episode: string
   /** 集数文案：「共 392 集」「共 58 期」「单集」，空串表示还没读到 */
   countLabel: string
+  /**
+   * 强制刷新：重新从所有来源站点抓详情、刷新缓存后重渲染。
+   * 本机文件播放没有详情，不传就不显示这颗按钮。
+   */
+  onRefresh?: () => void
+  /** 刷新进行中：按钮转圈并禁用，避免重复触发 */
+  refreshing?: boolean
 }
 
 /**
- * 播放窗自绘标题栏：左上角是片名与当前集数，右侧只有窗口按钮。
+ * 播放窗自绘标题栏：左上角是片名与当前集数，右侧是详情刷新和窗口按钮。
  * 整条是拖拽区，所有按钮单独退出拖拽，否则点不到。
  */
-function PlayerTitleBar({ title, episode, countLabel }: PlayerTitleBarProps): React.JSX.Element {
+function PlayerTitleBar({
+  title,
+  episode,
+  countLabel,
+  onRefresh,
+  refreshing = false
+}: PlayerTitleBarProps): React.JSX.Element {
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {
@@ -47,6 +66,20 @@ function PlayerTitleBar({ title, episode, countLabel }: PlayerTitleBarProps): Re
       <div className="player-titlebar-drag" />
 
       <div className="player-titlebar-actions">
+        {onRefresh && (
+          <button
+            type="button"
+            className="player-refresh-btn"
+            onClick={onRefresh}
+            disabled={refreshing}
+            title="强制刷新详情：重新从所有来源获取详情并刷新缓存"
+            aria-label="强制刷新详情"
+          >
+            <ReloadOutlined spin={refreshing} />
+            <span>{refreshing ? '刷新中' : '强制刷新'}</span>
+          </button>
+        )}
+
         {!IS_MAC && (
           <>
             <button
