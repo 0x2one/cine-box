@@ -88,6 +88,12 @@
     }
   }
 
+  // 远程封面统一走本服务的 /api/image：桌面端开了代理时，网页端的封面也经代理去取
+  function imageUrl(raw) {
+    var url = safeUrl(raw)
+    return url ? '/api/image?u=' + encodeURIComponent(url) : ''
+  }
+
   function isHls(value) {
     var text = String(value || '').trim()
     if (!text) return false
@@ -571,7 +577,7 @@
   }
 
   function coverHtml(item, variant) {
-    var pic = picOf(item)
+    var pic = imageUrl(picOf(item))
     var image = pic
       ? '<img src="' +
         esc(pic) +
@@ -610,7 +616,7 @@
       var candidates = []
       var raw = [item.pic].concat(Array.isArray(item.picCandidates) ? item.picCandidates : [])
       raw.forEach(function (value) {
-        var url = safeUrl(value)
+        var url = imageUrl(value)
         if (url && candidates.indexOf(url) < 0) candidates.push(url)
       })
       var index = Math.max(0, candidates.indexOf(img.getAttribute('src') || ''))
@@ -1840,7 +1846,7 @@
     var cachedPosition = cacheIndex(line)
     if (cachedPosition >= 0) index = cachedPosition
     var autoNext = readAutoNext()
-    var poster = picOf(video)
+    var poster = imageUrl(picOf(video))
     var intro = String(video.intro || '')
     var metaParts = unique([
       video.note,

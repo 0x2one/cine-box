@@ -23,7 +23,7 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data: http: https:",
+  "img-src 'self' data:",
   "media-src 'self' blob:",
   "connect-src 'self'",
   'worker-src blob:',
@@ -242,12 +242,14 @@ export function createLanService(options: CreateLanServiceOptions): LanService {
     try {
       if (mode === 'online') {
         const payload = await deps.searchOnline(keyword)
+        proxy.allowImages(payload)
         sendJson(req, res, 200, payload)
         return
       }
       const page = clampInt(url.searchParams.get('page'), 1, 1, 10_000)
       const pageSize = clampInt(url.searchParams.get('pageSize'), 20, 1, 50)
       const payload: LanSearchPayload = deps.searchLocal(keyword, page, pageSize)
+      proxy.allowImages(payload)
       sendJson(req, res, 200, payload)
     } catch {
       sendJson(req, res, 500, { ok: false, error: 'SEARCH_FAILED' })
@@ -288,7 +290,9 @@ export function createLanService(options: CreateLanServiceOptions): LanService {
       try {
         const page = clampInt(url.searchParams.get('page'), 1, 1, 10_000)
         const pageSize = clampInt(url.searchParams.get('pageSize'), 12, 1, 30)
-        sendJson(req, res, 200, deps.latest(page, pageSize))
+        const payload = deps.latest(page, pageSize)
+        proxy.allowImages(payload)
+        sendJson(req, res, 200, payload)
       } catch {
         sendJson(req, res, 500, { ok: false, error: 'LATEST_FAILED' })
       }
@@ -312,7 +316,9 @@ export function createLanService(options: CreateLanServiceOptions): LanService {
       const page = clampInt(url.searchParams.get('page'), 1, 1, 10_000)
       const pageSize = clampInt(url.searchParams.get('pageSize'), 30, 1, 50)
       try {
-        sendJson(req, res, 200, deps.browse({ categoryId, page, pageSize }))
+        const payload = deps.browse({ categoryId, page, pageSize })
+        proxy.allowImages(payload)
+        sendJson(req, res, 200, payload)
       } catch {
         sendJson(req, res, 500, { ok: false, error: 'BROWSE_FAILED' })
       }
@@ -320,6 +326,26 @@ export function createLanService(options: CreateLanServiceOptions): LanService {
     }
     if (pathname === '/api/search') {
       await handleSearch(req, res, url)
+      return
+    }
+    if (pathname === '/api/image') {
+      const raw = url.searchParams.get('u')
+      if (!raw) {
+        sendJson(req, res, 400, { ok: false, error: 'INVALID_INPUT' })
+        return
+      }
+      let target: URL
+      try {
+        target = new URL(raw)
+      } catch {
+        sendJson(req, res, 400, { ok: false, error: 'INVALID_URL' })
+        return
+      }
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+        sendJson(req, res, 400, { ok: false, error: 'INVALID_URL' })
+        return
+      }
+      await proxy.handleImage(req, res, target)
       return
     }
     if (pathname === '/api/downloads') {

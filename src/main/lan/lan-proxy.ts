@@ -1,12 +1,16 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { isIP } from 'node:net'
 import { isHttpUrl } from './lan-media-url'
 import type { LanFetch, LanVideoDetail } from './lan-types'
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const UPSTREAM_TIMEOUT = 20_000
+const IMAGE_TIMEOUT = 30_000
 const MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 const MAX_ALLOWED_ORIGINS = 400
+const MAX_IMAGE_ORIGINS = 1200
 
 /** 这些标签里的 URI 指向另一份播放列表；其余标签（KEY / MAP / PART…）都是分片或密钥 */
 const PLAYLIST_URI_TAGS = new Set([
@@ -29,8 +33,11 @@ const FORWARDED_HEADERS = [
 export interface MediaProxy {
   /** 播放页打开详情后登记这份视频的播放地址来源，之后才允许代理 */
   allowDetail: (video: LanVideoDetail) => void
+  /** 列表 / 检索 / 详情返回后登记封面来源，网页端的封面代理只放行这些域 */
+  allowImages: (payload: unknown) => void
   handlePlaylist: (req: IncomingMessage, res: ServerResponse, target: URL) => Promise<void>
   handleStream: (req: IncomingMessage, res: ServerResponse, target: URL) => Promise<void>
+  handleImage: (req: IncomingMessage, res: ServerResponse, target: URL) => Promise<void>
 }
 
 interface Upstream {
@@ -112,6 +119,88 @@ export function createMediaProxy(fetch: LanFetch): MediaProxy {
   const isAllowed = (target: URL): boolean =>
     isHttpUrl(target.href) && allowedOrigins.has(target.origin)
 
+  /* ── 封面代理 ──
+   * 网页端跑在别人的浏览器里，直连封面既不受桌面端代理控制，也常被防盗链拦住。
+   * 列表 / 检索 / 详情都返回封面地址，这里顺手登记来源域，网页端的 /api/image
+   * 只放行登记过的域，避免这个接口变成公网图片代理。 */
+  const imageOrigins = new Set<string>()
+
+  const rememberImageOrigin = (value: unknown): void => {
+    if (typeof value !== 'string' || !value.trim()) return
+    try {
+      const parsed = new URL(value)
+      if (!isHttpUrl(parsed.href)) return
+      if (imageOrigins.size >= MAX_IMAGE_ORIGINS) {
+        const first = imageOrigins.values().next().value
+        if (first) imageOrigins.delete(first)
+      }
+      imageOrigins.add(parsed.origin)
+    } catch {
+      // data: / 相对地址不用登记
+    }
+  }
+
+  const rememberImageValues = (value: unknown, depth: number): void => {
+    if (depth > 8 || value === null || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const item of value.slice(0, 500)) rememberImageValues(item, depth + 1)
+      return
+    }
+    const record = value as Record<string, unknown>
+    rememberImageOrigin(record.pic)
+    if (Array.isArray(record.picCandidates)) {
+      for (const item of record.picCandidates.slice(0, 50)) rememberImageOrigin(item)
+    }
+    for (const child of Object.values(record)) {
+      if (child && typeof child === 'object') rememberImageValues(child, depth + 1)
+    }
+  }
+
+  const allowImages: MediaProxy['allowImages'] = (payload) => {
+    rememberImageValues(payload, 0)
+  }
+
+  const isAllowedImage = (target: URL): boolean =>
+    isHttpUrl(target.href) && imageOrigins.has(target.origin)
+
+  const isPrivateIpv4 = (host: string): boolean => {
+    const parts = host.split('.').map((part) => Number(part))
+    if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return true
+    const [a, b] = parts
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
+    )
+  }
+
+  /** 本机 / 内网 / .local：不允许局域网页面借图片代理访问（SSRF 防护的最低限度） */
+  const isLocalOrPrivateHost = (hostname: string): boolean => {
+    const host = hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '')
+      .replace(/\.$/, '')
+    if (!host) return true
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
+      return true
+    }
+    const family = isIP(host)
+    if (family === 0) return false
+    if (family === 4) return isPrivateIpv4(host)
+    if (host === '::' || host === '::1') return true
+    if (/^f[cd][0-9a-f]{2}:/.test(host)) return true
+    if (/^fe[89ab][0-9a-f]:/.test(host)) return true
+    const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host)
+    if (mapped) return isPrivateIpv4(mapped[1])
+    return false
+  }
+
   const upstreamHeaders = (
     target: URL,
     options: { range?: string; accept?: string; noCache?: boolean }
@@ -176,10 +265,109 @@ export function createMediaProxy(fetch: LanFetch): MediaProxy {
   }
 
   const allowDetail: MediaProxy['allowDetail'] = (video) => {
+    allowImages(video)
     for (const source of video.sources) {
       for (const line of source.lines) {
         for (const episode of line.episodes) rememberOrigin(episode.url)
       }
+    }
+  }
+
+  /**
+   * 封面：由主进程取字节再下发，网页端的远程封面因此也走桌面端代理。
+   * 只放行列表 / 检索 / 详情里出现过的来源域，且目标不能是本机 / 内网地址。
+   */
+  const handleImage: MediaProxy['handleImage'] = async (req, res, target) => {
+    if (!isAllowedImage(target)) {
+      sendProxyError(res, 403, 'FORBIDDEN')
+      return
+    }
+    if (isLocalOrPrivateHost(target.hostname)) {
+      sendProxyError(res, 403, 'PRIVATE_HOST')
+      return
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), IMAGE_TIMEOUT)
+    try {
+      const response = await fetch(target.href, {
+        method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9'
+        },
+        redirect: 'follow',
+        signal: controller.signal
+      })
+      if (!response.ok) {
+        sendProxyError(res, 502, `UPSTREAM_HTTP_${response.status}`)
+        return
+      }
+      const declared = Number(response.headers.get('content-length') ?? 0)
+      if (declared > MAX_IMAGE_BYTES) {
+        sendProxyError(res, 413, 'IMAGE_TOO_LARGE')
+        return
+      }
+      const contentType = (response.headers.get('content-type') ?? '')
+        .split(';')[0]
+        .trim()
+        .toLowerCase()
+      const looksLikeImage =
+        contentType.startsWith('image/') ||
+        contentType === '' ||
+        contentType === 'application/octet-stream' ||
+        contentType === 'binary/octet-stream'
+      if (!looksLikeImage) {
+        sendProxyError(res, 415, 'NOT_IMAGE')
+        return
+      }
+      const headers: Record<string, string | number> = {
+        'Content-Type': contentType || 'application/octet-stream',
+        // 封面基本不变，放浏览器缓存一会儿，减少每次翻页都回源
+        'Cache-Control': 'public, max-age=600',
+        'Referrer-Policy': 'no-referrer'
+      }
+      // net.fetch 会自动解压：此时上游的 content-length 是压缩后的长度，不能原样转发
+      if (declared > 0 && !response.headers.get('content-encoding')) {
+        headers['Content-Length'] = declared
+      }
+      // 声明为图片时禁止嗅探；octet-stream 交给浏览器嗅探，否则 <img> 不认
+      if (contentType.startsWith('image/')) headers['X-Content-Type-Options'] = 'nosniff'
+      res.writeHead(200, headers)
+      res.on('close', () => controller.abort())
+      if (req.method === 'HEAD' || !response.body) {
+        res.end()
+        return
+      }
+      const reader = response.body.getReader()
+      let received = 0
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          received += value.byteLength
+          if (received > MAX_IMAGE_BYTES) {
+            res.destroy()
+            controller.abort()
+            return
+          }
+          if (!res.write(value)) await waitDrain(res)
+        }
+        res.end()
+      } catch {
+        res.destroy()
+      } finally {
+        try {
+          reader.releaseLock()
+        } catch {
+          // reader 已经 cancel
+        }
+      }
+    } catch {
+      if (!res.headersSent) sendProxyError(res, 502, 'UPSTREAM_FAILED')
+      else res.destroy()
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -292,5 +480,5 @@ export function createMediaProxy(fetch: LanFetch): MediaProxy {
     }
   }
 
-  return { allowDetail, handlePlaylist, handleStream }
+  return { allowDetail, allowImages, handlePlaylist, handleStream, handleImage }
 }
