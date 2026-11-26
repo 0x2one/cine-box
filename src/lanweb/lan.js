@@ -828,6 +828,8 @@
     var tops = []
     var selection = { topId: null, subId: null }
     var filterCat = ''
+    /** 这个分类的视频全部是 18+、而桌面端设置里隐藏了 18+：空状态要说清楚原因 */
+    var hiddenByAdult = false
     /** 切换分类时递增：旧请求的响应直接丢弃 */
     var generation = 0
     var page = 0
@@ -876,6 +878,19 @@
     }
 
     var showEmpty = function () {
+      if (hiddenByAdult) {
+        showState({
+          icon: 'film',
+          title: '这个分类的内容全部是 18+',
+          desc: '映盒剧场设置里关闭了 18+ 内容，所以这里不显示；在桌面端的「设置 › 内容分级」里打开「显示 18+ 内容」后就会出现在这里。',
+          actionId: 'browse-all',
+          actionLabel: '看看全部视频',
+          onAction: function () {
+            select({ topId: null, subId: null })
+          }
+        })
+        return
+      }
       if (filterCat) {
         showState({
           icon: 'film',
@@ -965,6 +980,7 @@
             return true
           })
           if (!append) grid.innerHTML = ''
+          if (!append) hiddenByAdult = data.hiddenByAdult === true
           if (fresh.length > 0) {
             appendHtml(grid, fresh.map(posterCardHtml).join(''), fresh)
           }
@@ -1000,6 +1016,7 @@
 
     var startFilter = function (cat) {
       filterCat = cat
+      hiddenByAdult = false
       generation += 1
       page = 0
       loading = false

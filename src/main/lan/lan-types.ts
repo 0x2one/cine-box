@@ -127,6 +127,8 @@ export interface LanBrowsePayload {
   pageSize: number
   /** 回显这次筛选的分类，空串表示「全部」 */
   categoryId: string
+  /** 这个分类的视频全部是 18+、而设置里隐藏了 18+：网页端据此显示被设置隐藏的说明 */
+  hiddenByAdult?: boolean
 }
 
 export interface LanPlayEpisode {

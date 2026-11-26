@@ -2029,7 +2029,8 @@ function lanBrowse(query: LanBrowseQuery): LanBrowsePayload {
     items: result.items.map(toLanCard),
     page: result.page,
     pageSize: result.pageSize,
-    categoryId: query.categoryId
+    categoryId: query.categoryId,
+    hiddenByAdult: result.hiddenByAdult === true
   }
 }
 

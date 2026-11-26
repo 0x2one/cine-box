@@ -97,6 +97,8 @@ function BrowseView({
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
   const [exhausted, setExhausted] = useState(false)
+  /** 当前分类的视频全部是 18+、而设置里隐藏了 18+：主进程直接返回空，空状态要说明原因 */
+  const [hiddenByAdult, setHiddenByAdult] = useState(false)
   const [compact, setCompact] = useState(false)
   const [showBackTop, setShowBackTop] = useState(false)
 
@@ -212,6 +214,8 @@ function BrowseView({
           return [...previous, ...result.items.filter((item) => !seen.has(item.id))]
         })
         setLoadedFilter(target.key)
+        // 18+ 全隐藏时主进程会带这个标记回来（只可能在第一页出现）
+        if (replace) setHiddenByAdult(result.hiddenByAdult === true)
         guard.current.page = page + 1
         const last = result.items.length < PAGE_SIZE
         guard.current.exhausted = last
@@ -246,6 +250,7 @@ function BrowseView({
       setLoading(true)
       setFailed(false)
       setExhausted(false)
+      setHiddenByAdult(false)
       void loadPage(1, target, true)
     },
     [loadPage]
@@ -459,6 +464,16 @@ function BrowseView({
             <p className="home-empty-title">视频库读取失败</p>
             <p className="home-empty-desc">视频缓存库可能正在初始化，稍后再试一次</p>
             <Button onClick={retry}>重新加载</Button>
+          </div>
+        ) : items.length === 0 && hiddenByAdult ? (
+          // 不是没采到，是被 18+ 设置挡住了：主进程会在结果上带 hiddenByAdult
+          <div className="home-empty-state">
+            <p className="home-empty-title">这个分类的内容全部是 18+</p>
+            <p className="home-empty-desc">
+              {
+                '设置里关闭了 18+ 内容，所以这里不显示；去「设置 › 内容分级」打开「显示 18+ 内容」后就会出现在这里'
+              }
+            </p>
           </div>
         ) : items.length === 0 ? (
           <div className="home-empty-state">

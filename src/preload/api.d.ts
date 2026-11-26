@@ -895,6 +895,11 @@ interface VideoListResult {
   page: number
   pageSize: number
   error?: string
+  /**
+   * 这次筛选的视频全部是 18+、而设置里隐藏了 18+：主进程没有查库，直接返回空。
+   * 展示端据此显示「内容被 18+ 设置隐藏」。
+   */
+  hiddenByAdult?: boolean
 }
 
 /** 只问数量时的结果（不取行） */

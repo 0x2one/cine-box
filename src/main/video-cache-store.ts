@@ -238,6 +238,9 @@ CREATE TABLE IF NOT EXISTS videos (
   latest_time TEXT NOT NULL DEFAULT '',
   primary_source_id INTEGER,
   source_count INTEGER NOT NULL DEFAULT 0,
+  -- 18+ 判定结果（人工标记 / 任一来源站点 / 任一来源绑定的本地分类命中），由写入路径与
+  -- setAdultFilters() 维护；展示端的 18+ 过滤因此只是一次列判断，不再是每行两条 EXISTS
+  adult INTEGER NOT NULL DEFAULT 0,
   pic TEXT NOT NULL DEFAULT '',
   note TEXT NOT NULL DEFAULT '',
   vod_actor TEXT NOT NULL DEFAULT '',
@@ -316,6 +319,12 @@ CREATE TABLE IF NOT EXISTS cache_sites (
   address TEXT NOT NULL DEFAULT '',
   format TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL
+);
+
+-- 缓存库自己的小配置：目前只存 18+ 定义的指纹，用来判断 videos.adult 是否已经对齐
+CREATE TABLE IF NOT EXISTS cache_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS collect_progress (
@@ -528,10 +537,62 @@ export function createVideoCacheStore(
   /** 18+ 站点与「18+ 本地分类绑定的在线分类」，由主进程在站点 / 分类 / 绑定变化后同步 */
   let adultSiteIds: string[] = []
   let adultCategoryFilters: { siteId: string; categoryId: string }[] = []
+  /** 上面两份列表的集合形态：每次写入视频 / 重建列都要按它们逐条判断 */
+  let adultSiteIdSet = new Set<string>()
+  let adultPairKeySet = new Set<string>()
+
+  /**
+   * `videos.adult` 是否已经与当前 18+ 定义对齐。false 时查询退回原来的 EXISTS 表达式：
+   * 结果一样，只是慢一点。首装 / 老库升级后由后台分批重建，重建完才切成列判断。
+   */
+  let adultReady = false
+
+  /** 后台重建列的任务状态：同一时间只跑一轮，跑的过程中定义又变了就重跑一遍 */
+  let adultRebuildRunning = false
+  let adultRebuildRestart = false
+  /** 正在跑（或刚要跑）的那一轮按哪份定义算；定义没变时重复调用不会再排一轮 */
+  let adultRebuildFingerprint = ''
+
+  /** 重建列的固定配置 */
+  const ADULT_BATCH = 5000
+  const ADULT_FINGERPRINT_KEY = 'adult_fingerprint'
+
+  /** 18+ 过滤条件的去重键（站点 + 在线分类） */
+  function adultPairKey(siteId: string, categoryId: string): string {
+    return `${siteId}\u0000${categoryId}`
+  }
+
+  /**
+   * 把一批 (站点, 在线分类) 过滤条件按站点合并成 `site_id = ? AND category_id IN (...)`。
+   * 福利这类大类有 149 条绑定但只落在 4 个站点，展开成 149 个 OR 时每行要比 149 次，
+   * 合并后只比 4 组 `IN`，结果完全等价。`prefix` 是查询里的表别名（带 `.`）。
+   */
+  function pairClause(
+    prefix: string,
+    pairs: { siteId: string; categoryId: string }[]
+  ): { sql: string; params: string[] } {
+    const bySite = new Map<string, string[]>()
+    for (const pair of pairs) {
+      const list = bySite.get(pair.siteId)
+      if (list) list.push(pair.categoryId)
+      else bySite.set(pair.siteId, [pair.categoryId])
+    }
+    const terms: string[] = []
+    const params: string[] = []
+    for (const [siteId, categoryIds] of bySite) {
+      terms.push(
+        `(${prefix}site_id = ? AND ${prefix}category_id IN (${categoryIds
+          .map(() => '?')
+          .join(', ')}))`
+      )
+      params.push(siteId, ...categoryIds)
+    }
+    return { sql: terms.join(' OR '), params }
+  }
 
   /**
    * 「这个视频算不算 18+」：人工标记，或有任一来源落在 18+ 站点 / 18+ 分类的绑定里。
-   * `alias` 是 videos 表在调用查询里的别名。
+   * `alias` 是 videos 表在调用查询里的别名。只在列没对齐（`adultReady` 为假）时走这条。
    */
   function adultVideoExpr(alias: string): { sql: string; params: string[] } {
     const parts: string[] = []
@@ -544,11 +605,11 @@ export function createVideoCacheStore(
       params.push(...adultSiteIds)
     }
     if (adultCategoryFilters.length > 0) {
-      const clauses = adultCategoryFilters.map(() => '(adc.site_id = ? AND adc.category_id = ?)')
+      const pairs = pairClause('adc.', adultCategoryFilters)
       parts.push(
-        `EXISTS (SELECT 1 FROM video_sources adc WHERE adc.video_id = ${alias}.id AND (${clauses.join(' OR ')}))`
+        `EXISTS (SELECT 1 FROM video_sources adc WHERE adc.video_id = ${alias}.id AND (${pairs.sql}))`
       )
-      for (const filter of adultCategoryFilters) params.push(filter.siteId, filter.categoryId)
+      params.push(...pairs.params)
     }
     // 人工标记：video_edits 是主键表，这条 EXISTS 只是一次主键探测
     parts.push(
@@ -565,8 +626,157 @@ export function createVideoCacheStore(
     includeAdult?: boolean
   ): { sql: string; params: string[] } | null {
     if (!adultHidden || includeAdult) return null
+    // 列对齐后只是一次整数比较；没对齐时退回两条 EXIST（结果一致，慢但只发生在重建期间）
+    if (adultReady) return { sql: `${alias}.adult = 0`, params: [] }
     const adult = adultVideoExpr(alias)
     return { sql: `NOT ${adult.sql}`, params: adult.params }
+  }
+
+  /**
+   * 这次筛选出来的视频是不是**必然**全是 18+：每个 (站点, 分类) 条件本身都已命中 18+。
+   * 是的话隐藏 18+ 时结果一定为空，不用查库——「福利」这种整个分类都来自 18+ 站点的
+   * 情况，不短路就要把 50 多万条视频整表扫完才能确定没有结果（实测 1.2 秒）。
+   */
+  function filtersAllAdult(filters?: { siteId: string; categoryId: string }[]): boolean {
+    if (!filters || filters.length === 0) return false
+    if (adultSiteIdSet.size === 0 && adultPairKeySet.size === 0) return false
+    return filters.every(
+      (filter) =>
+        adultSiteIdSet.has(filter.siteId) ||
+        adultPairKeySet.has(adultPairKey(filter.siteId, filter.categoryId))
+    )
+  }
+
+  function readMeta(key: string): string {
+    const row = database().prepare('SELECT value FROM cache_meta WHERE key = ?').get(key) as
+      Record<string, unknown> | undefined
+    return text(row?.value)
+  }
+
+  function writeMeta(key: string, value: string): void {
+    database()
+      .prepare(
+        `INSERT INTO cache_meta (key, value) VALUES (?, ?)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+      )
+      .run(key, value)
+  }
+
+  /** 当前 18+ 定义的指纹：站点集合 + 在线分类集合，顺序无关 */
+  function adultFingerprint(): string {
+    return JSON.stringify([[...adultSiteIdSet].sort(), [...adultPairKeySet].sort()])
+  }
+
+  /** 展示端按最新时间倒序取「非 18+」视频用的部分索引：只收录 adult = 0 的行 */
+  function ensureAdultIndex(connection: DatabaseSync = database()): void {
+    connection.exec(
+      'CREATE INDEX IF NOT EXISTS idx_videos_visible_latest ON videos (latest_ts DESC, id DESC) WHERE adult = 0'
+    )
+  }
+
+  /**
+   * 单个视频的 18+ 判定（人工编辑变化时用）：优先看人工标记，否则查它有没有命中
+   * 18+ 站点 / 18+ 分类的来源。来源变化走 recomputeVideo，不经过这里。
+   */
+  function refreshVideoAdult(connection: DatabaseSync, videoId: number): void {
+    const edit = connection
+      .prepare('SELECT adult FROM video_edits WHERE video_id = ?')
+      .get(videoId) as Record<string, unknown> | undefined
+    let adult = num(edit?.adult) === 1
+    if (!adult) {
+      const terms: string[] = []
+      const params: string[] = []
+      if (adultSiteIds.length > 0) {
+        terms.push(`site_id IN (${adultSiteIds.map(() => '?').join(', ')})`)
+        params.push(...adultSiteIds)
+      }
+      if (adultCategoryFilters.length > 0) {
+        const pairs = pairClause('', adultCategoryFilters)
+        terms.push(`(${pairs.sql})`)
+        params.push(...pairs.params)
+      }
+      if (terms.length > 0) {
+        adult = Boolean(
+          connection
+            .prepare(
+              `SELECT 1 FROM video_sources WHERE video_id = ? AND (${terms.join(' OR ')}) LIMIT 1`
+            )
+            .get(videoId, ...params)
+        )
+      }
+    }
+    const value = adult ? 1 : 0
+    connection
+      .prepare('UPDATE videos SET adult = ? WHERE id = ? AND adult <> ?')
+      .run(value, videoId, value)
+  }
+
+  /** 重建一小段 id 区间的列值：只写真正变了的行 */
+  function rebuildAdultBatch(connection: DatabaseSync, from: number, to: number): void {
+    const adult = adultVideoExpr('videos')
+    const setAdult = `UPDATE videos SET adult = 1
+      WHERE id >= ? AND id < ? AND adult = 0 AND ${adult.sql}`
+    const clearAdult = `UPDATE videos SET adult = 0
+      WHERE id >= ? AND id < ? AND adult = 1 AND NOT ${adult.sql}`
+    inTransaction(connection, (tx) => {
+      tx.prepare(setAdult).run(from, to, ...adult.params)
+      tx.prepare(clearAdult).run(from, to, ...adult.params)
+    })
+  }
+
+  /**
+   * 按当前 18+ 定义重建 `videos.adult`。50 多万条视频要 5 秒左右，所以按 id 区间分批、
+   * 批间把主线程让出去：重建期间界面照常可用（查询退回 EXISTS 表达式），重建完才切列。
+   * 每批都重新读一次内存里的定义，跑到一半定义变了就从头再来。
+   */
+  async function runAdultRebuild(): Promise<void> {
+    adultRebuildRunning = true
+    try {
+      for (;;) {
+        adultRebuildRestart = false
+        const connection = db
+        if (!connection) return
+        adultRebuildFingerprint = adultFingerprint()
+        const maxId = num(
+          (connection.prepare('SELECT MAX(id) AS n FROM videos').get() as Record<string, unknown>)
+            ?.n
+        )
+        for (let from = 0; from <= maxId; from += ADULT_BATCH) {
+          if (adultRebuildRestart || db !== connection) break
+          rebuildAdultBatch(connection, from, from + ADULT_BATCH)
+          await new Promise<void>((resolve) => setImmediate(resolve))
+        }
+        if (db !== connection) return
+        if (!adultRebuildRestart) {
+          // 指纹最后落盘：中途退出 / 崩溃时下次启动会整轮重来，不会留下半套值
+          writeMeta(ADULT_FINGERPRINT_KEY, adultFingerprint())
+          ensureAdultIndex(connection)
+          adultReady = true
+          return
+        }
+      }
+    } catch (error) {
+      // 重建失败（磁盘 / 库损坏）不拖垮应用：继续用 EXISTS 兜底，下次启动再试
+      console.error('18+ 索引重建失败', error)
+    } finally {
+      adultRebuildRunning = false
+      if (adultRebuildRestart) {
+        adultRebuildRestart = false
+        scheduleAdultRebuild()
+      }
+    }
+  }
+
+  function scheduleAdultRebuild(): void {
+    adultReady = false
+    const fingerprint = adultFingerprint()
+    if (adultRebuildRunning) {
+      // 定义没变（启动时 refreshAdultVisibility 会连着调好几次）就不用打断这一轮
+      if (adultRebuildFingerprint !== fingerprint) adultRebuildRestart = true
+      return
+    }
+    adultRebuildFingerprint = fingerprint
+    void runAdultRebuild()
   }
 
   /**
@@ -591,6 +801,13 @@ export function createVideoCacheStore(
     const ids = [...new Set(videoIds.filter((id) => Number.isInteger(id) && id > 0))]
     if (ids.length === 0) return []
     const placeholders = ids.map(() => '?').join(', ')
+    // 列对齐后只是一次主键 + 整数判断，不再逐条跑两条 EXISTS
+    if (adultReady) {
+      const rows = database()
+        .prepare(`SELECT id FROM videos WHERE id IN (${placeholders}) AND adult = 1`)
+        .all(...ids) as Record<string, unknown>[]
+      return rows.map((row) => num(row.id))
+    }
     const adult = adultVideoExpr('v')
     const rows = database()
       .prepare(`SELECT v.id AS id FROM videos v WHERE v.id IN (${placeholders}) AND ${adult.sql}`)
@@ -723,6 +940,15 @@ FROM collect_progress`)
     if (!editColumns.has('adult')) {
       connection.exec('ALTER TABLE video_edits ADD COLUMN adult INTEGER NOT NULL DEFAULT 0')
     }
+    // 18+ 判定结果列：老库补上，值全为 0，随后由 setAdultFilters() 在后台按当前定义重建
+    const videoColumns = new Set(
+      (connection.prepare('PRAGMA table_info(videos)').all() as Record<string, unknown>[]).map(
+        (row) => text(row.name)
+      )
+    )
+    if (!videoColumns.has('adult')) {
+      connection.exec('ALTER TABLE videos ADD COLUMN adult INTEGER NOT NULL DEFAULT 0')
+    }
     connection.exec('PRAGMA user_version = 1')
   }
 
@@ -743,7 +969,7 @@ FROM collect_progress`)
     const sources = connection
       .prepare(
         `SELECT id, name, pic, note, note_changed_at, intro_excerpt, intro_truncated, source_ts,
-                source_time, vod_actor, vod_class
+                source_time, site_id, category_id, vod_actor, vod_class
          FROM video_sources
          WHERE video_id = ?
          ORDER BY source_ts DESC, id ASC`
@@ -781,6 +1007,26 @@ FROM collect_progress`)
     const searchText = makeSearchText(primaryName)
     const latestTs = Math.max(...sources.map((source) => num(source.source_ts)))
     const introSource = sources.find((source) => text(source.intro_excerpt)) ?? primary
+
+    const old = connection
+      .prepare(
+        `SELECT v.name, v.search_text, v.latest_ts, v.latest_time, v.primary_source_id,
+                v.source_count, v.pic, v.note, v.vod_actor, v.vod_class, v.intro_excerpt,
+                v.intro_truncated, v.adult, COALESCE(e.adult, 0) AS manual_adult
+         FROM videos v LEFT JOIN video_edits e ON e.video_id = v.id
+         WHERE v.id = ?`
+      )
+      .get(videoId) as Record<string, unknown> | undefined
+    if (!old) return
+
+    // 18+ 判定跟着这次写入的来源一起算：来源集合变了，视频的 18+ 归属也可能变
+    const adult =
+      num(old.manual_adult) === 1 ||
+      sources.some(
+        (source) =>
+          adultSiteIdSet.has(text(source.site_id)) ||
+          adultPairKeySet.has(adultPairKey(text(source.site_id), text(source.category_id)))
+      )
     const next = {
       name: primaryName,
       searchText,
@@ -793,17 +1039,9 @@ FROM collect_progress`)
       vodActor: text(pick('vod_actor')),
       vodClass: text(pick('vod_class')),
       introExcerpt: text(introSource.intro_excerpt),
-      introTruncated: num(introSource.intro_truncated) !== 0 ? 1 : 0
+      introTruncated: num(introSource.intro_truncated) !== 0 ? 1 : 0,
+      adult: adult ? 1 : 0
     }
-
-    const old = connection
-      .prepare(
-        `SELECT name, search_text, latest_ts, latest_time, primary_source_id, source_count,
-                pic, note, vod_actor, vod_class, intro_excerpt, intro_truncated
-         FROM videos WHERE id = ?`
-      )
-      .get(videoId) as Record<string, unknown> | undefined
-    if (!old) return
 
     const changed =
       text(old.name) !== next.name ||
@@ -817,7 +1055,8 @@ FROM collect_progress`)
       text(old.vod_actor) !== next.vodActor ||
       text(old.vod_class) !== next.vodClass ||
       text(old.intro_excerpt) !== next.introExcerpt ||
-      num(old.intro_truncated) !== next.introTruncated
+      num(old.intro_truncated) !== next.introTruncated ||
+      num(old.adult) !== next.adult
     if (!changed) return
 
     const columns: string[] = []
@@ -841,6 +1080,7 @@ FROM collect_progress`)
       'vod_class = ?',
       'intro_excerpt = ?',
       'intro_truncated = ?',
+      'adult = ?',
       'updated_at = ?'
     )
     values.push(
@@ -854,6 +1094,7 @@ FROM collect_progress`)
       next.vodClass,
       next.introExcerpt,
       next.introTruncated,
+      next.adult,
       now,
       videoId
     )
@@ -1415,11 +1656,21 @@ FROM collect_progress`)
         ? ` AND EXISTS (SELECT 1 FROM video_sources s2 WHERE s2.video_id = videos.id AND s2.site_id NOT IN (${markers}))`
         : ''
     // 关闭 18+ 时，展示侧的总数也要把 18+ 视频排除掉，否则「共 N 部」和列表对不上
-    const adult = hiddenAdultClause('videos', includeAdult)
-    const adultOnSources = adult
-      ? ` AND NOT EXISTS (SELECT 1 FROM videos av WHERE av.id = video_sources.video_id AND ${adultVideoExpr('av').sql})`
-      : ''
-    const adultParams = adult ? adult.params : []
+    const adultFilter = adultHidden && !includeAdult
+    const adultOnVideos = !adultFilter
+      ? ''
+      : adultReady
+        ? 'videos.adult = 0'
+        : `NOT ${adultVideoExpr('videos').sql}`
+    const adultParams = adultFilter && !adultReady ? adultVideoExpr('videos').params : []
+    // 数来源行时不能再逐行套一层 videos 的 EXISTS（福利这种 149 条绑定要 10 秒），
+    // 列对齐后用 adult = 1 的 id 集合做一次 NOT IN；没对齐时才退回老表达式
+    const adultOnSources = !adultFilter
+      ? ''
+      : adultReady
+        ? ' AND video_id NOT IN (SELECT id FROM videos WHERE adult = 1)'
+        : ` AND NOT EXISTS (SELECT 1 FROM videos av WHERE av.id = video_sources.video_id AND ${adultVideoExpr('av').sql})`
+    const adultSourceParams = adultFilter && !adultReady ? adultVideoExpr('av').params : []
     if (filters && filters.length > 0) {
       const hiddenSql =
         visibility === 'shown'
@@ -1427,14 +1678,13 @@ FROM collect_progress`)
           : visibility === 'hidden'
             ? 'AND video_id IN (SELECT video_id FROM video_edits WHERE hidden = 1)'
             : ''
-      const clauses = filters.map(() => '(site_id = ? AND category_id = ?)').join(' OR ')
-      const params: string[] = []
-      for (const filter of filters) params.push(filter.siteId, filter.categoryId)
+      const pairs = pairClause('', filters)
       const counted = connection
         .prepare(
-          `SELECT COUNT(DISTINCT video_id) AS n FROM video_sources WHERE (${clauses}) ${hiddenSql}${visibleOnSources}${adultOnSources}`
+          `SELECT COUNT(DISTINCT video_id) AS n FROM video_sources WHERE (${pairs.sql}) ${hiddenSql}${visibleOnSources}${adultOnSources}`
         )
-        .get(...params, ...hiddenSites, ...adultParams) as Record<string, unknown> | undefined
+        .get(...pairs.params, ...hiddenSites, ...adultSourceParams) as
+        Record<string, unknown> | undefined
       return num(counted?.n)
     }
     const hiddenSql =
@@ -1445,7 +1695,7 @@ FROM collect_progress`)
           : ''
     const counted = connection
       .prepare(
-        `SELECT COUNT(*) AS n FROM videos WHERE 1 = 1 ${hiddenSql}${visibleOnVideos}${adult ? ` AND ${adult.sql}` : ''}`
+        `SELECT COUNT(*) AS n FROM videos WHERE 1 = 1 ${hiddenSql}${visibleOnVideos}${adultOnVideos ? ` AND ${adultOnVideos}` : ''}`
       )
       .get(...hiddenSites, ...adultParams) as Record<string, unknown> | undefined
     return num(counted?.n)
@@ -1469,11 +1719,11 @@ FROM collect_progress`)
       params.push(match)
     }
     if (categoryFilters && categoryFilters.length > 0) {
-      const clauses = categoryFilters
-        .map(() => '(f.site_id = ? AND f.category_id = ?)')
-        .join(' OR ')
-      where.push(`EXISTS (SELECT 1 FROM video_sources f WHERE f.video_id = v.id AND (${clauses}))`)
-      for (const filter of categoryFilters) params.push(filter.siteId, filter.categoryId)
+      const pairs = pairClause('f.', categoryFilters)
+      where.push(
+        `EXISTS (SELECT 1 FROM video_sources f WHERE f.video_id = v.id AND (${pairs.sql}))`
+      )
+      params.push(...pairs.params)
     }
     // 禁用站点的视频不算数：只被它们收录的视频从这里开始就查不到
     const visible = query.includeDisabledSites ? null : visibleSourceClause('v')
@@ -1502,6 +1752,8 @@ FROM collect_progress`)
     query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites' | 'includeAdult'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ): number {
+    // 这类筛选的结果必然为空（整类都是 18+ 且当前隐藏 18+），连库都不用查
+    if (adultHidden && query.includeAdult !== true && filtersAllAdult(categoryFilters)) return 0
     const built = buildListWhere(query, categoryFilters)
     if (!built) return 0
     if (!built.keyword) {
@@ -1527,6 +1779,12 @@ FROM collect_progress`)
     const connection = database()
     const pageSize = Math.min(Math.max(Number(query.pageSize) || 10, 1), 100)
     const page = Math.max(Number(query.page) || 1, 1)
+    // 筛出来的视频全是 18+、而设置里隐藏 18+：结果必然为空。直接返回，
+    // 否则 ORDER BY latest_ts LIMIT 30 要扫完整张 videos 才能确认一条都没有
+    // （福利：51.8 万条 / 1.2 秒），前端还会误显示成「这个分类下还没有视频」。
+    if (adultHidden && query.includeAdult !== true && filtersAllAdult(categoryFilters)) {
+      return { ok: true, items: [], total: 0, page, pageSize, hiddenByAdult: true }
+    }
     const offset = (page - 1) * pageSize
     const built = buildListWhere(query, categoryFilters)
     if (!built) return { ok: true, items: [], total: 0, page, pageSize }
@@ -1695,10 +1953,13 @@ FROM collect_progress`)
     }
     const hidden = patch.hidden === undefined ? num(current?.hidden) !== 0 : Boolean(patch.hidden)
     const adult = patch.adult === undefined ? num(current?.adult) !== 0 : Boolean(patch.adult)
+    // 人工 18+ 标记变了才需要重算 videos.adult（其它字段不影响 18+ 归属）
+    const adultChanged = (num(current?.adult) !== 0) !== adult
 
     const empty = !note && !intro && !vodActor && !vodClass && !pic
     if (empty && !hidden && !adult) {
       connection.prepare('DELETE FROM video_edits WHERE video_id = ?').run(videoId)
+      if (adultChanged) refreshVideoAdult(connection, videoId)
       return { ok: true }
     }
     connection
@@ -1729,6 +1990,7 @@ FROM collect_progress`)
         adult ? 1 : 0,
         new Date().toISOString()
       )
+    if (adultChanged) refreshVideoAdult(connection, videoId)
     return { ok: true }
   }
 
@@ -2354,6 +2616,7 @@ FROM collect_progress`)
     close: () => {
       closeDatabase(file)
       db = null
+      adultReady = false
     },
     connection: database,
     rebuild: async () => {
@@ -2372,6 +2635,10 @@ FROM collect_progress`)
       const connection = openDatabase(file)
       initSchema(connection)
       db = connection
+      // 新库是空的：列天然和任何 18+ 定义对齐，把当前指纹落盘，省掉下次启动的一轮重建
+      writeMeta(ADULT_FINGERPRINT_KEY, adultFingerprint())
+      ensureAdultIndex(connection)
+      adultReady = true
     },
     ensureSite,
     listCacheSites,
@@ -2401,11 +2668,32 @@ FROM collect_progress`)
         const siteId = typeof item?.siteId === 'string' ? item.siteId : ''
         const categoryId = typeof item?.categoryId === 'string' ? item.categoryId : ''
         if (!siteId || !categoryId) continue
-        const key = `${siteId}\u0000${categoryId}`
+        const key = adultPairKey(siteId, categoryId)
         if (seen.has(key)) continue
         seen.add(key)
         adultCategoryFilters.push({ siteId, categoryId })
       }
+      adultSiteIdSet = new Set(adultSiteIds)
+      adultPairKeySet = seen
+      // 缓存库还没打开时只记下定义；等 init 之后的第一次 refreshAdultVisibility 再来对齐
+      if (!db) {
+        adultReady = false
+        return
+      }
+      // 重建正在跑：定义没变就让它跑完，变了就让它从头再来（不能在这时候信任库里的列，
+      // 它可能正被上一份定义改写）
+      if (adultRebuildRunning) {
+        if (adultRebuildFingerprint !== adultFingerprint()) adultRebuildRestart = true
+        return
+      }
+      // 定义没变、库里的列也已经对齐：直接用列查询，不用再扫一遍 50 万行
+      if (readMeta(ADULT_FINGERPRINT_KEY) === adultFingerprint()) {
+        adultReady = true
+        ensureAdultIndex(db)
+        return
+      }
+      // 首次升级 / 改过 18+ 站点或分类：后台分批重算，期间查询退回 EXISTS 表达式
+      scheduleAdultRebuild()
     },
     listAdultVideoIds,
     listManualAdultVideoIds,

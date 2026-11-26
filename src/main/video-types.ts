@@ -356,6 +356,11 @@ export interface VideoListResult {
   page: number
   pageSize: number
   error?: string
+  /**
+   * 这次筛选的视频**全部**是 18+，而当前设置隐藏 18+，所以主进程没查库就直接返回了空。
+   * 展示端据此显示「这些内容被 18+ 设置隐藏」，而不是「这个分类下还没有视频」。
+   */
+  hiddenByAdult?: boolean
 }
 
 /** 在线检索自检里的一条命中：只给界面看，不写缓存库 */
