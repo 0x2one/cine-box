@@ -353,7 +353,7 @@ function LanServicePanel({ title, desc }: { title: string; desc: string }): Reac
           <PlayCircleOutlined />
           <div>
             <strong>点开即播</strong>
-            <span>列表点开就是播放页，只留 m3u8 线路与选集；电脑缓存好的剧集同片分组，直接播</span>
+            <span>列表直达播放，只留 m3u8 与选集；本机缓存的剧集同片分组直接播</span>
           </div>
         </div>
       </div>
