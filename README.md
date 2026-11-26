@@ -161,6 +161,7 @@ Logo 源文件为 [`build/icon.svg`](build/icon.svg)，`src/renderer/src/assets/
 - [`AGENTS.md`](AGENTS.md)：工程约定（命令、目录、IPC、窗口与主题的坑、发版约束）。
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更记录，同时作为 Release 说明与客户端更新说明。
 - [`docs/采集接口参数说明.md`](docs/采集接口参数说明.md)：XML 采集接口的参数说明，解析与采集实现在 `src/main/video-collect-parser.ts`、`video-collector.ts`。
+- [`docs/迭代待办计划.md`](docs/迭代待办计划.md)：迭代方向、任务拆分、优先级、验收标准与决策记录。
 
 ## License
 
