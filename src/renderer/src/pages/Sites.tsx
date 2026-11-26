@@ -25,6 +25,7 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
   SearchOutlined,
   TagsOutlined
 } from '@ant-design/icons'
@@ -41,6 +42,8 @@ interface SiteFormValues {
   onlineSearch: boolean
   /** 禁用：还能编辑，但不再采集、不参与搜索、不显示只属于它的视频 */
   disabled: boolean
+  /** 18+：设置里关闭 18+ 内容时，这个站点的视频在展示端与共享页都不可见 */
+  adult: boolean
 }
 
 /** 竖排三点：antd 只有横排的 MoreOutlined，这里直接画一颗，别用旋转凑 */
@@ -177,7 +180,8 @@ function SitesPanel({
         format: editing.format,
         remark: editing.remark,
         onlineSearch: editing.onlineSearch,
-        disabled: editing.disabled
+        disabled: editing.disabled,
+        adult: editing.adult
       })
     } else {
       form.resetFields()
@@ -236,7 +240,8 @@ function SitesPanel({
         format: site.format,
         remark: site.remark,
         onlineSearch: site.onlineSearch,
-        disabled: !site.disabled
+        disabled: !site.disabled,
+        adult: site.adult
       })
       .then(async (result) => {
         if (!result.ok) {
@@ -245,6 +250,30 @@ function SitesPanel({
         }
         setSites(await window.api.sites.list())
         message.success(site.disabled ? '已启用站点' : '已禁用站点')
+      })
+      .catch(() => message.error('操作失败，请重试'))
+  }
+
+  /** 卡片菜单上的 18+ 标记：只改这一个字段，其余字段原样带回去（update 是整行覆盖） */
+  const toggleAdult = (site: Site): void => {
+    void window.api.sites
+      .update(site.id, {
+        name: site.name,
+        display: site.display,
+        address: site.address,
+        format: site.format,
+        remark: site.remark,
+        onlineSearch: site.onlineSearch,
+        disabled: site.disabled,
+        adult: !site.adult
+      })
+      .then(async (result) => {
+        if (!result.ok) {
+          message.error(SITE_ERRORS[result.error ?? ''] ?? '操作失败，请重试')
+          return
+        }
+        setSites(await window.api.sites.list())
+        message.success(site.adult ? '已取消 18+ 标记' : '已标记为 18+ 站点')
       })
       .catch(() => message.error('操作失败，请重试'))
   }
@@ -278,6 +307,7 @@ function SitesPanel({
     else if (key === 'test') openSearchTest(site)
     else if (key === 'categories') loadCategories(site)
     else if (key === 'bind') startBindingFromCard(site)
+    else if (key === 'adult') toggleAdult(site)
     else if (key === 'toggle') toggleDisabled(site)
     else if (key === 'remove') confirmRemove(site)
   }
@@ -497,6 +527,7 @@ function SitesPanel({
         format: testSite.format,
         remark: testSite.remark,
         disabled: testSite.disabled,
+        adult: testSite.adult,
         onlineSearch: true
       })
       if (!result.ok) {
@@ -564,6 +595,11 @@ function SitesPanel({
                     </span>
                   </Tooltip>
                   {site.disabled && <Tag className="site-card-disabled">已禁用</Tag>}
+                  {site.adult && (
+                    <Tooltip title="18+ 站点：设置里关闭「显示 18+ 内容」时，这个站点的视频在展示端和共享页都不可见">
+                      <Tag className="site-card-adult">18+</Tag>
+                    </Tooltip>
+                  )}
                   {site.onlineSearch && (
                     <Tooltip title="支持在线检索：搜索页可切到「在线」，采集里多出「检索」方式">
                       <span className="site-card-online" aria-label="支持在线检索">
@@ -584,6 +620,11 @@ function SitesPanel({
                         { key: 'test', icon: <SearchOutlined />, label: '测试在线检索' },
                         { key: 'categories', icon: <TagsOutlined />, label: '获取分类' },
                         { key: 'bind', icon: <LinkOutlined />, label: '绑定在线分类' },
+                        {
+                          key: 'adult',
+                          icon: <SafetyCertificateOutlined />,
+                          label: site.adult ? '取消 18+ 标记' : '标记为 18+ 站点'
+                        },
                         { type: 'divider' },
                         {
                           key: 'toggle',
@@ -639,7 +680,7 @@ function SitesPanel({
           form={form}
           layout="vertical"
           requiredMark={false}
-          initialValues={{ format: 'xml', onlineSearch: false, disabled: false }}
+          initialValues={{ format: 'xml', onlineSearch: false, disabled: false, adult: false }}
           className="site-form"
         >
           <Row gutter={12}>
@@ -701,6 +742,14 @@ function SitesPanel({
             extra="禁用后仍然可以编辑，但不再采集、不参与搜索（本地 / 在线），推荐页与列表页也不再显示只属于它的视频；缓存数据保留，重新启用即恢复。"
           >
             <Switch checkedChildren="已禁用" unCheckedChildren="正常" />
+          </Form.Item>
+          <Form.Item
+            name="adult"
+            label="18+ 站点"
+            valuePropName="checked"
+            extra="标记后，设置里关闭「显示 18+ 内容」时，这个站点的视频在推荐、找片看、搜索视频、播放页和局域网共享页里都不可见；控制台仍然能看到并管理。"
+          >
+            <Switch checkedChildren="18+" unCheckedChildren="普通" />
           </Form.Item>
           <Form.Item name="remark" label="备注">
             <Input.TextArea

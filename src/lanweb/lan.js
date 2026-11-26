@@ -44,6 +44,7 @@
     DETAIL_FAILED: '读取播放信息失败',
     DOWNLOADS_FAILED: '读取下载中心失败，请稍后重试',
     NOT_FOUND: '这个视频不在片库里',
+    ADULT_HIDDEN: '这个视频被标记为 18+，当前设置下不可见',
     INVALID_INPUT: '请输入关键词',
     FORBIDDEN: '播放地址没有被授权，请重新打开播放页',
     UPSTREAM_FAILED: '播放源暂时连不上，换一条线路试试',

@@ -8,6 +8,7 @@ import {
   Popconfirm,
   Space,
   Spin,
+  Switch,
   Tooltip,
   Tree,
   TreeSelect
@@ -21,7 +22,8 @@ import {
   EyeInvisibleOutlined,
   EyeOutlined,
   LinkOutlined,
-  PlusOutlined
+  PlusOutlined,
+  SafetyCertificateOutlined
 } from '@ant-design/icons'
 import BindingWorkspace from './BindingWorkspace'
 import {
@@ -36,6 +38,8 @@ import {
 interface CategoryFormValues {
   name: string
   parentId?: string
+  /** 18+ 分类：父分类标记后整棵子树都按 18+ 处理 */
+  adult?: boolean
 }
 
 type DropInfo = Parameters<NonNullable<TreeProps['onDrop']>>[0]
@@ -122,6 +126,9 @@ function CategoriesPanel({
   const [togglingId, setTogglingId] = useState<string | null>(null)
   /** 快速连续切换时只采纳最后一次结果，避免旧响应覆盖新状态 */
   const toggleToken = useRef(0)
+  /** 正在切换 18+ 标记的分类与请求令牌（和显示开关互不干扰） */
+  const [adultTogglingId, setAdultTogglingId] = useState<string | null>(null)
+  const adultToggleToken = useRef(0)
   const [form] = Form.useForm<CategoryFormValues>()
   /** 正在拖拽的节点及其子树，用于阻止把分类拖进自己的后代 */
   const dragging = useRef<{ id: string; subtree: Set<string> } | null>(null)
@@ -206,7 +213,8 @@ function CategoriesPanel({
   useEffect(() => {
     let alive = true
     void window.api.categories
-      .list()
+      // 控制台要看全部：18+ 分类也要列出来才能管理
+      .list({ includeAdult: true })
       .then((rows) => {
         if (alive) setCategories(rows)
       })
@@ -239,10 +247,14 @@ function CategoriesPanel({
   useEffect(() => {
     if (!formOpen) return
     if (editing) {
-      form.setFieldsValue({ name: editing.name, parentId: editing.parentId ?? undefined })
+      form.setFieldsValue({
+        name: editing.name,
+        parentId: editing.parentId ?? undefined,
+        adult: editing.adult
+      })
       return
     }
-    form.setFieldsValue({ name: '', parentId: draftParent ?? undefined })
+    form.setFieldsValue({ name: '', parentId: draftParent ?? undefined, adult: false })
   }, [formOpen, editing, draftParent, form])
 
   const tree = useMemo(() => buildCategoryTree(categories), [categories])
@@ -265,6 +277,25 @@ function CategoriesPanel({
   /** 展示端可见的分类：父分类隐藏时整棵子树一起隐藏 */
   const visibleIds = useMemo(() => visibleCategoryIds(categories), [categories])
   const hiddenCount = categories.length - visibleIds.size
+  /** 有效 18+ 分类：自身标记，或任一上级被标记（和主进程同一套口径） */
+  const adultIds = useMemo(() => {
+    const byId = new Map(categories.map((row) => [row.id, row]))
+    const result = new Set<string>()
+    for (const row of categories) {
+      const seen = new Set<string>()
+      let cursor: VideoCategory | undefined = row
+      while (cursor && !seen.has(cursor.id)) {
+        seen.add(cursor.id)
+        if (cursor.adult) {
+          result.add(row.id)
+          break
+        }
+        cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
+      }
+    }
+    return result
+  }, [categories])
+  const adultCount = categories.filter((row) => row.adult).length
   const bindingGroups = useMemo(() => groupBindings(bindingItems), [bindingItems])
 
   // 映射模式下只在数据属于当前站点时才展示，否则视为加载中
@@ -314,7 +345,11 @@ function CategoriesPanel({
     } catch {
       return
     }
-    const payload = { name: values.name, parentId: values.parentId ?? null }
+    const payload = {
+      name: values.name,
+      parentId: values.parentId ?? null,
+      adult: values.adult === true
+    }
     const current = editing
     setSaving(true)
     try {
@@ -367,6 +402,22 @@ function CategoriesPanel({
       )
     } finally {
       if (token === toggleToken.current) setTogglingId(null)
+    }
+  }
+
+  /** 切换 18+ 标记：父分类打开后整棵子树都按 18+ 处理，展示端立刻按新口径过滤 */
+  const toggleAdult = async (category: VideoCategory, adult: boolean): Promise<void> => {
+    const token = ++adultToggleToken.current
+    setAdultTogglingId(category.id)
+    try {
+      const result = await window.api.categories.setAdult(category.id, adult)
+      if (token === adultToggleToken.current) applyResult(result)
+    } catch (error) {
+      message.error(
+        error instanceof TypeError ? '切换失败，请重启应用后重试' : '切换 18+ 标记失败，请重试'
+      )
+    } finally {
+      if (token === adultToggleToken.current) setAdultTogglingId(null)
     }
   }
 
@@ -568,6 +619,14 @@ function CategoriesPanel({
     const ownVisible = category?.visible !== false
     // 有效隐藏：自身关闭，或任一上级关闭
     const hidden = !visibleIds.has(node.key)
+    const ownAdult = category?.adult === true
+    // 有效 18+：自身标记，或任一上级被标记
+    const inheritedAdult = !ownAdult && adultIds.has(node.key)
+    const adultTitle = ownAdult
+      ? '已标记为 18+，点击取消'
+      : inheritedAdult
+        ? '上级分类已标为 18+，当前分类也按 18+ 处理；点击可单独标记'
+        : '标记为 18+：设置里关闭「显示 18+ 内容」时不在展示端出现'
     const visibilityTitle = !ownVisible
       ? '已隐藏，点击显示'
       : hidden
@@ -585,6 +644,11 @@ function CategoriesPanel({
         }}
       >
         <span className="category-name">{node.title}</span>
+        {adultIds.has(node.key) && (
+          <Tooltip title={inheritedAdult ? '上级分类是 18+，整棵子树都按 18+ 处理' : '18+ 分类'}>
+            <span className="category-adult-badge">18+</span>
+          </Tooltip>
+        )}
         {bound > 0 && (
           <button
             type="button"
@@ -618,6 +682,21 @@ function CategoriesPanel({
                 if (category) void toggleVisible(category, !ownVisible)
               }}
               aria-label={ownVisible ? `隐藏「${node.title}」` : `显示「${node.title}」`}
+            />
+          </Tooltip>
+          <Tooltip title={adultTitle}>
+            <Button
+              type="text"
+              size="small"
+              className={`category-adult${ownAdult ? ' is-on' : ''}`}
+              icon={<SafetyCertificateOutlined />}
+              loading={adultTogglingId === node.key}
+              onClick={() => {
+                if (category) void toggleAdult(category, !ownAdult)
+              }}
+              aria-label={
+                ownAdult ? `取消「${node.title}」的 18+ 标记` : `把「${node.title}」标记为 18+`
+              }
             />
           </Tooltip>
           <Tooltip title={bound > 0 ? `已绑定 ${bound} 个在线分类` : '绑定在线分类'}>
@@ -690,6 +769,7 @@ function CategoriesPanel({
           <span className="sites-count">
             共 {categories.length} 个分类
             {hiddenCount > 0 ? ` · ${hiddenCount} 个已隐藏` : ''}
+            {adultCount > 0 ? ` · ${adultCount} 个 18+` : ''}
           </span>
         </p>
         <div className="settings-panel-actions">
@@ -724,6 +804,7 @@ function CategoriesPanel({
                 <p className="category-tip">
                   拖拽分类可调整层级与顺序，行内 +
                   可在该分类下新增子分类；行尾眼睛按钮控制是否在展示端显示，关闭父分类会连同子分类一起隐藏。
+                  盾牌按钮标记 18+，设置里关闭「显示 18+ 内容」时整棵子树都不在展示端出现。
                 </p>
               )}
               <div className="settings-card category-card">
@@ -814,6 +895,14 @@ function CategoriesPanel({
               placeholder="留空则创建一级分类"
               treeData={parentOptions}
             />
+          </Form.Item>
+          <Form.Item
+            name="adult"
+            label="18+ 分类"
+            valuePropName="checked"
+            extra="标记后，设置里关闭「显示 18+ 内容」时，这个分类（含子分类）的视频在推荐、找片看、搜索视频、播放页和局域网共享页里都不可见；控制台仍然能看到。"
+          >
+            <Switch checkedChildren="18+" unCheckedChildren="普通" />
           </Form.Item>
         </Form>
       </Modal>

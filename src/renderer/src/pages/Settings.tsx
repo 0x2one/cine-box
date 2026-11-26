@@ -42,10 +42,12 @@ import {
 import { ACCENTS } from '../theme/appearance'
 import { useTheme } from '../theme/theme-context'
 import type { ThemeMode } from '../theme/appearance'
+import { clearLastFeed } from '../lib/feed-cache'
 import { formatBytes } from '../utils/format'
 import { AboutPanel } from './About'
 
-type SettingsSection = 'preferences' | 'network' | 'shortcut' | 'download' | 'storage' | 'about'
+type SettingsSection =
+  'preferences' | 'content' | 'network' | 'shortcut' | 'download' | 'storage' | 'about'
 
 const NAV_ITEMS: {
   key: SettingsSection
@@ -53,6 +55,7 @@ const NAV_ITEMS: {
   icon: typeof SettingOutlined
 }[] = [
   { key: 'preferences', label: '偏好设置', icon: SettingOutlined },
+  { key: 'content', label: '内容分级', icon: SafetyCertificateOutlined },
   { key: 'network', label: '网络', icon: GlobalOutlined },
   { key: 'shortcut', label: '快捷键', icon: ThunderboltOutlined },
   { key: 'download', label: '下载', icon: CloudDownloadOutlined },
@@ -62,6 +65,7 @@ const NAV_ITEMS: {
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   preferences: { title: '偏好设置', desc: '启动、关闭、更新与外观' },
+  content: { title: '内容分级', desc: '18+ 内容是否在展示端出现' },
   network: { title: '网络', desc: '代理与网络连接' },
   shortcut: { title: '快捷键', desc: '在任何应用中唤起映盒剧场' },
   download: { title: '下载', desc: '保存位置与同时下载任务数' },
@@ -307,6 +311,82 @@ function PreferencesPanel(): React.JSX.Element {
           title="自动下载更新"
           description="检测到新版本后自动下载，安装前仍会征求你的确认"
         />
+      </SettingsCard>
+    </>
+  )
+}
+
+/* ── 内容分级 ── */
+
+/**
+ * 18+ 内容总开关：关掉之后，标记过的站点 / 分类 / 视频在推荐、找片看、搜索视频、
+ * 播放页和局域网共享页里全部不可见；控制台不受影响，仍然能看到并管理。
+ */
+function ContentPanel(): React.JSX.Element {
+  const { message } = App.useApp()
+  const [allowAdult, setAllowAdult] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    void window.api.settings
+      .get()
+      .then((settings) => {
+        if (!alive) return
+        setAllowAdult(settings.allowAdult)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const toggle = async (value: boolean): Promise<void> => {
+    setAllowAdult(value)
+    setSaving(true)
+    try {
+      const settings = await window.api.settings.setAllowAdult(value)
+      setAllowAdult(settings.allowAdult)
+      // 推荐页那一层渲染缓存也一起作废：回推荐页不能先闪一帧已经该隐藏的内容
+      clearLastFeed()
+      message.success(settings.allowAdult ? '已显示 18+ 内容' : '已隐藏全部 18+ 内容')
+    } catch {
+      message.error('保存失败，请重试')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <SettingsCard>
+        <SettingRow
+          title="显示 18+ 内容"
+          description="关闭后，标记为 18+ 的站点、分类与视频在推荐、找片看、搜索视频、播放页和局域网共享页里都不再出现。"
+        >
+          <Switch
+            checked={allowAdult}
+            loading={loading}
+            disabled={saving}
+            onChange={(value) => void toggle(value)}
+          />
+        </SettingRow>
+        <p className="settings-note">
+          打开后这些内容会照常出现在展示端，不额外提示。开关只影响展示端与共享页，控制台始终能看到全部视频，方便继续采集和整理。
+        </p>
+      </SettingsCard>
+
+      <SettingsCard>
+        <SettingRow
+          title="在哪里标记 18+"
+          description="控制台的「站点」「分类」「视频」各自有一个 18+ 开关；站点或分类标记之后，它们下面的视频都按 18+ 处理。"
+        >
+          <span className="settings-static">站点 · 分类 · 视频</span>
+        </SettingRow>
       </SettingsCard>
     </>
   )
@@ -1327,6 +1407,7 @@ function Settings({ onBack }: { onBack: () => void }): React.JSX.Element {
             <p className="settings-panel-desc">{meta.desc}</p>
           </div>
           {section === 'preferences' && <PreferencesPanel />}
+          {section === 'content' && <ContentPanel />}
           {section === 'network' && <NetworkPanel />}
           {section === 'shortcut' && <ShortcutPanel />}
           {section === 'download' && <DownloadPanel />}

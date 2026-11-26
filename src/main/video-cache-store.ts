@@ -152,13 +152,13 @@ export interface VideoCacheStore {
   ) => VideoListResult
   /** 只数总数、不取行（控制台概览的「隐藏了多少」）：条件与 `listVideos` 完全一致 */
   countVideos: (
-    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites'>,
+    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites' | 'includeAdult'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ) => number
   /** 按 id 批量取视频（首页海报 / 推荐条目用，可能不在分类前 100 条里） */
   listVideosByIds: (
     videoIds: number[],
-    options?: { includeDisabledSites?: boolean }
+    options?: { includeDisabledSites?: boolean; includeAdult?: boolean }
   ) => VideoListItem[]
   /**
    * 禁用的站点：它们收录的来源不再算「可见来源」，只被这些站点收录的视频
@@ -166,6 +166,20 @@ export interface VideoCacheStore {
    * 传 `includeDisabledSites: true` 仍能看到全部。
    */
   setDisabledSites: (siteIds: string[]) => void
+  /**
+   * 「关闭 18+」总开关：打开后（hidden = true）默认查询都不返回 18+ 视频，
+   * 只有显式传 `includeAdult: true` 的控制台查询例外。设置里改完立刻生效。
+   */
+  setAdultHidden: (hidden: boolean) => void
+  /**
+   * 18+ 站点与「18+ 本地分类绑定的在线分类」：视频只要有一个来源落在这里面
+   * 就按 18+ 处理。站点 / 分类 / 绑定变化后由主进程重新灌入。
+   */
+  setAdultFilters: (siteIds: string[], categories: { siteId: string; categoryId: string }[]) => void
+  /** 一批视频里哪些被判定为 18+（控制台角标与播放页拦截用） */
+  listAdultVideoIds: (videoIds: number[]) => number[]
+  /** 一批视频里哪些是人工标记的 18+（只看 video_edits.adult） */
+  listManualAdultVideoIds: (videoIds: number[]) => number[]
   /** 指定视频各来源的在线分类，列表页据此解析绑定后的本地分类 */
   listSourceCategories: (
     videoIds: number[]
@@ -366,6 +380,7 @@ CREATE TABLE IF NOT EXISTS video_edits (
   pic TEXT,
   pic_site_id TEXT NOT NULL DEFAULT '',
   hidden INTEGER NOT NULL DEFAULT 0,
+  adult INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
 `
@@ -465,7 +480,12 @@ const VIDEO_ITEM_FROM = `
   JOIN video_sources s ON s.id = v.primary_source_id
   LEFT JOIN video_edits e ON e.video_id = v.id`
 
-function rowToVideoItem(raw: Record<string, unknown>, candidates: string[] = []): VideoListItem {
+function rowToVideoItem(
+  raw: Record<string, unknown>,
+  candidates: string[] = [],
+  adult = false,
+  adultManual = false
+): VideoListItem {
   return {
     id: num(raw.id),
     name: text(raw.name),
@@ -484,6 +504,8 @@ function rowToVideoItem(raw: Record<string, unknown>, candidates: string[] = [])
     categoryId: text(raw.category_id),
     categoryName: text(raw.category_name),
     hidden: num(raw.hidden) !== 0,
+    adult,
+    adultManual,
     edited: num(raw.edited) !== 0
   }
 }
@@ -501,6 +523,52 @@ export function createVideoCacheStore(
   /** 禁用站点 id（由主进程在站点增删改 / 恢复备份后同步进来）；为空时查询不多加条件 */
   let disabledSiteIds: string[] = []
 
+  /** 「关闭 18+」总开关；false 时所有查询都不过滤 18+（控制台传 includeAdult 也不影响） */
+  let adultHidden = false
+  /** 18+ 站点与「18+ 本地分类绑定的在线分类」，由主进程在站点 / 分类 / 绑定变化后同步 */
+  let adultSiteIds: string[] = []
+  let adultCategoryFilters: { siteId: string; categoryId: string }[] = []
+
+  /**
+   * 「这个视频算不算 18+」：人工标记，或有任一来源落在 18+ 站点 / 18+ 分类的绑定里。
+   * `alias` 是 videos 表在调用查询里的别名。
+   */
+  function adultVideoExpr(alias: string): { sql: string; params: string[] } {
+    const parts: string[] = []
+    const params: string[] = []
+    if (adultSiteIds.length > 0) {
+      const placeholders = adultSiteIds.map(() => '?').join(', ')
+      parts.push(
+        `EXISTS (SELECT 1 FROM video_sources ads WHERE ads.video_id = ${alias}.id AND ads.site_id IN (${placeholders}))`
+      )
+      params.push(...adultSiteIds)
+    }
+    if (adultCategoryFilters.length > 0) {
+      const clauses = adultCategoryFilters.map(() => '(adc.site_id = ? AND adc.category_id = ?)')
+      parts.push(
+        `EXISTS (SELECT 1 FROM video_sources adc WHERE adc.video_id = ${alias}.id AND (${clauses.join(' OR ')}))`
+      )
+      for (const filter of adultCategoryFilters) params.push(filter.siteId, filter.categoryId)
+    }
+    // 人工标记：video_edits 是主键表，这条 EXISTS 只是一次主键探测
+    parts.push(
+      `EXISTS (SELECT 1 FROM video_edits ade WHERE ade.video_id = ${alias}.id AND ade.adult = 1)`
+    )
+    return { sql: `(${parts.join(' OR ')})`, params }
+  }
+
+  /**
+   * 展示侧要排除 18+ 视频时追加的条件；总开关打开或调用方明确要控制台口径时返回 null。
+   */
+  function hiddenAdultClause(
+    alias: string,
+    includeAdult?: boolean
+  ): { sql: string; params: string[] } | null {
+    if (!adultHidden || includeAdult) return null
+    const adult = adultVideoExpr(alias)
+    return { sql: `NOT ${adult.sql}`, params: adult.params }
+  }
+
   /**
    * 「这个视频至少还有一个启用站点的来源」——禁用站点的来源不算数。
    * 没有禁用站点时返回 null，调用方保持原查询（不多付一条 EXISTS）。
@@ -517,6 +585,31 @@ export function createVideoCacheStore(
   /** 缓存库行 -> 选图规则需要的最小结构 */
   const asPicSources = (rows: Record<string, unknown>[]): PicSource[] =>
     rows.map((row) => ({ siteId: text(row.site_id), pic: text(row.pic) }))
+
+  /** 一批视频里哪些是 18+：控制台角标、播放页拦截都走这一条 */
+  function listAdultVideoIds(videoIds: number[]): number[] {
+    const ids = [...new Set(videoIds.filter((id) => Number.isInteger(id) && id > 0))]
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(', ')
+    const adult = adultVideoExpr('v')
+    const rows = database()
+      .prepare(`SELECT v.id AS id FROM videos v WHERE v.id IN (${placeholders}) AND ${adult.sql}`)
+      .all(...ids, ...adult.params) as Record<string, unknown>[]
+    return rows.map((row) => num(row.id))
+  }
+
+  /** 一批视频里哪些是「人工标记」的 18+：编辑弹窗只回显这一份 */
+  function listManualAdultVideoIds(videoIds: number[]): number[] {
+    const ids = [...new Set(videoIds.filter((id) => Number.isInteger(id) && id > 0))]
+    if (ids.length === 0) return []
+    const placeholders = ids.map(() => '?').join(', ')
+    const rows = database()
+      .prepare(
+        `SELECT video_id AS id FROM video_edits WHERE adult = 1 AND video_id IN (${placeholders})`
+      )
+      .all(...ids) as Record<string, unknown>[]
+    return rows.map((row) => num(row.id))
+  }
 
   /**
    * 一次查询取齐一批视频的所有来源 pic，按默认站点优先排成候选列表。
@@ -620,6 +713,15 @@ FROM collect_progress`)
       connection.exec(
         "ALTER TABLE video_sources ADD COLUMN note_changed_at TEXT NOT NULL DEFAULT ''"
       )
+    }
+    // 人工 18+ 标记：老库没有这一列，补上（已有视频默认不是 18+）
+    const editColumns = new Set(
+      (connection.prepare('PRAGMA table_info(video_edits)').all() as Record<string, unknown>[]).map(
+        (row) => text(row.name)
+      )
+    )
+    if (!editColumns.has('adult')) {
+      connection.exec('ALTER TABLE video_edits ADD COLUMN adult INTEGER NOT NULL DEFAULT 0')
     }
     connection.exec('PRAGMA user_version = 1')
   }
@@ -1298,7 +1400,8 @@ FROM collect_progress`)
     connection: DatabaseSync,
     filters: { siteId: string; categoryId: string }[] | undefined,
     visibility: 'all' | 'shown' | 'hidden',
-    includeDisabledSites = false
+    includeDisabledSites = false,
+    includeAdult = false
   ): number {
     const hiddenSites = includeDisabledSites ? [] : disabledSiteIds
     // 两条分支查询的表不同：数 `video_sources` 时用 video_id，数 `videos` 时用 videos.id
@@ -1311,6 +1414,12 @@ FROM collect_progress`)
       hiddenSites.length > 0
         ? ` AND EXISTS (SELECT 1 FROM video_sources s2 WHERE s2.video_id = videos.id AND s2.site_id NOT IN (${markers}))`
         : ''
+    // 关闭 18+ 时，展示侧的总数也要把 18+ 视频排除掉，否则「共 N 部」和列表对不上
+    const adult = hiddenAdultClause('videos', includeAdult)
+    const adultOnSources = adult
+      ? ` AND NOT EXISTS (SELECT 1 FROM videos av WHERE av.id = video_sources.video_id AND ${adultVideoExpr('av').sql})`
+      : ''
+    const adultParams = adult ? adult.params : []
     if (filters && filters.length > 0) {
       const hiddenSql =
         visibility === 'shown'
@@ -1323,9 +1432,9 @@ FROM collect_progress`)
       for (const filter of filters) params.push(filter.siteId, filter.categoryId)
       const counted = connection
         .prepare(
-          `SELECT COUNT(DISTINCT video_id) AS n FROM video_sources WHERE (${clauses}) ${hiddenSql}${visibleOnSources}`
+          `SELECT COUNT(DISTINCT video_id) AS n FROM video_sources WHERE (${clauses}) ${hiddenSql}${visibleOnSources}${adultOnSources}`
         )
-        .get(...params, ...hiddenSites) as Record<string, unknown> | undefined
+        .get(...params, ...hiddenSites, ...adultParams) as Record<string, unknown> | undefined
       return num(counted?.n)
     }
     const hiddenSql =
@@ -1335,8 +1444,10 @@ FROM collect_progress`)
           ? 'AND id IN (SELECT video_id FROM video_edits WHERE hidden = 1)'
           : ''
     const counted = connection
-      .prepare(`SELECT COUNT(*) AS n FROM videos WHERE 1 = 1 ${hiddenSql}${visibleOnVideos}`)
-      .get(...hiddenSites) as Record<string, unknown> | undefined
+      .prepare(
+        `SELECT COUNT(*) AS n FROM videos WHERE 1 = 1 ${hiddenSql}${visibleOnVideos}${adult ? ` AND ${adult.sql}` : ''}`
+      )
+      .get(...hiddenSites, ...adultParams) as Record<string, unknown> | undefined
     return num(counted?.n)
   }
 
@@ -1345,7 +1456,7 @@ FROM collect_progress`)
    * 返回的 `keyword` 决定总数要不要走带 FTS 的完整条件。
    */
   function buildListWhere(
-    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites'>,
+    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites' | 'includeAdult'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ): { keyword: string; where: string[]; params: (string | number)[] } | null {
     const keyword = query.keyword?.trim() ?? ''
@@ -1370,6 +1481,12 @@ FROM collect_progress`)
       where.push(visible.sql)
       params.push(...visible.params)
     }
+    // 关闭 18+ 时，18+ 视频在展示端等于不存在；控制台传 includeAdult 才能看到
+    const adult = hiddenAdultClause('v', query.includeAdult)
+    if (adult) {
+      where.push(adult.sql)
+      params.push(...adult.params)
+    }
     const visibility = query.visibility ?? 'all'
     if (visibility === 'hidden') where.push('COALESCE(e.hidden, 0) = 1')
     if (visibility === 'shown') where.push('COALESCE(e.hidden, 0) = 0')
@@ -1382,7 +1499,7 @@ FROM collect_progress`)
    * 会为了找 1 条把整张 videos 表连着两个 JOIN 扫一遍（实测 140–175ms）。
    */
   function countMatching(
-    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites'>,
+    query: Pick<VideoListQuery, 'keyword' | 'visibility' | 'includeDisabledSites' | 'includeAdult'>,
     categoryFilters?: { siteId: string; categoryId: string }[]
   ): number {
     const built = buildListWhere(query, categoryFilters)
@@ -1392,7 +1509,8 @@ FROM collect_progress`)
         database(),
         categoryFilters,
         query.visibility ?? 'all',
-        query.includeDisabledSites
+        query.includeDisabledSites,
+        query.includeAdult
       )
     }
     const from = `${VIDEO_ITEM_FROM}${built.where.length ? ` WHERE ${built.where.join(' AND ')}` : ''}`
@@ -1443,7 +1561,8 @@ FROM collect_progress`)
           connection,
           categoryFilters,
           query.visibility ?? 'all',
-          query.includeDisabledSites
+          query.includeDisabledSites,
+          query.includeAdult
         )
       }
     } catch {
@@ -1451,9 +1570,18 @@ FROM collect_progress`)
       return { ok: false, items: [], total: 0, page, pageSize, error: 'DB' }
     }
 
-    const candidates = candidatesFor(rows.map((row) => num(row.id)))
+    const ids = rows.map((row) => num(row.id))
+    const candidates = candidatesFor(ids)
+    // 18+ 角标只在控制台口径下需要；展示端这些行本来就被过滤掉了
+    const adultIds = new Set(query.includeAdult ? listAdultVideoIds(ids) : [])
+    const manualAdultIds = new Set(query.includeAdult ? listManualAdultVideoIds(ids) : [])
     const items: VideoListItem[] = rows.map((row) =>
-      rowToVideoItem(row, candidates.get(num(row.id)) ?? [])
+      rowToVideoItem(
+        row,
+        candidates.get(num(row.id)) ?? [],
+        adultIds.has(num(row.id)),
+        manualAdultIds.has(num(row.id))
+      )
     )
     return { ok: true, items, total, page, pageSize }
   }
@@ -1464,22 +1592,36 @@ FROM collect_progress`)
    */
   function listVideosByIds(
     videoIds: number[],
-    options: { includeDisabledSites?: boolean } = {}
+    options: { includeDisabledSites?: boolean; includeAdult?: boolean } = {}
   ): VideoListItem[] {
     const ids = [...new Set(videoIds.filter((id) => Number.isInteger(id) && id > 0))]
     if (ids.length === 0) return []
     const placeholders = ids.map(() => '?').join(', ')
     const visible = options.includeDisabledSites ? null : visibleSourceClause('v')
+    const adult = hiddenAdultClause('v', options.includeAdult)
     try {
       const rows = database()
         .prepare(
           `${VIDEO_ITEM_SELECT} ${VIDEO_ITEM_FROM} WHERE v.id IN (${placeholders})${
             visible ? ` AND ${visible.sql}` : ''
-          }`
+          }${adult ? ` AND ${adult.sql}` : ''}`
         )
-        .all(...ids, ...(visible?.params ?? [])) as Record<string, unknown>[]
-      const candidates = candidatesFor(rows.map((row) => num(row.id)))
-      return rows.map((row) => rowToVideoItem(row, candidates.get(num(row.id)) ?? []))
+        .all(...ids, ...(visible?.params ?? []), ...(adult?.params ?? [])) as Record<
+        string,
+        unknown
+      >[]
+      const rowIds = rows.map((row) => num(row.id))
+      const candidates = candidatesFor(rowIds)
+      const adultIds = new Set(options.includeAdult ? listAdultVideoIds(rowIds) : [])
+      const manualAdultIds = new Set(options.includeAdult ? listManualAdultVideoIds(rowIds) : [])
+      return rows.map((row) =>
+        rowToVideoItem(
+          row,
+          candidates.get(num(row.id)) ?? [],
+          adultIds.has(num(row.id)),
+          manualAdultIds.has(num(row.id))
+        )
+      )
     } catch {
       return []
     }
@@ -1529,7 +1671,7 @@ FROM collect_progress`)
 
     const current = connection
       .prepare(
-        'SELECT note, intro, vod_actor, vod_class, pic, pic_site_id, hidden FROM video_edits WHERE video_id = ?'
+        'SELECT note, intro, vod_actor, vod_class, pic, pic_site_id, hidden, adult FROM video_edits WHERE video_id = ?'
       )
       .get(videoId) as Record<string, unknown> | undefined
 
@@ -1552,17 +1694,18 @@ FROM collect_progress`)
       picSiteId = pic ? picResult.siteId : ''
     }
     const hidden = patch.hidden === undefined ? num(current?.hidden) !== 0 : Boolean(patch.hidden)
+    const adult = patch.adult === undefined ? num(current?.adult) !== 0 : Boolean(patch.adult)
 
     const empty = !note && !intro && !vodActor && !vodClass && !pic
-    if (empty && !hidden) {
+    if (empty && !hidden && !adult) {
       connection.prepare('DELETE FROM video_edits WHERE video_id = ?').run(videoId)
       return { ok: true }
     }
     connection
       .prepare(
         `INSERT INTO video_edits
-           (video_id, note, intro, vod_actor, vod_class, pic, pic_site_id, hidden, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (video_id, note, intro, vod_actor, vod_class, pic, pic_site_id, hidden, adult, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (video_id) DO UPDATE SET
            note = excluded.note,
            intro = excluded.intro,
@@ -1571,6 +1714,7 @@ FROM collect_progress`)
            pic = excluded.pic,
            pic_site_id = excluded.pic_site_id,
            hidden = excluded.hidden,
+           adult = excluded.adult,
            updated_at = excluded.updated_at`
       )
       .run(
@@ -1582,6 +1726,7 @@ FROM collect_progress`)
         pic,
         picSiteId,
         hidden ? 1 : 0,
+        adult ? 1 : 0,
         new Date().toISOString()
       )
     return { ok: true }
@@ -2073,6 +2218,8 @@ FROM collect_progress`)
       sourceCount: num(video.source_count),
       sources,
       hidden: num(video.hidden) !== 0,
+      adult: listAdultVideoIds([num(video.id)]).length > 0,
+      adultManual: listManualAdultVideoIds([num(video.id)]).length > 0,
       edited: num(video.edited) !== 0,
       picSiteId: text(video.pic_site_id)
     }
@@ -2243,6 +2390,25 @@ FROM collect_progress`)
     setDisabledSites: (siteIds) => {
       disabledSiteIds = [...new Set(siteIds.filter((id) => typeof id === 'string' && id))]
     },
+    setAdultHidden: (hidden) => {
+      adultHidden = Boolean(hidden)
+    },
+    setAdultFilters: (siteIds, categories) => {
+      adultSiteIds = [...new Set(siteIds.filter((id) => typeof id === 'string' && id))]
+      const seen = new Set<string>()
+      adultCategoryFilters = []
+      for (const item of categories) {
+        const siteId = typeof item?.siteId === 'string' ? item.siteId : ''
+        const categoryId = typeof item?.categoryId === 'string' ? item.categoryId : ''
+        if (!siteId || !categoryId) continue
+        const key = `${siteId}\u0000${categoryId}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        adultCategoryFilters.push({ siteId, categoryId })
+      }
+    },
+    listAdultVideoIds,
+    listManualAdultVideoIds,
     listSourceCategories,
     updateVideo,
     stats,

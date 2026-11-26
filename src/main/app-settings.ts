@@ -77,6 +77,11 @@ export interface AppSettings {
   closeToTray: boolean
   /** 检测到新版本后自动下载 */
   autoDownload: boolean
+  /**
+   * 是否显示 18+ 内容：关闭时，标记为 18+ 的站点 / 分类 / 视频在推荐、找片看、
+   * 搜索、播放页与局域网共享页里一律不可见；控制台仍然能看到并管理。
+   */
+  allowAdult: boolean
   /** 全局快捷键，空字符串表示未启用 */
   showShortcut: string
   /** 启动映盒剧场时直接打开的页面 */
@@ -102,6 +107,7 @@ interface StoreFile {
   openAtLogin?: boolean
   closeToTray?: boolean
   autoDownload?: boolean
+  allowAdult?: boolean
   showShortcut?: string
   startView?: string
   windowSize?: string
@@ -117,6 +123,8 @@ const DEFAULTS: AppSettings = {
   openAtLogin: false,
   closeToTray: false,
   autoDownload: true,
+  // 默认关闭：标记为 18+ 的内容在展示端不可见，需要时在「设置 › 内容分级」里打开
+  allowAdult: false,
   showShortcut: DEFAULT_SHOW_SHORTCUT,
   startView: 'home',
   windowSize: DEFAULT_WINDOW_SIZE,
@@ -135,6 +143,8 @@ export interface AppSettingsStore {
   setOpenAtLogin: (value: boolean) => AppSettings
   setCloseToTray: (value: boolean) => AppSettings
   setAutoDownload: (value: boolean) => AppSettings
+  /** 是否显示 18+ 内容；保存后展示端立刻按新值隐藏 / 恢复 */
+  setAllowAdult: (value: boolean) => AppSettings
   setShowShortcut: (value: string | null) => AppSettings
   setStartView: (value: string | null) => AppSettings
   setWindowSize: (value: string | null) => AppSettings
@@ -188,6 +198,7 @@ export function createAppSettingsStore(): AppSettingsStore {
           typeof data?.closeToTray === 'boolean' ? data.closeToTray : DEFAULTS.closeToTray,
         autoDownload:
           typeof data?.autoDownload === 'boolean' ? data.autoDownload : DEFAULTS.autoDownload,
+        allowAdult: typeof data?.allowAdult === 'boolean' ? data.allowAdult : DEFAULTS.allowAdult,
         showShortcut:
           typeof data?.showShortcut === 'string' ? data.showShortcut : DEFAULTS.showShortcut,
         startView: data?.startView === 'search' ? 'search' : 'home',
@@ -220,6 +231,7 @@ export function createAppSettingsStore(): AppSettingsStore {
       openAtLogin: settings.openAtLogin,
       closeToTray: settings.closeToTray,
       autoDownload: settings.autoDownload,
+      allowAdult: settings.allowAdult,
       showShortcut: settings.showShortcut,
       startView: settings.startView,
       windowSize: settings.windowSize,
@@ -264,6 +276,11 @@ export function createAppSettingsStore(): AppSettingsStore {
     },
     setAutoDownload: (value: boolean) => {
       settings = { ...settings, autoDownload: Boolean(value) }
+      persist()
+      return snapshot()
+    },
+    setAllowAdult: (value: boolean) => {
+      settings = { ...settings, allowAdult: Boolean(value) }
       persist()
       return snapshot()
     },

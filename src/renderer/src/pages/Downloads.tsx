@@ -616,6 +616,8 @@ function Downloads({ onBack }: { onBack: () => void }): React.JSX.Element {
       if (result.error === 'FILE_MISSING') {
         message.warning('文件已被删除或移动，可以重新缓存')
         await loadRecords()
+      } else if (result.error === 'ADULT_HIDDEN') {
+        message.warning('这条缓存被标记为 18+，先在「设置 › 内容分级」里打开 18+ 内容再播放')
       } else if (result.error === 'SERVICE_FAILED') {
         message.error('启动本机播放服务失败，稍后再试')
       } else {

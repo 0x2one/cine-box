@@ -47,6 +47,9 @@ const api = {
       ipcRenderer.invoke('settings:setCloseToTray', value),
     setAutoDownload: (value: boolean): Promise<AppSettings> =>
       ipcRenderer.invoke('settings:setAutoDownload', value),
+    /** 是否显示 18+ 内容：关闭时展示端与共享页都看不到标记过的内容 */
+    setAllowAdult: (value: boolean): Promise<AppSettings> =>
+      ipcRenderer.invoke('settings:setAllowAdult', value),
     setShowShortcut: (value: string | null): Promise<SetShortcutResult> =>
       ipcRenderer.invoke('settings:setShowShortcut', value),
     resetShowShortcut: (): Promise<SetShortcutResult> =>
@@ -156,13 +159,18 @@ const api = {
     ): Promise<SiteCategoriesApplyResult> => ipcRenderer.invoke('sites:categories:apply', id, mode)
   },
   categories: {
-    list: (): Promise<VideoCategory[]> => ipcRenderer.invoke('categories:list'),
+    /** 控制台传 { includeAdult: true } 才能看到 18+ 分类（展示端默认看不到） */
+    list: (options?: { includeAdult?: boolean }): Promise<VideoCategory[]> =>
+      ipcRenderer.invoke('categories:list', options),
     create: (input: VideoCategoryInput): Promise<VideoCategoryResult> =>
       ipcRenderer.invoke('categories:create', input),
     update: (id: string, input: VideoCategoryInput): Promise<VideoCategoryResult> =>
       ipcRenderer.invoke('categories:update', id, input),
     setVisible: (id: string, visible: boolean): Promise<VideoCategoryResult> =>
       ipcRenderer.invoke('categories:setVisible', id, visible),
+    /** 切换 18+ 标记：父分类打开后整棵子树都按 18+ 处理 */
+    setAdult: (id: string, adult: boolean): Promise<VideoCategoryResult> =>
+      ipcRenderer.invoke('categories:setAdult', id, adult),
     move: (
       id: string,
       targetId: string | null,
@@ -223,7 +231,8 @@ const api = {
       ipcRenderer.invoke('home:sections:reorder', categoryId, videoIds),
     clearSectionItems: (categoryId: string): Promise<HomeActionResult> =>
       ipcRenderer.invoke('home:sections:clear', categoryId),
-    getSearch: (): Promise<HomeSearchResult> => ipcRenderer.invoke('home:search:get'),
+    getSearch: (options?: { view?: HomeFeedView }): Promise<HomeSearchResult> =>
+      ipcRenderer.invoke('home:search:get', options),
     saveSearch: (patch: HomeSearchPatch): Promise<HomeActionResult> =>
       ipcRenderer.invoke('home:search:save', patch),
     addSearchItem: (videoId: number): Promise<HomeActionResult> =>
@@ -248,11 +257,13 @@ const api = {
       ipcRenderer.invoke('videos:count', query),
     update: (videoId: number, patch: VideoUpdateInput): Promise<VideoUpdateResult> =>
       ipcRenderer.invoke('videos:update', videoId, patch),
-    detail: (videoId: number, options?: { autoFetch?: boolean }): Promise<VideoDetailResult> =>
-      ipcRenderer.invoke('videos:detail', videoId, options),
+    detail: (
+      videoId: number,
+      options?: { autoFetch?: boolean; includeAdult?: boolean }
+    ): Promise<VideoDetailResult> => ipcRenderer.invoke('videos:detail', videoId, options),
     refreshDetail: (
       videoId: number,
-      options?: { force?: boolean }
+      options?: { force?: boolean; includeAdult?: boolean }
     ): Promise<VideoDetailRefreshResult> =>
       ipcRenderer.invoke('videos:detail:refresh', videoId, options),
     stats: (): Promise<VideoStats> => ipcRenderer.invoke('videos:stats'),

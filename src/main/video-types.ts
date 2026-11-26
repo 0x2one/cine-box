@@ -303,6 +303,12 @@ export interface VideoListQuery {
    * 管理员仍然能看到并编辑这些视频。
    */
   includeDisabledSites?: boolean
+  /**
+   * 是否连同类 18+ 的视频一起返回。默认 false：设置里关闭 18+ 内容时，
+   * 标记为 18+ 的站点 / 分类 / 视频在展示端一律查不到；控制台传 true 才能看到并管理。
+   * 设置里打开 18+ 内容后，主进程会把「隐藏 18+」整个关掉，这个字段就不再起作用。
+   */
+  includeAdult?: boolean
 }
 
 export interface VideoListItem {
@@ -325,6 +331,10 @@ export interface VideoListItem {
   categoryName: string
   /** 展示端隐藏；默认 false（显示） */
   hidden: boolean
+  /** 被标记为 18+（人工标记 / 来源站点 / 绑定分类任一命中） */
+  adult: boolean
+  /** 人工标记了 18+（只看 video_edits.adult；控制台编辑弹窗用） */
+  adultManual: boolean
   /** 备注 / 简介 / 主演 / 类型 / 封面被手动改过 */
   edited: boolean
   /** 已在首页海报叠层里（控制台视频列表用，由 IPC 层补齐） */
@@ -434,6 +444,8 @@ export interface VideoUpdateInput {
   /** 封面来自哪个站点，仅用于界面回显 */
   picSiteId?: string
   hidden?: boolean
+  /** 人工标记 18+：设置里关闭 18+ 内容时展示端不再出现 */
+  adult?: boolean
 }
 
 export interface VideoUpdateResult {
@@ -520,6 +532,10 @@ export interface VideoDetail {
   sources: VideoDetailSource[]
   /** 展示端隐藏；默认 false */
   hidden: boolean
+  /** 被标记为 18+（人工标记 / 来源站点 / 绑定分类任一命中） */
+  adult: boolean
+  /** 人工标记了 18+（只看 video_edits.adult） */
+  adultManual: boolean
   /** 存在手动修改的字段 */
   edited: boolean
   /** 封面取自哪个站点（手动换图时记录），空串表示用主来源 */

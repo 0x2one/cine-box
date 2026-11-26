@@ -967,6 +967,17 @@
   line-height: 16px;
 }
 
+/* 18+ 站点 / 视频 / 分类的角标：统一用警示色，和「已禁用」那种灰底区分开 */
+.site-card-adult {
+  margin-inline-end: 0;
+  border-color: transparent;
+  background: color-mix(in srgb, #e5484d 14%, transparent);
+  color: #e5484d;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
 /* ── 站点弹窗：在线检索自检（发一次真实请求看支不支持） ── */
 
 .site-search-test-hint {
@@ -1474,6 +1485,25 @@
 /* 已隐藏的分类：开关图标弱化，和行内其它操作按钮一起悬停出现 */
 .category-actions .category-visible.is-off {
   color: var(--text-faint);
+}
+
+/* 18+ 分类：行内盾牌按钮标记，打开时点亮；继承自上级时只在标题后显示角标 */
+.category-actions .category-adult.is-on {
+  color: #e5484d;
+}
+
+.category-adult-badge {
+  display: inline-flex;
+  height: 17px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #e5484d 14%, transparent);
+  color: #e5484d;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 17px;
 }
 
 /* 有效隐藏（自身或上级关闭）：弱化名称与绑定徽标，但仍可正常操作 */

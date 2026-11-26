@@ -27,6 +27,11 @@ export interface Site {
    * 推荐页与列表页也不再显示只属于它的视频；它的缓存数据保留，重新启用即恢复。
    */
   disabled: boolean
+  /**
+   * 是否 18+ 站点：设置里关闭 18+ 内容时，这个站点的视频在推荐 / 找片看 / 搜索 /
+   * 播放页与局域网共享页里不可见（控制台仍能看到并管理）；打开设置后恢复。
+   */
+  adult: boolean
   /** 创建 / 更新时间，ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -41,6 +46,7 @@ export interface SiteInput {
   remark?: string
   onlineSearch?: boolean
   disabled?: boolean
+  adult?: boolean
 }
 
 export type SiteError = 'INVALID_NAME' | 'INVALID_ADDRESS' | 'INVALID_FORMAT' | 'NOT_FOUND'
@@ -139,6 +145,7 @@ CREATE TABLE IF NOT EXISTS sites (
   remark TEXT NOT NULL DEFAULT '',
   online_search INTEGER NOT NULL DEFAULT 0,
   disabled INTEGER NOT NULL DEFAULT 0,
+  adult INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -156,24 +163,24 @@ CREATE INDEX IF NOT EXISTS idx_site_categories_site ON site_categories (site_id)
 `
 
 const INSERT_SITE = `
-INSERT INTO sites (id, name, display, address, format, remark, online_search, disabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO sites (id, name, display, address, format, remark, online_search, disabled, adult, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const UPDATE_SITE = `
 UPDATE sites
-SET name = ?, display = ?, address = ?, format = ?, remark = ?, online_search = ?, disabled = ?, updated_at = ?
+SET name = ?, display = ?, address = ?, format = ?, remark = ?, online_search = ?, disabled = ?, adult = ?, updated_at = ?
 WHERE id = ?
 `
 
 const SELECT_ALL = `
-SELECT id, name, display, address, format, remark, online_search, disabled, created_at, updated_at
+SELECT id, name, display, address, format, remark, online_search, disabled, adult, created_at, updated_at
 FROM sites
 ORDER BY created_at DESC, rowid DESC
 `
 
 const SELECT_ONE = `
-SELECT id, name, display, address, format, remark, online_search, disabled, created_at, updated_at
+SELECT id, name, display, address, format, remark, online_search, disabled, adult, created_at, updated_at
 FROM sites
 WHERE id = ?
 `
@@ -239,6 +246,7 @@ function normalizeSite(value: unknown): Site | null {
     remark: typeof raw.remark === 'string' ? raw.remark : '',
     onlineSearch: raw.onlineSearch === true,
     disabled: raw.disabled === true,
+    adult: raw.adult === true,
     createdAt,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : createdAt
   }
@@ -257,6 +265,7 @@ function rowToSite(row: unknown): Site | null {
     remark: raw.remark,
     onlineSearch: Number(raw.online_search ?? 0) !== 0,
     disabled: Number(raw.disabled ?? 0) !== 0,
+    adult: Number(raw.adult ?? 0) !== 0,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at
   })
@@ -318,7 +327,8 @@ function validateSiteInput(
         .trim()
         .slice(0, MAX_REMARK),
       onlineSearch: Boolean(input?.onlineSearch),
-      disabled: Boolean(input?.disabled)
+      disabled: Boolean(input?.disabled),
+      adult: Boolean(input?.adult)
     }
   }
 }
@@ -326,7 +336,8 @@ function validateSiteInput(
 // 后加列：老库补上（新库建表时已经有了），保持迁移幂等
 const LATE_COLUMNS = [
   { name: 'online_search', ddl: 'online_search INTEGER NOT NULL DEFAULT 0' },
-  { name: 'disabled', ddl: 'disabled INTEGER NOT NULL DEFAULT 0' }
+  { name: 'disabled', ddl: 'disabled INTEGER NOT NULL DEFAULT 0' },
+  { name: 'adult', ddl: 'adult INTEGER NOT NULL DEFAULT 0' }
 ]
 
 function migrate(connection: DatabaseSync): void {
@@ -449,6 +460,7 @@ export function createSiteStore(file: string): SiteStore {
           site.remark,
           site.onlineSearch ? 1 : 0,
           site.disabled ? 1 : 0,
+          site.adult ? 1 : 0,
           site.createdAt,
           site.updatedAt
         )
@@ -474,6 +486,7 @@ export function createSiteStore(file: string): SiteStore {
           site.remark,
           site.onlineSearch ? 1 : 0,
           site.disabled ? 1 : 0,
+          site.adult ? 1 : 0,
           site.updatedAt,
           site.id
         )

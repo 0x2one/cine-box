@@ -231,8 +231,15 @@ function PlayerSession({
         if (!alive || requestId !== detailRequestRef.current) return
         if (!result.ok || !result.video) {
           setPhase('error')
-          setErrorText(result.error === 'CACHE_UNAVAILABLE' ? '视频缓存不可用' : '读取视频详情失败')
-          setErrorHint('没有详情缓存时会先抓一次，可以重新加载')
+          if (result.error === 'ADULT_HIDDEN') {
+            setErrorText('该内容已被隐藏')
+            setErrorHint('它被标记为 18+，打开「设置 › 内容分级 › 显示 18+ 内容」后才能播放')
+          } else {
+            setErrorText(
+              result.error === 'CACHE_UNAVAILABLE' ? '视频缓存不可用' : '读取视频详情失败'
+            )
+            setErrorHint('没有详情缓存时会先抓一次，可以重新加载')
+          }
           return
         }
         const built = buildLines(result.video.sources)
@@ -570,11 +577,13 @@ function PlayerSession({
       if (requestId !== detailRequestRef.current) return
       if (!result.ok || !result.video) {
         fail(
-          result.error === 'CACHE_UNAVAILABLE'
-            ? '视频缓存库不可用，无法强制刷新'
-            : result.error === 'NOT_FOUND'
-              ? '这部视频已不在缓存里，无法强制刷新'
-              : '强制刷新失败，请检查网络后重试'
+          result.error === 'ADULT_HIDDEN'
+            ? '这部视频被标记为 18+，已不在展示端显示'
+            : result.error === 'CACHE_UNAVAILABLE'
+              ? '视频缓存库不可用，无法强制刷新'
+              : result.error === 'NOT_FOUND'
+                ? '这部视频已不在缓存里，无法强制刷新'
+                : '强制刷新失败，请检查网络后重试'
         )
         return
       }

@@ -96,6 +96,11 @@ interface AppSettings {
   openAtLogin: boolean
   closeToTray: boolean
   autoDownload: boolean
+  /**
+   * 是否显示 18+ 内容：关闭时，标记为 18+ 的站点 / 分类 / 视频在推荐、找片看、
+   * 搜索、播放页与局域网共享页里一律不可见；控制台仍然能看到并管理。
+   */
+  allowAdult: boolean
   /** 全局快捷键，空字符串表示未启用 */
   showShortcut: string
   /** 默认首页：启动映盒剧场时打开的页面 */
@@ -185,6 +190,8 @@ interface SettingsApi {
   setOpenAtLogin: (value: boolean) => Promise<AppSettings>
   setCloseToTray: (value: boolean) => Promise<AppSettings>
   setAutoDownload: (value: boolean) => Promise<AppSettings>
+  /** 是否显示 18+ 内容：保存后展示端与共享页立刻按新值隐藏 / 恢复 */
+  setAllowAdult: (value: boolean) => Promise<AppSettings>
   setShowShortcut: (value: string | null) => Promise<SetShortcutResult>
   resetShowShortcut: () => Promise<SetShortcutResult>
   /** 设置默认首页，返回保存后的设置；下次启动生效 */
@@ -225,6 +232,11 @@ interface Site {
    * 推荐页与列表页也不再显示只属于它的视频；缓存数据保留，重新启用即恢复。
    */
   disabled: boolean
+  /**
+   * 是否 18+ 站点：设置里关闭 18+ 内容时，这个站点的视频在展示端与共享页里不可见，
+   * 在线检索也不会再问这个站点；控制台仍能看到并管理。
+   */
+  adult: boolean
   /** ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -238,6 +250,7 @@ interface SiteInput {
   remark?: string
   onlineSearch?: boolean
   disabled?: boolean
+  adult?: boolean
 }
 
 interface AddSiteResult {
@@ -386,6 +399,8 @@ interface VideoCategory {
   sortOrder: number
   /** 是否在展示端显示：关闭后该分类及其整棵子树都不再展示，管理页仍会列出 */
   visible: boolean
+  /** 是否 18+ 分类：设置里关闭 18+ 内容时，这个分类（含整棵子树）的视频在展示端不可见 */
+  adult: boolean
   /** 创建 / 更新时间，ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -395,6 +410,8 @@ interface VideoCategoryInput {
   name: string
   /** 上级分类：新增时不传即一级分类；编辑时不传表示保持原样，传 null 表示移到一级分类 */
   parentId?: string | null
+  /** 18+ 分类：新增时不传按关闭；编辑时不传表示保持原样 */
+  adult?: boolean
 }
 
 /** 拖拽落点：目标之前 / 成为目标的子分类 / 目标之后 */
@@ -416,11 +433,14 @@ interface VideoCategoryResult {
 }
 
 interface CategoriesApi {
-  list: () => Promise<VideoCategory[]>
+  /** 控制台传 { includeAdult: true } 才能看到 18+ 分类（展示端默认看不到） */
+  list: (options?: { includeAdult?: boolean }) => Promise<VideoCategory[]>
   create: (input: VideoCategoryInput) => Promise<VideoCategoryResult>
   update: (id: string, input: VideoCategoryInput) => Promise<VideoCategoryResult>
   /** 切换展示端的显示状态：关闭父分类会让整棵子树一起隐藏（管理页始终返回全部分类） */
   setVisible: (id: string, visible: boolean) => Promise<VideoCategoryResult>
+  /** 切换 18+ 标记：父分类打开后整棵子树都按 18+ 处理 */
+  setAdult: (id: string, adult: boolean) => Promise<VideoCategoryResult>
   /** 拖拽移动：改变上级并插入到指定位置 */
   move: (
     id: string,
@@ -824,6 +844,12 @@ interface VideoListQuery {
    * 只被禁用站点收录的视频查不到；控制台「视频」页传 true 才能看到全部。
    */
   includeDisabledSites?: boolean
+  /**
+   * 是否连同 18+ 的视频一起返回。默认 false：设置里关闭 18+ 内容时，标记为 18+
+   * 的站点 / 分类 / 视频在展示端一律查不到；控制台传 true 才能看到并管理。
+   * 设置里打开 18+ 内容后这个字段不再起作用（全部可见）。
+   */
+  includeAdult?: boolean
 }
 
 interface VideoListItem {
@@ -847,6 +873,10 @@ interface VideoListItem {
   /** 绑定后的本地分类路径（如「电影 / 动作片」）；展示侧只统计启用站点，控制台 includeDisabledSites 时包含禁用站点，未绑定时为空数组 */
   localCategoryPaths: string[]
   hidden: boolean
+  /** 被标记为 18+（人工标记 / 来源站点 / 绑定分类任一命中） */
+  adult: boolean
+  /** 人工标记了 18+（只看人工编辑） */
+  adultManual: boolean
   edited: boolean
   /** 已在首页海报叠层里 */
   inPoster?: boolean
@@ -911,6 +941,8 @@ interface VideoUpdateInput {
   pic?: string
   picSiteId?: string
   hidden?: boolean
+  /** 人工标记 18+：设置里关闭 18+ 内容时展示端不再出现 */
+  adult?: boolean
 }
 
 interface VideoUpdateResult {
@@ -990,6 +1022,10 @@ interface VideoDetail {
   sourceCount: number
   sources: VideoDetailSource[]
   hidden: boolean
+  /** 被标记为 18+（人工标记 / 来源站点 / 绑定分类任一命中） */
+  adult: boolean
+  /** 人工标记了 18+（只看人工编辑，编辑弹窗回显这一份） */
+  adultManual: boolean
   edited: boolean
   picSiteId: string
   /** 各来源绑定的本地分类路径（如「电影 / 动作片」）；只统计启用站点，未绑定时为空数组 */
@@ -1107,10 +1143,13 @@ interface VideosApi {
   /** 只问数量、不取行 */
   count: (query: VideoListQuery) => Promise<VideoCountResult>
   update: (videoId: number, patch: VideoUpdateInput) => Promise<VideoUpdateResult>
-  detail: (videoId: number, options?: { autoFetch?: boolean }) => Promise<VideoDetailResult>
+  detail: (
+    videoId: number,
+    options?: { autoFetch?: boolean; includeAdult?: boolean }
+  ) => Promise<VideoDetailResult>
   refreshDetail: (
     videoId: number,
-    options?: { force?: boolean }
+    options?: { force?: boolean; includeAdult?: boolean }
   ) => Promise<VideoDetailRefreshResult>
   stats: () => Promise<VideoStats>
   /** { sites: false } 跳过按站点分组的统计 */
@@ -1308,7 +1347,7 @@ interface HomeApi {
   /** 清空「自定义」轨道的全部推荐 */
   clearSectionItems: (categoryId: string) => Promise<HomeActionResult>
   /** 搜索页底部推荐 */
-  getSearch: () => Promise<HomeSearchResult>
+  getSearch: (options?: { view?: HomeFeedView }) => Promise<HomeSearchResult>
   saveSearch: (patch: HomeSearchPatch) => Promise<HomeActionResult>
   addSearchItem: (videoId: number) => Promise<HomeActionResult>
   updateSearchItem: (videoId: number, patch: HomeItemPatch) => Promise<HomeActionResult>

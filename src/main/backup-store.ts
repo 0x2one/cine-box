@@ -62,6 +62,8 @@ interface SiteRow {
   onlineSearch: boolean
   /** 是否禁用；旧备份没有该字段时按启用处理 */
   disabled: boolean
+  /** 是否 18+ 站点；旧备份没有该字段时按普通站点处理 */
+  adult: boolean
   createdAt: string
   updatedAt: string
 }
@@ -82,6 +84,8 @@ interface VideoCategoryRow {
   sortOrder: number
   /** 展示端是否显示；旧备份没有该字段时按显示处理 */
   visible: boolean
+  /** 是否 18+ 分类；旧备份没有该字段时按普通分类处理 */
+  adult: boolean
   createdAt: string
   updatedAt: string
 }
@@ -199,7 +203,7 @@ export interface BackupStore {
 }
 
 const SELECT_SITES = `
-SELECT id, name, display, address, format, remark, online_search, disabled, created_at, updated_at
+SELECT id, name, display, address, format, remark, online_search, disabled, adult, created_at, updated_at
 FROM sites
 ORDER BY created_at ASC, rowid ASC
 `
@@ -211,7 +215,7 @@ ORDER BY rowid
 `
 
 const SELECT_VIDEO_CATEGORIES = `
-SELECT id, parent_id, name, sort_order, visible, created_at, updated_at
+SELECT id, parent_id, name, sort_order, visible, adult, created_at, updated_at
 FROM video_categories
 ORDER BY sort_order ASC, rowid ASC
 `
@@ -231,8 +235,8 @@ ORDER BY created_at ASC, rowid ASC
 
 const INSERT_SITE = `
 INSERT INTO sites
-  (id, name, display, address, format, remark, online_search, disabled, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (id, name, display, address, format, remark, online_search, disabled, adult, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_SITE_CATEGORY = `
@@ -241,8 +245,8 @@ VALUES (?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_VIDEO_CATEGORY = `
-INSERT INTO video_categories (id, parent_id, name, sort_order, visible, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO video_categories (id, parent_id, name, sort_order, visible, adult, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_BINDING = `
@@ -327,6 +331,8 @@ function parseSites(value: unknown): SiteRow[] | null {
       onlineSearch: item.onlineSearch === true,
       // 旧备份没有这个字段：按「启用」恢复
       disabled: item.disabled === true,
+      // 旧备份没有这个字段：按普通站点恢复
+      adult: item.adult === true,
       createdAt,
       updatedAt: timestamp(item.updatedAt, createdAt)
     })
@@ -377,6 +383,8 @@ function parseVideoCategories(value: unknown): VideoCategoryRow[] | null {
     if (!id || !name || parents.has(id) || parentId === id) return null
     // 旧备份没有 visible（默认显示），有的话必须是布尔值，否则说明文件被改坏了
     if (item.visible !== undefined && typeof item.visible !== 'boolean') return null
+    // 18+ 标记同理：老备份没有就按普通分类恢复
+    if (item.adult !== undefined && typeof item.adult !== 'boolean') return null
     const createdAt = timestamp(item.createdAt, new Date().toISOString())
     parents.set(id, parentId)
     rows.push({
@@ -386,6 +394,7 @@ function parseVideoCategories(value: unknown): VideoCategoryRow[] | null {
       sortOrder:
         typeof item.sortOrder === 'number' && Number.isFinite(item.sortOrder) ? item.sortOrder : 0,
       visible: item.visible !== false,
+      adult: item.adult === true,
       createdAt,
       updatedAt: timestamp(item.updatedAt, createdAt)
     })
@@ -557,6 +566,7 @@ function readState(database: DatabaseSync): BackupData {
         remark: String(raw.remark ?? ''),
         onlineSearch: Number(raw.online_search ?? 0) !== 0,
         disabled: Number(raw.disabled ?? 0) !== 0,
+        adult: Number(raw.adult ?? 0) !== 0,
         createdAt,
         updatedAt: timestamp(raw.updated_at, createdAt)
       }
@@ -590,6 +600,7 @@ function readState(database: DatabaseSync): BackupData {
         name: String(raw.name ?? ''),
         sortOrder: Number(raw.sort_order ?? 0),
         visible: Number(raw.visible ?? 1) !== 0,
+        adult: Number(raw.adult ?? 0) !== 0,
         createdAt,
         updatedAt: timestamp(raw.updated_at, createdAt)
       }
@@ -678,6 +689,7 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.remark,
         row.onlineSearch ? 1 : 0,
         row.disabled ? 1 : 0,
+        row.adult ? 1 : 0,
         row.createdAt,
         row.updatedAt
       )
@@ -722,6 +734,7 @@ function applyState(database: DatabaseSync, data: BackupData): void {
         row.name,
         row.sortOrder,
         row.visible ? 1 : 0,
+        row.adult ? 1 : 0,
         row.createdAt,
         row.updatedAt
       )

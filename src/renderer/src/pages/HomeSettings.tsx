@@ -374,7 +374,7 @@ function HomeItemEditor({
     if (item.missing) return
     let alive = true
     window.api.videos
-      .detail(item.videoId, { autoFetch: false })
+      .detail(item.videoId, { autoFetch: false, includeAdult: true })
       .then((result) => {
         if (!alive || !result.ok || !result.video) return
         const seen = new Set<string>()
@@ -998,10 +998,14 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
     }
 
     for (const section of pending) {
-      void fill(section.categoryId, { categoryId: section.categoryId, visibility: 'shown' })
+      void fill(section.categoryId, {
+        categoryId: section.categoryId,
+        visibility: 'shown',
+        includeAdult: true
+      })
     }
-    // 搜索页推荐位那一行：整库里「展示中」的数量
-    if (wantSearch) void fill('search', { visibility: 'shown' })
+    // 搜索页推荐位那一行：整库里「展示中」的数量（控制台口径，18+ 的也算）
+    if (wantSearch) void fill('search', { visibility: 'shown', includeAdult: true })
   }, [])
 
   const load = useCallback(async (silent = false): Promise<void> => {

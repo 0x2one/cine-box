@@ -13,6 +13,11 @@ export interface VideoCategory {
   sortOrder: number
   /** 是否在展示端显示：关闭后该分类及其整棵子树都不再展示，管理页仍会列出 */
   visible: boolean
+  /**
+   * 是否 18+ 分类：设置里关闭 18+ 内容时，这个分类（含整棵子树）的视频在展示端与
+   * 局域网共享页里都不可见；控制台仍然能看到并管理。
+   */
+  adult: boolean
   /** 创建 / 更新时间，ISO 8601 */
   createdAt: string
   updatedAt: string
@@ -23,6 +28,8 @@ export interface VideoCategoryInput {
   name: string
   /** 上级分类：新增时不传即一级分类；编辑时不传表示保持原样，传 null 表示移到一级分类 */
   parentId?: string | null
+  /** 18+ 分类：新增时不传按关闭；编辑时不传表示保持原样 */
+  adult?: boolean
 }
 
 /** 拖拽落点：目标之前 / 成为目标的子分类 / 目标之后 */
@@ -47,6 +54,8 @@ export interface CategoryStore {
   update: (id: string, input: VideoCategoryInput) => CategoryResult
   /** 切换展示端的显示状态；关闭父分类会让整棵子树在展示端一起隐藏 */
   setVisible: (id: string, visible: boolean) => CategoryResult
+  /** 切换 18+ 标记；打开父分类会让整棵子树都被当成 18+ */
+  setAdult: (id: string, adult: boolean) => CategoryResult
   /** 拖拽移动：改变上级并插入到指定位置 */
   move: (id: string, targetId: string | null, placement: CategoryPlacement) => CategoryResult
   /** 删除分类及其所有子分类 */
@@ -64,6 +73,7 @@ CREATE TABLE IF NOT EXISTS video_categories (
   name TEXT NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
   visible INTEGER NOT NULL DEFAULT 1,
+  adult INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -74,24 +84,29 @@ CREATE INDEX IF NOT EXISTS idx_video_categories_parent ON video_categories (pare
 const ADD_VISIBLE_COLUMN =
   'ALTER TABLE video_categories ADD COLUMN visible INTEGER NOT NULL DEFAULT 1'
 
+/** 旧库没有 adult 列，启动时补上；已有分类默认不是 18+ */
+const ADD_ADULT_COLUMN = 'ALTER TABLE video_categories ADD COLUMN adult INTEGER NOT NULL DEFAULT 0'
+
 const SELECT_ALL = `
-SELECT id, parent_id, name, sort_order, visible, created_at, updated_at
+SELECT id, parent_id, name, sort_order, visible, adult, created_at, updated_at
 FROM video_categories
 ORDER BY sort_order ASC, created_at ASC, rowid ASC
 `
 
 const INSERT_CATEGORY = `
-INSERT INTO video_categories (id, parent_id, name, sort_order, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO video_categories (id, parent_id, name, sort_order, adult, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 const UPDATE_CATEGORY = `
 UPDATE video_categories
-SET name = ?, parent_id = ?, sort_order = ?, updated_at = ?
+SET name = ?, parent_id = ?, sort_order = ?, adult = ?, updated_at = ?
 WHERE id = ?
 `
 
 const UPDATE_VISIBLE = 'UPDATE video_categories SET visible = ?, updated_at = ? WHERE id = ?'
+
+const UPDATE_ADULT = 'UPDATE video_categories SET adult = ?, updated_at = ? WHERE id = ?'
 
 /** 只改排序，不动 updatedAt（同级整体压紧不算内容变更） */
 const UPDATE_ORDER = 'UPDATE video_categories SET sort_order = ? WHERE id = ?'
@@ -129,6 +144,7 @@ function rowToCategory(row: unknown): VideoCategory | null {
     sortOrder: typeof raw.sort_order === 'number' ? raw.sort_order : 0,
     // node:sqlite 返回整数 0 / 1，缺列时按显示处理
     visible: Number(raw.visible ?? 1) !== 0,
+    adult: Number(raw.adult ?? 0) !== 0,
     createdAt,
     updatedAt: typeof raw.updated_at === 'string' ? raw.updated_at : createdAt
   }
@@ -224,7 +240,15 @@ export function createCategoryStore(file: string): CategoryStore {
     const sortOrder = brothers.reduce((max, row) => Math.max(max, row.sortOrder + 1), 0)
     database()
       .prepare(INSERT_CATEGORY)
-      .run(randomUUID().replace(/-/g, ''), parentId, name, sortOrder, now, now)
+      .run(
+        randomUUID().replace(/-/g, ''),
+        parentId,
+        name,
+        sortOrder,
+        input?.adult === true ? 1 : 0,
+        now,
+        now
+      )
     return { ok: true, categories: queryAll() }
   }
 
@@ -247,10 +271,11 @@ export function createCategoryStore(file: string): CategoryStore {
     if (target.some((row) => row.name === name)) return { ok: false, error: 'DUPLICATE_NAME' }
 
     const now = new Date().toISOString()
-    // 换上级时追加到新同级末尾，原同级随之压紧
+    // 换上级时追加到新同级末尾，原同级随之压紧；18+ 标记不传就保持原样
     const sortOrder = changedParent ? target.length : existing.sortOrder
+    const adult = input?.adult === undefined ? existing.adult : Boolean(input.adult)
     inTransaction(database(), (connection) => {
-      connection.prepare(UPDATE_CATEGORY).run(name, parentId, sortOrder, now, id)
+      connection.prepare(UPDATE_CATEGORY).run(name, parentId, sortOrder, adult ? 1 : 0, now, id)
       if (changedParent)
         reindex(
           connection,
@@ -269,6 +294,18 @@ export function createCategoryStore(file: string): CategoryStore {
     database()
       .prepare(UPDATE_VISIBLE)
       .run(visible ? 1 : 0, new Date().toISOString(), id)
+    return { ok: true, categories: queryAll() }
+  }
+
+  function setAdult(id: string, adult: boolean): CategoryResult {
+    const rows = queryAll()
+    const existing = rows.find((row) => row.id === id)
+    if (!existing) return { ok: false, error: 'NOT_FOUND' }
+    // 值没变就不刷 updatedAt
+    if (existing.adult === adult) return { ok: true, categories: rows }
+    database()
+      .prepare(UPDATE_ADULT)
+      .run(adult ? 1 : 0, new Date().toISOString(), id)
     return { ok: true, categories: queryAll() }
   }
 
@@ -317,7 +354,9 @@ export function createCategoryStore(file: string): CategoryStore {
     inTransaction(database(), (connection) => {
       const order = connection.prepare(UPDATE_ORDER)
       ordered.forEach((row, at) => order.run(at, row.id))
-      connection.prepare(UPDATE_CATEGORY).run(existing.name, parentId, position, now, id)
+      connection
+        .prepare(UPDATE_CATEGORY)
+        .run(existing.name, parentId, position, existing.adult ? 1 : 0, now, id)
       if (changedParent) {
         reindex(
           connection,
@@ -356,6 +395,7 @@ export function createCategoryStore(file: string): CategoryStore {
           .all()
           .map((row) => String((row as Record<string, unknown>).name ?? ''))
         if (!columns.includes('visible')) connection.exec(ADD_VISIBLE_COLUMN)
+        if (!columns.includes('adult')) connection.exec(ADD_ADULT_COLUMN)
         db = connection
       } catch (error) {
         db = null
@@ -367,6 +407,7 @@ export function createCategoryStore(file: string): CategoryStore {
     create,
     update,
     setVisible,
+    setAdult,
     move,
     remove,
     close: () => {

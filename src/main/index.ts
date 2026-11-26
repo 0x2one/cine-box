@@ -46,6 +46,7 @@ import { isHlsUrl } from './lan/lan-media-url'
 import type {
   LanBrowsePayload,
   LanBrowseQuery,
+  LanCacheItem,
   LanCategoriesPayload,
   LanCategory,
   LanDetailPayload,
@@ -335,6 +336,60 @@ function refreshDisabledSites(): void {
   invalidateHomeFeed()
 }
 
+/* ── 18+ 内容开关 ── */
+
+/** 「关闭 18+」是否生效：为 true 时标记过的站点 / 分类 / 视频在展示端一律不可见 */
+let adultHidden = false
+
+/**
+ * 有效 18+ 分类：自身被标记，或任一上级被标记（和展示端 visible 的继承口径一致）。
+ * 父分类标成 18+ 时整棵子树都算 18+，不需要逐个改写子分类。
+ */
+function effectiveAdultCategoryIds(rows: VideoCategory[]): Set<string> {
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const adult = new Set<string>()
+  for (const row of rows) {
+    const seen = new Set<string>()
+    let cursor: VideoCategory | undefined = row
+    while (cursor && !seen.has(cursor.id)) {
+      seen.add(cursor.id)
+      if (cursor.adult) {
+        adult.add(row.id)
+        break
+      }
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
+    }
+  }
+  return adult
+}
+
+/**
+ * 把 18+ 开关、18+ 站点与「18+ 分类绑定的在线分类」灌进缓存库，并作废推荐缓存。
+ * 设置里改开关、站点 / 分类 / 绑定变化、恢复备份之后都要调一次。
+ */
+function refreshAdultVisibility(): void {
+  adultHidden = !appSettingsStore.get().allowAdult
+  if (!videoCacheReady) return
+  videoStore.setAdultHidden(adultHidden)
+  const siteIds = siteStore
+    .list()
+    .filter((site) => site.adult)
+    .map((site) => site.id)
+  const adultCategories = effectiveAdultCategoryIds(categoryStore.list())
+  const filters = bindingStore
+    .pathsForSourceCategories()
+    .filter((row) => adultCategories.has(row.categoryId))
+    .map((row) => ({ siteId: row.siteId, categoryId: row.sourceCategoryId }))
+  videoStore.setAdultFilters(siteIds, filters)
+  invalidateHomeFeed()
+}
+
+/** 单个视频是不是 18+（播放页 / 下载中心拦截用；批量时走 listAdultVideoIds） */
+function isAdultVideoId(videoId: number): boolean {
+  if (!Number.isInteger(videoId) || videoId <= 0 || !videoCacheReady) return false
+  return videoStore.listAdultVideoIds([videoId]).length > 0
+}
+
 /**
  * 首页数据：配置 + 分类绑定 + 视频库解析成一份可以直接渲染的 feed。
  * 展示端取 'display'（不算总数、不含隐藏轨道、不带搜索推荐位），控制台取 'console'。
@@ -344,19 +399,32 @@ function readHomeFeed(view: HomeFeedView): HomeFeedResult {
     return { ok: true, feed: displayFeed.feed }
   }
   try {
+    // 展示端不构建 18+ 分类的轨道（里面的视频也已经被隐藏）；控制台要能重新打开它们
+    const categoryRows = categoryStore.list()
+    const adultCategories =
+      view === 'console' || !adultHidden ? null : effectiveAdultCategoryIds(categoryRows)
     const feed = buildHomeFeed(
       {
         config: homeStore.get(),
-        categories: categoryStore.list(),
+        categories: adultCategories
+          ? categoryRows.filter((row) => !adultCategories.has(row.id))
+          : categoryRows,
         // 展示端只认启用站点的绑定；控制台要能看到全部（含禁用站点）的分类配置
         bindingsFor: (categoryId) => {
           const bindings = bindingStore.forCategory(categoryId)
           return view === 'console' ? bindings : filterEnabledSources(bindings)
         },
-        // 控制台要把禁用站点的条目也读出来（否则会显示成「视频已丢失」）；展示端按可见口径
+        // 控制台要把禁用站点、18+ 的条目也读出来（否则会显示成「视频已丢失」）；展示端按可见口径
         videosByIds: (videoIds) =>
-          videoStore.listVideosByIds(videoIds, { includeDisabledSites: view === 'console' }),
-        listVideos: (query, filters) => videoStore.listVideos(query, filters),
+          videoStore.listVideosByIds(videoIds, {
+            includeDisabledSites: view === 'console',
+            includeAdult: view === 'console'
+          }),
+        listVideos: (query, filters) =>
+          videoStore.listVideos(
+            view === 'console' ? { ...query, includeAdult: true } : query,
+            filters
+          ),
         cacheReady: videoCacheReady
       },
       view
@@ -370,12 +438,21 @@ function readHomeFeed(view: HomeFeedView): HomeFeedResult {
 }
 
 /** 搜索页底部的推荐位：单独读，控制台和搜索页看到的是同一份结果 */
-function readHomeSearch(): HomeSearchResult {
+function readHomeSearch(view: HomeFeedView = 'display'): HomeSearchResult {
   try {
     const search = buildSearchSection({
       config: homeStore.get().search,
-      videosByIds: (videoIds) => videoStore.listVideosByIds(videoIds),
-      listVideos: (query, filters) => videoStore.listVideos(query, filters),
+      // 控制台要能看到 18+ / 禁用站点里的推荐条目，展示端按可见口径
+      videosByIds: (videoIds) =>
+        videoStore.listVideosByIds(videoIds, {
+          includeDisabledSites: view === 'console',
+          includeAdult: view === 'console'
+        }),
+      listVideos: (query, filters) =>
+        videoStore.listVideos(
+          view === 'console' ? { ...query, includeAdult: true } : query,
+          filters
+        ),
       cacheReady: videoCacheReady
     })
     return { ok: true, search }
@@ -412,7 +489,10 @@ function syncHomeRecommendations(): void {
     bindings: bindingStore.pathsForSourceCategories(),
     loadVideoData: (videoIds) => ({
       sources: videoStore.listSourceCategories(videoIds),
-      knownVideoIds: videoStore.listVideosByIds(videoIds).map((video) => video.id)
+      // 推荐的视频判定只看「视频还在不在」：18+ / 禁用站点不能把已有推荐当成丢失删掉
+      knownVideoIds: videoStore
+        .listVideosByIds(videoIds, { includeDisabledSites: true, includeAdult: true })
+        .map((video) => video.id)
     }),
     move: (fromCategoryId, toCategoryId, videoId) =>
       homeStore.moveSectionItem(fromCategoryId, toCategoryId, videoId)
@@ -712,6 +792,13 @@ ipcMain.handle('settings:setAutoDownload', (_event, value: boolean) =>
   appSettingsStore.setAutoDownload(Boolean(value))
 )
 
+// 18+ 内容开关：改完立刻重建 18+ 过滤（推荐 / 找片看 / 搜索 / 播放页 / 局域网随之生效）
+ipcMain.handle('settings:setAllowAdult', (_event, value: boolean) => {
+  const settings = appSettingsStore.setAllowAdult(Boolean(value))
+  refreshAdultVisibility()
+  return settings
+})
+
 ipcMain.handle('settings:setShowShortcut', (_event, value: string | null) => {
   const result = applyShowShortcut(value)
   if (result.ok) appSettingsStore.setShowShortcut(result.shortcut)
@@ -983,6 +1070,10 @@ ipcMain.handle('downloads:openFolder', async (_event, id?: string) => {
 ipcMain.handle('downloads:play', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record) return { ok: false, error: 'NOT_FOUND' }
+  // 关闭 18+ 时，缓存好的 18+ 视频也不在播放窗里出现
+  if (adultHidden && typeof record.videoId === 'number' && isAdultVideoId(record.videoId)) {
+    return { ok: false, error: 'ADULT_HIDDEN' }
+  }
   if (!existsSync(record.path)) return { ok: false, error: 'FILE_MISSING' }
   if (record.kind === 'hls') {
     // 缓存包走本机 http 服务，播放页按 HLS 播
@@ -1324,22 +1415,31 @@ ipcMain.handle('videos:update', (_event, videoId: number, patch: VideoUpdateInpu
 
 ipcMain.handle(
   'videos:detail',
-  async (_event, videoId: number, options?: { autoFetch?: boolean }) => {
+  async (_event, videoId: number, options?: { autoFetch?: boolean; includeAdult?: boolean }) => {
     if (!videoCacheReady) return cacheUnavailable()
     // 播放页「简介」要显示视频绑定的本地分类：详情里只有各来源的在线分类，这里按绑定关系补一次
-    return withLocalCategoryPaths(
+    const result = withLocalCategoryPaths(
       await detailCache.read(Number(videoId), options?.autoFetch !== false)
     )
+    // 关闭 18+ 时播放页 / 展示端一律看不到这类内容；控制台编辑传 includeAdult: true
+    if (result.ok && result.video?.adult && adultHidden && options?.includeAdult !== true) {
+      return { ok: false, error: 'ADULT_HIDDEN' }
+    }
+    return result
   }
 )
 
 ipcMain.handle(
   'videos:detail:refresh',
-  async (_event, videoId: number, options?: { force?: boolean }) => {
+  async (_event, videoId: number, options?: { force?: boolean; includeAdult?: boolean }) => {
     if (!videoCacheReady) return { ...cacheUnavailable(), refreshed: 0, failed: 0 }
-    return withLocalCategoryPaths(
+    const result = withLocalCategoryPaths(
       await detailCache.refresh(Number(videoId), Boolean(options?.force))
     )
+    if (result.ok && result.video?.adult && adultHidden && options?.includeAdult !== true) {
+      return { ok: false, error: 'ADULT_HIDDEN', refreshed: 0, failed: 0 }
+    }
+    return result
   }
 )
 
@@ -1708,9 +1808,16 @@ async function performOnlineSearch(input?: { keyword?: string }): Promise<VideoO
   if (!videoCacheReady) return { ...empty, ok: false, error: 'CACHE_UNAVAILABLE' }
   if (!keyword) return empty
   // 正在后台清理缓存的站点先跳过：刚写进去的来源会被清理一起删掉；禁用的站点也不问
+  // 关闭 18+ 时，标记为 18+ 的站点连检索都不发（免得把这类内容采进库里）
   const sites = siteStore
     .list()
-    .filter((site) => site.onlineSearch && !site.disabled && !siteCachePurges.has(site.id))
+    .filter(
+      (site) =>
+        site.onlineSearch &&
+        !site.disabled &&
+        !siteCachePurges.has(site.id) &&
+        !(adultHidden && site.adult)
+    )
   if (sites.length === 0) return empty
 
   const results = await Promise.all(sites.map((site) => searchOneSite(site, keyword)))
@@ -1855,8 +1962,10 @@ function lanVisibleCategoryIds(rows: VideoCategory[]): Set<string> {
 function lanCategories(): LanCategoriesPayload {
   const rows = categoryStore.list()
   const visible = lanVisibleCategoryIds(rows)
+  // 关闭 18+ 时，18+ 分类（含被父分类带下来的子树）不出现在共享页的分类里
+  const adult = adultHidden ? effectiveAdultCategoryIds(rows) : new Set<string>()
   const categories: LanCategory[] = rows
-    .filter((row) => visible.has(row.id))
+    .filter((row) => visible.has(row.id) && !adult.has(row.id))
     .map((row) => ({
       id: row.id,
       parentId: row.parentId,
@@ -1882,11 +1991,13 @@ function lanBrowse(query: LanBrowseQuery): LanBrowsePayload {
   if (!videoCacheReady) return { ...base, ok: false, error: 'CACHE_UNAVAILABLE' }
   const rows = categoryStore.list()
   const visible = lanVisibleCategoryIds(rows)
+  // 18+ 分类：关闭时整棵子树在共享页里也不可见（直接输地址同样返回空）
+  const adult = adultHidden ? effectiveAdultCategoryIds(rows) : new Set<string>()
 
   let listQuery: VideoListQuery
   if (query.categoryId) {
-    // 隐藏 / 已删除的分类返回空列表，不退回全库
-    if (!visible.has(query.categoryId)) return base
+    // 隐藏 / 已删除 / 18+ 分类返回空列表，不退回全库
+    if (!visible.has(query.categoryId) || adult.has(query.categoryId)) return base
     listQuery = {
       categoryId: query.categoryId,
       page: query.page,
@@ -1896,7 +2007,7 @@ function lanBrowse(query: LanBrowseQuery): LanBrowsePayload {
     }
   } else {
     const topIds = rows
-      .filter((row) => row.parentId === null && visible.has(row.id))
+      .filter((row) => row.parentId === null && visible.has(row.id) && !adult.has(row.id))
       .map((row) => row.id)
     // 没有可见分类：和显式空数组一样直接空结果，不能退化成查全库
     if (topIds.length === 0) return base
@@ -1957,6 +2068,8 @@ async function lanVideoDetail(videoId: number): Promise<LanDetailPayload> {
       return { ok: false, error: result.error ?? 'NOT_FOUND' }
     }
     const video = result.video
+    // 关闭 18+ 时，共享页里连详情都拿不到（网页端按「不可见」处理）
+    if (adultHidden && video.adult) return { ok: false, error: 'ADULT_HIDDEN' }
     const primary = video.sources.find((source) => source.detail)?.detail
     const sources = video.sources
       .map((source) => ({
@@ -2001,6 +2114,17 @@ async function lanVideoDetail(videoId: number): Promise<LanDetailPayload> {
   }
 }
 
+/**
+ * 共享页的「本机缓存」：关闭 18+ 时，属于 18+ 视频的缓存记录不出现在列表里，
+ * 网页端也就拼不出播放地址（缓存文件本身由 cachedFile 再拦一次）。
+ */
+function lanCacheItems(videoId?: number): LanCacheItem[] {
+  const items = lanCache.list(videoId)
+  if (!adultHidden || !videoCacheReady || items.length === 0) return items
+  const adult = new Set(videoStore.listAdultVideoIds(items.map((item) => item.videoId)))
+  return items.filter((item) => !adult.has(item.videoId))
+}
+
 const lanService = createLanService({
   dataDir: join(app.getPath('userData'), 'Data'),
   fetch: (url, init) => net.fetch(url, init),
@@ -2013,12 +2137,21 @@ const lanService = createLanService({
     detail: lanVideoDetail,
     downloads: (videoId) => {
       try {
-        return { ok: true, items: lanCache.list(videoId) }
+        return { ok: true, items: lanCacheItems(videoId) }
       } catch {
         return { ok: false, error: 'DOWNLOADS_FAILED', items: [] }
       }
     },
-    cachedFile: (recordId, relativePath) => lanCache.resolveFile(recordId, relativePath),
+    cachedFile: (recordId, relativePath) => {
+      // 关闭 18+ 时，缓存包里的文件也一起藏起来：直接拼地址同样 404
+      if (adultHidden) {
+        const record = downloadStore.find(recordId)
+        if (record && typeof record.videoId === 'number' && isAdultVideoId(record.videoId)) {
+          return Promise.resolve(null)
+        }
+      }
+      return lanCache.resolveFile(recordId, relativePath)
+    },
     onChange: (state) => sendToRenderer('lan:changed', state)
   }
 })
@@ -2169,7 +2302,11 @@ ipcMain.handle('sites:list', () => siteStore.list())
 
 ipcMain.handle('sites:add', (_event, input: SiteInput) => {
   const result = siteStore.add(input)
-  if (result.ok) refreshDisabledSites()
+  if (result.ok) {
+    refreshDisabledSites()
+    // 新站点可能一开始就被标成 18+
+    refreshAdultVisibility()
+  }
   return result
 })
 
@@ -2193,6 +2330,8 @@ ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
   if (!existing.disabled && result.site.disabled) collector.cancel({ siteId })
   // 禁用状态影响列表 / 搜索 / 首页能查到哪些视频，同步给缓存库并作废 feed 缓存
   refreshDisabledSites()
+  // 18+ 标记可能刚被改过：重新算一遍 18+ 站点与 18+ 分类绑定
+  refreshAdultVisibility()
   // 只有真的换了站点（域名 / 格式变了）旧缓存才不可信。同一个 domain 下改路径、补斜杠
   // 通常只是笔误，为此把几万条来源和详情文件全清掉不值当；清理本身也放到后台，不堵保存。
   if (formatChanged || !isSameSiteHost(existing.address, result.site.address)) {
@@ -2215,6 +2354,7 @@ ipcMain.handle('sites:remove', (_event, id: string) => {
     // 站点的绑定被级联删掉了，推荐要按剩下的绑定重算
     syncHomeRecommendations()
     refreshDisabledSites()
+    refreshAdultVisibility()
     // 默认 pic 来源指向这个站点时清掉配置，别留下悬空 id
     if (appSettingsStore.get().defaultPicSiteId === siteId) {
       appSettingsStore.setDefaultPicSite('')
@@ -2373,17 +2513,27 @@ ipcMain.handle('sites:categories:apply', (_event, id: string, mode: CategoryUpda
   const categories = siteStore.applyCategories(site.id, pending.categories, mode)
   // 全量更新会删掉线上已不存在的分类，连带删绑定：推荐跟着重算
   if (mode === 'full') syncHomeRecommendations()
+  // 全量更新删掉的在线分类会连带删绑定，18+ 分类过滤条件要重新算一次
+  refreshAdultVisibility()
   return { ok: true, categories }
 })
 
 /* ── IPC：视频分类 ── */
 
-ipcMain.handle('categories:list', () => categoryStore.list())
+ipcMain.handle('categories:list', (_event, options?: { includeAdult?: boolean }) => {
+  const rows = categoryStore.list()
+  // 展示端（找片看 / 搜索的分类入口）看不到 18+ 分类及其子树；控制台要看全部才能管理
+  if (!adultHidden || options?.includeAdult === true) return rows
+  const adult = effectiveAdultCategoryIds(rows)
+  return rows.filter((row) => !adult.has(row.id))
+})
 
 ipcMain.handle('categories:create', (_event, input: VideoCategoryInput) => {
   const result = categoryStore.create(input)
   // 新分类不代表就有轨道，但「推荐在哪几条轨道上」可能变，缓存一并作废
   invalidateHomeFeed()
+  // 新建时就带 18+ 标记的分类要立刻生效
+  if (result.ok) refreshAdultVisibility()
   return result
 })
 
@@ -2392,6 +2542,8 @@ ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInp
   // 改了上级分类，视频所属的大类可能跟着变
   if (result.ok && input?.parentId !== undefined) syncHomeRecommendations()
   invalidateHomeFeed()
+  // 改名 / 换上级 / 改 18+ 标记都会影响 18+ 判定
+  if (result.ok) refreshAdultVisibility()
   return result
 })
 
@@ -2399,6 +2551,13 @@ ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) =
   const result = categoryStore.setVisible(String(id), Boolean(visible))
   // 分类的显示开关决定推荐页有没有这条轨道
   invalidateHomeFeed()
+  return result
+})
+
+// 18+ 分类开关：父分类打开后整棵子树都算 18+，展示端立刻按新口径过滤
+ipcMain.handle('categories:setAdult', (_event, id: string, adult: boolean) => {
+  const result = categoryStore.setAdult(String(id), Boolean(adult))
+  refreshAdultVisibility()
   return result
 })
 
@@ -2413,6 +2572,8 @@ ipcMain.handle(
     // 拖到别的大类下面（before / after 也可能换了上级），推荐跟着换分类
     if (result.ok) syncHomeRecommendations()
     invalidateHomeFeed()
+    // 换了上级会改变「父分类 18+」的继承关系
+    if (result.ok) refreshAdultVisibility()
     return result
   }
 )
@@ -2422,6 +2583,7 @@ ipcMain.handle('categories:remove', (_event, id: string) => {
   // 分类删了，绑在它（或子树）上的视频就没有归属了，推荐一并清掉
   if (result.ok) syncHomeRecommendations()
   invalidateHomeFeed()
+  if (result.ok) refreshAdultVisibility()
   return result
 })
 
@@ -2440,6 +2602,8 @@ ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: str
   // 绑定关系变了：已推荐到这个在线分类的视频要跟着换大类
   if (result.ok) syncHomeRecommendations()
   invalidateHomeFeed()
+  // 绑到 18+ 分类上（或从中解绑）会改变视频的 18+ 判定
+  if (result.ok) refreshAdultVisibility()
   return result
 })
 
@@ -2448,6 +2612,7 @@ ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => {
   // 解绑后视频不再属于原来的大类，推荐会被挪到别处或直接删掉
   if (result.ok) syncHomeRecommendations()
   invalidateHomeFeed()
+  if (result.ok) refreshAdultVisibility()
   return result
 })
 
@@ -2539,7 +2704,10 @@ ipcMain.handle('home:sections:clear', (_event, categoryId: string) => {
 
 /* ── IPC：搜索页底部推荐（没有分类归属） ── */
 
-ipcMain.handle('home:search:get', () => readHomeSearch())
+// 搜索页底部推荐：展示端只放行可见视频，控制台要完整的一份（管理 18+ / 禁用站点的条目）
+ipcMain.handle('home:search:get', (_event, options?: { view?: HomeFeedView }) =>
+  readHomeSearch(options?.view === 'console' ? 'console' : 'display')
+)
 
 ipcMain.handle('home:search:save', (_event, patch: HomeSearchPatch) =>
   homeStore.saveSearch(patch ?? {})
@@ -2549,7 +2717,10 @@ ipcMain.handle('home:search:addItem', (_event, videoId: number) => {
   if (!videoCacheReady) return cacheUnavailable()
   const vid = Number(videoId)
   // 只接受缓存库里还在的视频；列表页的「推荐」入口本来就来自它
-  if (!Number.isInteger(vid) || videoStore.listVideosByIds([vid]).length === 0) {
+  if (
+    !Number.isInteger(vid) ||
+    videoStore.listVideosByIds([vid], { includeAdult: true }).length === 0
+  ) {
     return { ok: false, error: 'NOT_FOUND' }
   }
   return homeStore.addSearchItem(vid)
@@ -2645,8 +2816,9 @@ ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
     if (defaultPicSiteId && !siteStore.list().some((site) => site.id === defaultPicSiteId)) {
       appSettingsStore.setDefaultPicSite('')
     }
-    // 分类 / 绑定被整体替换，推荐页那份缓存不再可信；禁用站点状态也要重新灌一次
+    // 分类 / 绑定被整体替换，推荐页那份缓存不再可信；禁用站点与 18+ 状态也要重新灌一次
     refreshDisabledSites()
+    refreshAdultVisibility()
   }
   return result
 })
@@ -2780,6 +2952,9 @@ if (!gotTheLock) {
       videoCacheReady = false
       console.error('视频缓存初始化失败', error)
     }
+
+    // 18+ 开关先算一次（缓存库不可用时也要让 adultHidden 正确），随后同步 18+ 站点 / 分类
+    refreshAdultVisibility()
 
     // 启动时校正一次：老配置里可能有推荐到了非绑定分类的条目，按当前绑定拉回或清掉
     syncHomeRecommendations()

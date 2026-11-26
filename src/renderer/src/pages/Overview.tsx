@@ -90,11 +90,15 @@ function OverviewPanel({
         const [sites, categories, counts, hidden, capacity, schedules, progress, logs] =
           await Promise.all([
             window.api.sites.list(),
-            window.api.categories.list(),
+            window.api.categories.list({ includeAdult: true }),
             window.api.bindings.counts(),
             // 只关心「隐藏了多少」：只要数字，不取行（取一页拿 total 会扫整张表）
-            // 管理口径：禁用站点的视频也算进来
-            window.api.videos.count({ visibility: 'hidden', includeDisabledSites: true }),
+            // 管理口径：禁用站点、18+ 的视频也算进来
+            window.api.videos.count({
+              visibility: 'hidden',
+              includeDisabledSites: true,
+              includeAdult: true
+            }),
             // 概览只看总量，按站点分组的统计（十几万条来源）在这里用不到
             window.api.videos.capacity({ sites: false }),
             window.api.videos.schedules(),

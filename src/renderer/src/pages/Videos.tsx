@@ -46,6 +46,7 @@ interface EditFields {
 interface EditOrigin extends EditFields {
   pic: string
   hidden: boolean
+  adult: boolean
 }
 
 function siteLabel(sites: Map<string, Site>, siteId: string): string {
@@ -241,10 +242,12 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     vodActor: '',
     vodClass: '',
     pic: '',
-    hidden: false
+    hidden: false,
+    adult: false
   })
   const [draftPic, setDraftPic] = useState('')
   const [draftHidden, setDraftHidden] = useState(false)
+  const [draftAdult, setDraftAdult] = useState(false)
   const [saving, setSaving] = useState(false)
   /** 本地分类全量（含子分类）：列表的分类筛选和「推荐」弹窗共用 */
   const [categories, setCategories] = useState<VideoCategory[]>([])
@@ -322,7 +325,8 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
         // 站点名缺失只影响展示，列表本身照常
       })
     window.api.categories
-      .list()
+      // 控制台口径：18+ 分类也要能筛 / 能推荐
+      .list({ includeAdult: true })
       .then(setCategories)
       .catch(() => {
         // 分类读不到时「推荐」弹窗提示去建分类，不影响列表
@@ -345,8 +349,9 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
         page,
         pageSize: PAGE_SIZE,
         visibility,
-        // 控制台是管理口径：禁用站点的视频也要列出来，否则没法查看 / 编辑
-        includeDisabledSites: true
+        // 控制台是管理口径：禁用站点、18+ 的视频也要列出来，否则没法查看 / 编辑
+        includeDisabledSites: true,
+        includeAdult: true
       })
       if (ticket !== requestId.current) return
       if (!result.ok) {
@@ -381,7 +386,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     setDetailLoading(true)
     try {
       // 默认 autoFetch：详情没缓存时顺手抓一次，回来就能看线路
-      const result = await window.api.videos.detail(item.id)
+      const result = await window.api.videos.detail(item.id, { includeAdult: true })
       if (!result.ok || !result.video) {
         message.error('读取视频详情失败')
         setDetailOpen(false)
@@ -403,7 +408,8 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
       vodActor: item.vodActor,
       vodClass: item.vodClass,
       pic: '',
-      hidden: item.hidden
+      hidden: item.hidden,
+      adult: item.adultManual
     }
     setEditTarget(item)
     setEditOpen(true)
@@ -412,6 +418,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     setEditOriginal(baseline)
     setDraftPic('')
     setDraftHidden(item.hidden)
+    setDraftAdult(item.adultManual)
     form.setFieldsValue({
       note: item.note,
       intro: item.introExcerpt,
@@ -420,7 +427,10 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     })
     try {
       // 只读缓存里的来源，编辑时不因为换封面去抓详情
-      const result = await window.api.videos.detail(item.id, { autoFetch: false })
+      const result = await window.api.videos.detail(item.id, {
+        autoFetch: false,
+        includeAdult: true
+      })
       if (result.ok && result.video) {
         const video = result.video
         setEditSources(video.sources)
@@ -432,10 +442,12 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
           vodActor: video.vodActor,
           vodClass: video.vodClass,
           pic: chosenPic,
-          hidden: video.hidden
+          hidden: video.hidden,
+          adult: video.adultManual
         })
         setDraftPic(chosenPic)
         setDraftHidden(video.hidden)
+        setDraftAdult(video.adultManual)
         form.setFieldsValue({
           note: video.note,
           intro: video.introExcerpt,
@@ -461,6 +473,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     if (values.vodClass !== editOriginal.vodClass) patch.vodClass = values.vodClass
     if (draftPic !== editOriginal.pic) patch.pic = draftPic
     if (draftHidden !== editOriginal.hidden) patch.hidden = draftHidden
+    if (draftAdult !== editOriginal.adult) patch.adult = draftAdult
     if (Object.keys(patch).length === 0) {
       message.info('没有改动')
       setEditOpen(false)
@@ -817,6 +830,11 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                     </Tag>
                   )}
                   {item.inSearch && <Tag color="purple">搜索推荐</Tag>}
+                  {item.adult && (
+                    <Tooltip title="18+ 视频：设置里关闭「显示 18+ 内容」后不再出现在展示端">
+                      <Tag color="red">18+</Tag>
+                    </Tooltip>
+                  )}
                   {item.hidden && <Tag color="default">已隐藏</Tag>}
                   {item.edited && <Tag color="processing">已编辑</Tag>}
                 </div>
@@ -958,6 +976,18 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                 </span>
               </div>
             </div>
+
+            <div className="video-edit-switch">
+              <Switch checked={draftAdult} onChange={setDraftAdult} />
+              <div>
+                <span className="video-edit-label">标记为 18+</span>
+                <span className="video-edit-hint">
+                  {editTarget?.adult && !editOriginal.adult
+                    ? '这个视频的来源站点或绑定分类已被标记为 18+：关闭「显示 18+ 内容」后即使这里不勾选，它也不会出现在展示端。'
+                    : '关闭「显示 18+ 内容」后，这个视频在推荐、找片看、搜索视频、播放页和共享页里都不再出现；控制台仍然能看到并编辑。'}
+                </span>
+              </div>
+            </div>
           </Form>
         </Spin>
       </Modal>
@@ -1068,6 +1098,7 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                     {detail.vodClass && <span>{detail.vodClass}</span>}
                     <span>{detail.sourceCount} 个来源</span>
                     <span>更新 {detail.latestTime}</span>
+                    {detail.adult && <Tag color="red">18+</Tag>}
                     {detail.hidden && <Tag color="default">已隐藏</Tag>}
                   </div>
                   {detail.vodActor && (
