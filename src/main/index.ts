@@ -54,6 +54,8 @@ import type {
   LanVideoCard
 } from './lan/lan-types'
 import { createPlayerWindowManager } from './player-window'
+import { createNetworkManager } from './network/network-manager'
+import { isValidProxyEndpoint, normalizeNetworkSettings } from './network/network-types'
 import type {
   HomeFeed,
   HomeFeedResult,
@@ -123,6 +125,8 @@ let isQuitting = false
 let registeredShortcut: string | null = null
 
 const appSettingsStore = createAppSettingsStore()
+// 网络代理：把「设置 › 网络」的配置套到默认会话上，启动时也要先套用再建窗口
+const networkManager = createNetworkManager()
 // 应用数据存 SQLite：userData/Data/cine-box.db，站点与视频分类共用这一个库
 const databaseFile = join(app.getPath('userData'), 'Data', 'cine-box.db')
 const siteStore = createSiteStore(databaseFile)
@@ -745,6 +749,31 @@ ipcMain.handle('settings:setCollectConcurrency', (_event, value: number) => {
   })
   return settings
 })
+
+ipcMain.handle('settings:setNetwork', async (_event, value: unknown) => {
+  const next = normalizeNetworkSettings(value)
+  // 自定义模式必须填完整才落盘：不完整的配置会把整台应用的网络切到直连
+  if (next.mode === 'custom' && !isValidProxyEndpoint(next)) {
+    return {
+      ok: false,
+      error: 'INVALID_PROXY',
+      message: '代理服务器地址或端口不完整，设置未保存',
+      settings: appSettingsStore.get()
+    }
+  }
+  const settings = appSettingsStore.setNetwork(next)
+  const applied = await networkManager.apply(settings.network)
+  return {
+    ok: applied.ok,
+    error: applied.error,
+    message: applied.message,
+    settings
+  }
+})
+
+ipcMain.handle('settings:testNetwork', (_event, input?: { settings?: unknown; url?: unknown }) =>
+  networkManager.test(input?.settings, input?.url)
+)
 
 /* ── IPC：下载中心 ── */
 
@@ -2697,6 +2726,9 @@ if (!gotTheLock) {
     })
 
     await appSettingsStore.init().catch(() => {})
+    // 先套用代理再初始化其它模块 / 建窗口：首屏封面和站点请求就该走代理
+    const networkApplied = await networkManager.apply(appSettingsStore.get().network)
+    if (!networkApplied.ok) console.error('网络代理初始化失败：', networkApplied.message)
     await siteStore.init().catch(() => {})
     await categoryStore.init().catch(() => {})
     await bindingStore.init().catch(() => {})
@@ -2782,6 +2814,8 @@ if (!gotTheLock) {
     downloadStore.flush()
     // 本机播放服务只在缓存播放时用，退出时关掉监听
     downloadHlsServer.dispose()
+    // 关掉本机代理桥接：它只是转发的中间层，不需要等退出流程
+    void networkManager.dispose()
     // 先关掉局域网监听，别让网页端在数据库关闭后还发请求进来
     lanService.dispose()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护

@@ -2159,6 +2159,150 @@
   line-height: 1.6;
 }
 
+/* ── 设置 · 网络 ── */
+
+/* stacked 设置行的控件容器本身是横向 flex，多行内容（输入 + 提示 + 结果）要自己竖排 */
+.network-field {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 双保险：即使控件外层没有 network-field（热更新只换了样式 / 老结构），
+   代理服务器与代理验证这两行的输入、提示和结果也必须竖排，不能挤到按钮右边 */
+.settings-row--stack .settings-row-control:has(.network-endpoint),
+.settings-row--stack .settings-row-control:has(.network-test) {
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.network-endpoint {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+
+.network-endpoint .ant-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.network-endpoint .ant-input-number {
+  width: 118px;
+  flex: none;
+}
+
+.network-auth {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.network-test {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+
+.network-test .ant-input-affix-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.network-hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.network-hint.is-error {
+  color: #e5484d;
+}
+
+.network-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.network-result .anticon {
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.network-result.is-ok {
+  border-color: color-mix(in srgb, #2f9e63 32%, var(--border));
+  background: color-mix(in srgb, #2f9e63 7%, var(--surface));
+}
+
+.network-result.is-ok .anticon {
+  color: #2f9e63;
+}
+
+.network-result.is-error {
+  border-color: color-mix(in srgb, #e5484d 32%, var(--border));
+  background: color-mix(in srgb, #e5484d 7%, var(--surface));
+}
+
+.network-result.is-error .anticon {
+  color: #e5484d;
+}
+
+.network-result-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.network-result-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+/* 保存条贴在可视区底部：设置项多，滚到一半也能看到是否还有未保存的修改 */
+.network-savebar {
+  position: sticky;
+  bottom: 8px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--text) 8%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.network-savebar .settings-row-desc {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .network-auth {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* 设置里的下载路径：等宽显示，单行省略，右侧接「更改目录 / 打开目录」 */
 .settings-path-row {
   display: flex;

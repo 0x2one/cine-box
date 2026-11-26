@@ -112,6 +112,65 @@ interface AppSettings {
   downloadConcurrency: number
   /** 单集内部同时下载的分片数（1–6） */
   downloadSegmentConcurrency: number
+  /** 网络代理配置 */
+  network: NetworkSettings
+}
+
+/** 代理模式：禁用 / 跟随系统 / 自定义 */
+type NetworkProxyMode = 'off' | 'system' | 'custom'
+/** 自定义代理协议：HTTP(S) 代理或 SOCKS5 代理 */
+type NetworkProxyType = 'http' | 'socks5'
+
+interface NetworkSettings {
+  mode: NetworkProxyMode
+  type: NetworkProxyType
+  /** 代理服务器地址（域名 / IPv4 / IPv6，不带协议） */
+  host: string
+  /** 代理端口；缺失或 0 时主进程回落成默认 7897 */
+  port: number
+  /** 代理身份验证，默认关闭 */
+  authEnabled: boolean
+  username: string
+  password: string
+  /** 代理验证地址，默认 https://www.google.com */
+  testUrl: string
+}
+
+interface SetNetworkResult {
+  ok: boolean
+  /** INVALID_PROXY：自定义代理没填完整；BRIDGE_FAILED：本机桥接启动失败 */
+  error?: 'INVALID_PROXY' | 'BRIDGE_FAILED'
+  message?: string
+  settings: AppSettings
+}
+
+interface NetworkTestInput {
+  /** 表单里的草稿配置，未保存也能验证 */
+  settings: NetworkSettings
+  /** 为空时用 settings.testUrl */
+  url?: string
+}
+
+interface NetworkTestResult {
+  ok: boolean
+  /** 实际验证的地址 */
+  url: string
+  /** HTTP 状态码，没拿到响应时为 0 */
+  status: number
+  elapsedMs: number
+  /** 这次验证使用的代理说明 */
+  proxy: string
+  error?:
+    | 'INVALID_URL'
+    | 'INVALID_PROXY'
+    | 'PROXY_UNREACHABLE'
+    | 'PROXY_AUTH'
+    | 'PROXY_CONNECT_FAILED'
+    | 'PROXY_PROTOCOL'
+    | 'TIMEOUT'
+    | 'NETWORK'
+    | 'BRIDGE_FAILED'
+  message: string
 }
 
 interface SetShortcutResult {
@@ -136,6 +195,10 @@ interface SettingsApi {
   setDefaultPicSite: (value: string) => Promise<AppSettings>
   /** 设置同时采集的站点数（1–4），返回保存后的设置；立即影响填槽，不打断在跑任务 */
   setCollectConcurrency: (value: number) => Promise<AppSettings>
+  /** 保存网络代理配置并立即套用 */
+  setNetwork: (value: NetworkSettings) => Promise<SetNetworkResult>
+  /** 用当前草稿配置验证代理链路（未保存也可以） */
+  testNetwork: (input: NetworkTestInput) => Promise<NetworkTestResult>
 }
 
 type SiteFormat = 'xml' | 'json'

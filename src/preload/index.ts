@@ -58,7 +58,11 @@ const api = {
     setDefaultPicSite: (value: string): Promise<AppSettings> =>
       ipcRenderer.invoke('settings:setDefaultPicSite', value),
     setCollectConcurrency: (value: number): Promise<AppSettings> =>
-      ipcRenderer.invoke('settings:setCollectConcurrency', value)
+      ipcRenderer.invoke('settings:setCollectConcurrency', value),
+    setNetwork: (value: NetworkSettings): Promise<SetNetworkResult> =>
+      ipcRenderer.invoke('settings:setNetwork', value),
+    testNetwork: (input: NetworkTestInput): Promise<NetworkTestResult> =>
+      ipcRenderer.invoke('settings:testNetwork', input)
   },
   downloads: {
     list: (): Promise<DownloadRecordView[]> => ipcRenderer.invoke('downloads:list'),

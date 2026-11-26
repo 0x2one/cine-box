@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Popconfirm, Progress, Segmented, Spin, Switch, Tooltip } from 'antd'
+import {
+  App,
+  Button,
+  Input,
+  InputNumber,
+  Popconfirm,
+  Progress,
+  Segmented,
+  Spin,
+  Switch,
+  Tooltip
+} from 'antd'
 import {
   ArrowLeftOutlined,
+  CheckCircleFilled,
   CheckOutlined,
   CloudDownloadOutlined,
   CompassOutlined,
@@ -9,13 +21,18 @@ import {
   DeleteOutlined,
   DesktopOutlined,
   EditOutlined,
+  ExclamationCircleFilled,
   ExpandOutlined,
   FolderOpenOutlined,
+  GlobalOutlined,
   HddOutlined,
   InfoCircleOutlined,
   LaptopOutlined,
+  LinkOutlined,
   MoonOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
+  SaveOutlined,
   SearchOutlined,
   SettingOutlined,
   SunOutlined,
@@ -28,7 +45,7 @@ import type { ThemeMode } from '../theme/appearance'
 import { formatBytes } from '../utils/format'
 import { AboutPanel } from './About'
 
-type SettingsSection = 'preferences' | 'shortcut' | 'download' | 'storage' | 'about'
+type SettingsSection = 'preferences' | 'network' | 'shortcut' | 'download' | 'storage' | 'about'
 
 const NAV_ITEMS: {
   key: SettingsSection
@@ -36,6 +53,7 @@ const NAV_ITEMS: {
   icon: typeof SettingOutlined
 }[] = [
   { key: 'preferences', label: '偏好设置', icon: SettingOutlined },
+  { key: 'network', label: '网络', icon: GlobalOutlined },
   { key: 'shortcut', label: '快捷键', icon: ThunderboltOutlined },
   { key: 'download', label: '下载', icon: CloudDownloadOutlined },
   { key: 'storage', label: '存储', icon: HddOutlined },
@@ -44,6 +62,7 @@ const NAV_ITEMS: {
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   preferences: { title: '偏好设置', desc: '启动、关闭、更新与外观' },
+  network: { title: '网络', desc: '代理与网络连接' },
   shortcut: { title: '快捷键', desc: '在任何应用中唤起映盒剧场' },
   download: { title: '下载', desc: '保存位置与同时下载任务数' },
   storage: { title: '存储', desc: '本地缓存占用与清理' },
@@ -289,6 +308,327 @@ function PreferencesPanel(): React.JSX.Element {
           description="检测到新版本后自动下载，安装前仍会征求你的确认"
         />
       </SettingsCard>
+    </>
+  )
+}
+
+/* ── 网络 ── */
+
+const NETWORK_MODE_OPTIONS: { value: NetworkProxyMode; label: string }[] = [
+  { value: 'off', label: '禁用' },
+  { value: 'system', label: '系统代理' },
+  { value: 'custom', label: '自定义' }
+]
+
+const NETWORK_MODE_DESC: Record<NetworkProxyMode, string> = {
+  off: '所有远程请求直连，即使操作系统设置了代理也不使用',
+  system: '跟随操作系统的代理设置（Windows「Internet 选项」/ macOS「网络」）',
+  custom: '使用下方填写的 HTTP 或 SOCKS5 代理服务器'
+}
+
+const DEFAULT_NETWORK_TEST_URL = 'https://www.google.com'
+
+/** 设置页里的一段人话，和主进程 describeNetwork 保持一致 */
+function describeNetworkSettings(settings: NetworkSettings): string {
+  if (settings.mode === 'system') return '跟随系统代理'
+  if (settings.mode === 'off') return '直连（不使用代理）'
+  const type = settings.type === 'socks5' ? 'SOCKS5' : 'HTTP'
+  const host = settings.host
+    ? `${
+        settings.host.includes(':') ? `[${settings.host}]` : settings.host
+      }${settings.port > 0 ? `:${settings.port}` : ''}`
+    : '未填写'
+  return `${type} 代理 ${host}${settings.authEnabled ? ' · 身份验证' : ''}`
+}
+
+/** 与主进程 isValidProxyHost 对齐的轻量校验：域名 / IPv4 / IPv6 */
+function isNetworkHostShape(host: string): boolean {
+  if (host.includes(':')) return /^[0-9a-f:.]+$/i.test(host)
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    return host.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255)
+  }
+  return /^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(
+    host
+  )
+}
+
+/** 表单的即时校验：只覆盖「填没填对」，代理能不能连由「验证」按钮回答 */
+function networkDraftProblem(settings: NetworkSettings): string | null {
+  if (settings.mode !== 'custom') return null
+  const host = settings.host.trim()
+  if (!host) return '请填写代理服务器地址'
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host)) return '代理服务器地址不要带 http:// 或 socks5:// 前缀'
+  if (/[\s/]/.test(host)) return '代理服务器地址不能包含空格或路径'
+  if (!isNetworkHostShape(host)) return '代理服务器地址只支持域名、IPv4 或 IPv6'
+  if (!Number.isInteger(settings.port) || settings.port < 1 || settings.port > 65535) {
+    return '端口需要是 1–65535 之间的整数'
+  }
+  if (settings.authEnabled && !settings.username.trim()) return '启用身份验证后需要填写用户名'
+  return null
+}
+
+function NetworkPanel(): React.JSX.Element {
+  const { message } = App.useApp()
+  const [saved, setSaved] = useState<NetworkSettings | null>(null)
+  const [draft, setDraft] = useState<NetworkSettings | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<NetworkTestResult | null>(null)
+  const [saveError, setSaveError] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    void window.api.settings
+      .get()
+      .then((settings) => {
+        if (!alive) return
+        setSaved(settings.network)
+        setDraft(settings.network)
+        setLoading(false)
+      })
+      .catch(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const patch = (value: Partial<NetworkSettings>): void => {
+    setDraft((current) => (current ? { ...current, ...value } : current))
+    setTestResult(null)
+    setSaveError('')
+  }
+
+  if (!draft || !saved) {
+    return (
+      <SettingsCard>
+        <div className="settings-row">
+          <span className="settings-row-desc">
+            {loading ? '正在读取网络设置…' : '读取网络设置失败'}
+          </span>
+        </div>
+      </SettingsCard>
+    )
+  }
+
+  const problem = networkDraftProblem(draft)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved)
+  // 套用失败（例如本机桥接没起来）时配置已经落盘，需要允许原样重试
+  const canSave = (dirty || Boolean(saveError)) && !problem && !saving
+
+  const save = async (): Promise<void> => {
+    const invalid = networkDraftProblem(draft)
+    if (invalid) {
+      message.error(invalid)
+      return
+    }
+    setSaving(true)
+    try {
+      const result = await window.api.settings.setNetwork(draft)
+      setSaved(result.settings.network)
+      if (result.ok) {
+        setDraft(result.settings.network)
+        setSaveError('')
+        message.success('网络设置已保存并生效')
+      } else {
+        setSaveError(result.message || '网络设置保存失败')
+        message.error(result.message || '网络设置保存失败')
+      }
+    } catch {
+      message.error('保存网络设置失败，请稍后重试')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const test = async (): Promise<void> => {
+    const invalid = networkDraftProblem(draft)
+    if (invalid) {
+      message.error(invalid)
+      return
+    }
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await window.api.settings.testNetwork({
+        settings: draft,
+        url: draft.testUrl
+      })
+      setTestResult(result)
+      if (result.ok) message.success(result.message)
+      else message.error(result.message)
+    } catch {
+      message.error('代理验证失败，请稍后重试')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <>
+      <SettingsCard>
+        <SettingRow stacked title="代理模式" description={NETWORK_MODE_DESC[draft.mode]}>
+          <Segmented
+            value={draft.mode}
+            disabled={loading}
+            onChange={(value) => patch({ mode: value as NetworkProxyMode })}
+            options={NETWORK_MODE_OPTIONS}
+          />
+        </SettingRow>
+        <div className="settings-note">
+          代理开启后，预览图、播放视频、站点接口数据以及局域网共享页里的远程封面与视频都由代理转发；
+          本地缓存、本机播放服务与局域网地址始终直连。
+        </div>
+      </SettingsCard>
+
+      {draft.mode === 'custom' && (
+        <SettingsCard>
+          <SettingRow
+            title="代理协议"
+            description="HTTP 代理走 CONNECT 隧道，SOCKS5 由代理端解析域名"
+          >
+            <Segmented
+              value={draft.type}
+              onChange={(value) => patch({ type: value as NetworkProxyType })}
+              options={[
+                { value: 'http', label: 'HTTP' },
+                { value: 'socks5', label: 'SOCKS5' }
+              ]}
+            />
+          </SettingRow>
+          <SettingRow
+            stacked
+            title="代理服务器"
+            description="只填地址和端口；支持域名、IPv4 与 IPv6，不要带协议前缀"
+          >
+            <div className="network-field">
+              <div className="network-endpoint">
+                <Input
+                  value={draft.host}
+                  placeholder="127.0.0.1 或 proxy.example.com"
+                  allowClear
+                  spellCheck={false}
+                  autoComplete="off"
+                  onChange={(event) => patch({ host: event.target.value })}
+                />
+                <InputNumber
+                  value={draft.port > 0 ? draft.port : null}
+                  min={1}
+                  max={65535}
+                  precision={0}
+                  placeholder="端口"
+                  onChange={(value) => patch({ port: Number(value) || 0 })}
+                />
+              </div>
+              {problem && <span className="network-hint is-error">{problem}</span>}
+            </div>
+          </SettingRow>
+          <SettingRow title="身份验证" description="代理服务器要求用户名密码时打开，默认关闭">
+            <Switch
+              checked={draft.authEnabled}
+              onChange={(checked) => patch({ authEnabled: checked })}
+            />
+          </SettingRow>
+          {draft.authEnabled && (
+            <SettingRow
+              stacked
+              title="代理账号"
+              description="HTTP 代理使用 Basic 认证；SOCKS5 使用用户名密码认证，凭据只保存在本机设置文件里"
+            >
+              <div className="network-auth">
+                <Input
+                  value={draft.username}
+                  placeholder="用户名"
+                  autoComplete="off"
+                  onChange={(event) => patch({ username: event.target.value })}
+                />
+                <Input.Password
+                  value={draft.password}
+                  placeholder="密码"
+                  autoComplete="new-password"
+                  onChange={(event) => patch({ password: event.target.value })}
+                />
+              </div>
+            </SettingRow>
+          )}
+        </SettingsCard>
+      )}
+
+      <SettingsCard>
+        <SettingRow
+          stacked
+          title="代理验证"
+          description="用当前填写的配置访问目标地址，未保存的修改也可以先验证"
+        >
+          <div className="network-field">
+            <div className="network-test">
+              <Input
+                value={draft.testUrl}
+                placeholder={DEFAULT_NETWORK_TEST_URL}
+                prefix={<LinkOutlined />}
+                allowClear
+                spellCheck={false}
+                onChange={(event) => patch({ testUrl: event.target.value })}
+              />
+              <Button
+                icon={<SafetyCertificateOutlined />}
+                loading={testing}
+                disabled={Boolean(problem)}
+                onClick={() => void test()}
+              >
+                验证
+              </Button>
+            </div>
+            {testing && (
+              <span className="network-hint">
+                正在通过代理请求 {draft.testUrl || DEFAULT_NETWORK_TEST_URL}…
+              </span>
+            )}
+            {!testing && testResult && (
+              <div className={`network-result${testResult.ok ? ' is-ok' : ' is-error'}`}>
+                {testResult.ok ? <CheckCircleFilled /> : <ExclamationCircleFilled />}
+                <div className="network-result-text">
+                  <span>{testResult.message}</span>
+                  <span className="network-result-meta">
+                    {testResult.proxy}
+                    {testResult.status > 0 ? ` · HTTP ${testResult.status}` : ''} ·{' '}
+                    {testResult.elapsedMs} ms
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </SettingRow>
+        <div className="settings-note">
+          默认验证地址是 {DEFAULT_NETWORK_TEST_URL}，也可以换成任意 http(s) 地址；返回任意 HTTP
+          状态码都表示代理链路已经连通。
+        </div>
+      </SettingsCard>
+
+      <div className="network-savebar">
+        <div className="settings-row-text">
+          <span className="settings-row-title">
+            {dirty ? '有未保存的更改' : saveError ? '修改已保存，但未生效' : '网络设置已保存'}
+          </span>
+          <span className="settings-row-desc">
+            {dirty
+              ? `保存后生效：${describeNetworkSettings(draft)}`
+              : `当前配置：${describeNetworkSettings(saved)}`}
+          </span>
+          {saveError && <span className="network-hint is-error">{saveError}</span>}
+        </div>
+        <Button
+          type="primary"
+          icon={<SaveOutlined />}
+          disabled={!canSave}
+          loading={saving}
+          onClick={() => void save()}
+        >
+          保存
+        </Button>
+      </div>
     </>
   )
 }
@@ -987,6 +1327,7 @@ function Settings({ onBack }: { onBack: () => void }): React.JSX.Element {
             <p className="settings-panel-desc">{meta.desc}</p>
           </div>
           {section === 'preferences' && <PreferencesPanel />}
+          {section === 'network' && <NetworkPanel />}
           {section === 'shortcut' && <ShortcutPanel />}
           {section === 'download' && <DownloadPanel />}
           {section === 'storage' && <StoragePanel />}

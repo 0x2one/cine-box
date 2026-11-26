@@ -2,6 +2,11 @@ import { app } from 'electron'
 import { mkdirSync, promises as fsp, writeFileSync } from 'fs'
 import { join } from 'path'
 import { DEFAULT_WINDOW_SIZE, isAppWindowSize, type AppWindowSize } from './window-size'
+import {
+  DEFAULT_NETWORK_SETTINGS,
+  normalizeNetworkSettings,
+  type NetworkSettings
+} from './network/network-types'
 
 /** 默认全局快捷键：在任何地方唤起 / 隐藏主窗口 */
 export const DEFAULT_SHOW_SHORTCUT = 'Ctrl+Shift+Space'
@@ -88,6 +93,8 @@ export interface AppSettings {
   downloadConcurrency: number
   /** 单集内部同时下载的分片数（1–6） */
   downloadSegmentConcurrency: number
+  /** 网络代理：禁用 / 系统代理 / 自定义（HTTP、SOCKS5，可选身份验证） */
+  network: NetworkSettings
 }
 
 interface StoreFile {
@@ -103,6 +110,7 @@ interface StoreFile {
   downloadPath?: string
   downloadConcurrency?: number
   downloadSegmentConcurrency?: number
+  network?: Partial<NetworkSettings>
 }
 
 const DEFAULTS: AppSettings = {
@@ -117,7 +125,8 @@ const DEFAULTS: AppSettings = {
   // 读取配置时再落到系统下载目录（此时 app 已就绪），这里只占位
   downloadPath: '',
   downloadConcurrency: DEFAULT_DOWNLOAD_CONCURRENCY,
-  downloadSegmentConcurrency: DEFAULT_DOWNLOAD_SEGMENT_CONCURRENCY
+  downloadSegmentConcurrency: DEFAULT_DOWNLOAD_SEGMENT_CONCURRENCY,
+  network: { ...DEFAULT_NETWORK_SETTINGS }
 }
 
 export interface AppSettingsStore {
@@ -138,6 +147,8 @@ export interface AppSettingsStore {
   setDownloadConcurrency: (value: number | null) => AppSettings
   /** 单集内部的分片并发（1–6）；对之后开始的缓存任务生效 */
   setDownloadSegmentConcurrency: (value: number | null) => AppSettings
+  /** 网络代理配置；保存后由主进程立刻套用到 Chromium 网络栈 */
+  setNetwork: (value: unknown) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -164,7 +175,7 @@ function readOpenAtLogin(): boolean {
 
 export function createAppSettingsStore(): AppSettingsStore {
   const file = join(app.getPath('userData'), 'app-settings.json')
-  let settings: AppSettings = { ...DEFAULTS }
+  let settings: AppSettings = { ...DEFAULTS, network: { ...DEFAULT_NETWORK_SETTINGS } }
 
   async function readFile(): Promise<void> {
     try {
@@ -191,10 +202,15 @@ export function createAppSettingsStore(): AppSettingsStore {
         downloadConcurrency: clampDownloadConcurrency(data?.downloadConcurrency),
         downloadSegmentConcurrency: clampDownloadSegmentConcurrency(
           data?.downloadSegmentConcurrency
-        )
+        ),
+        network: normalizeNetworkSettings(data?.network)
       }
     } catch {
-      settings = { ...DEFAULTS, downloadPath: defaultDownloadPath() }
+      settings = {
+        ...DEFAULTS,
+        downloadPath: defaultDownloadPath(),
+        network: { ...DEFAULT_NETWORK_SETTINGS }
+      }
     }
   }
 
@@ -211,7 +227,8 @@ export function createAppSettingsStore(): AppSettingsStore {
       collectConcurrency: settings.collectConcurrency,
       downloadPath: settings.downloadPath,
       downloadConcurrency: settings.downloadConcurrency,
-      downloadSegmentConcurrency: settings.downloadSegmentConcurrency
+      downloadSegmentConcurrency: settings.downloadSegmentConcurrency,
+      network: settings.network
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -294,6 +311,11 @@ export function createAppSettingsStore(): AppSettingsStore {
     },
     setDownloadSegmentConcurrency: (value: number | null) => {
       settings = { ...settings, downloadSegmentConcurrency: clampDownloadSegmentConcurrency(value) }
+      persist()
+      return snapshot()
+    },
+    setNetwork: (value: unknown) => {
+      settings = { ...settings, network: normalizeNetworkSettings(value) }
       persist()
       return snapshot()
     }
