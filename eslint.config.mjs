@@ -6,7 +6,8 @@ import eslintPluginReactHooks from 'eslint-plugin-react-hooks'
 import eslintPluginReactRefresh from 'eslint-plugin-react-refresh'
 
 export default defineConfig(
-  { ignores: ['**/node_modules', '**/dist', '**/out'] },
+  // tmp / .tmp 是 .gitignore 里的本地草稿目录（截图、临时脚本），不参与 lint
+  { ignores: ['**/node_modules', '**/dist', '**/out', '**/tmp', '**/.tmp'] },
   tseslint.configs.recommended,
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat['jsx-runtime'],
