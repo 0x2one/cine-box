@@ -674,7 +674,7 @@ function SitesPanel({
         confirmLoading={saving}
         onOk={() => void submit()}
         onCancel={closeForm}
-        width={600}
+        width={720}
       >
         <Form
           form={form}
@@ -735,22 +735,28 @@ function SitesPanel({
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item
-            name="disabled"
-            label="禁用站点"
-            valuePropName="checked"
-            extra="禁用后仍然可以编辑，但不再采集、不参与搜索（本地 / 在线），推荐页与列表页也不再显示只属于它的视频；缓存数据保留，重新启用即恢复。"
-          >
-            <Switch checkedChildren="已禁用" unCheckedChildren="正常" />
-          </Form.Item>
-          <Form.Item
-            name="adult"
-            label="18+ 站点"
-            valuePropName="checked"
-            extra="标记后，设置里关闭「显示 18+ 内容」时，这个站点的视频在推荐、找片看、搜索视频、播放页和局域网共享页里都不可见；控制台仍然能看到并管理。"
-          >
-            <Switch checkedChildren="18+" unCheckedChildren="普通" />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="disabled"
+                label="禁用站点"
+                valuePropName="checked"
+                extra="禁用后不再采集，也不参与本地 / 在线搜索，展示端不再显示只属于它的视频；缓存保留，重新启用即恢复。"
+              >
+                <Switch checkedChildren="已禁用" unCheckedChildren="正常" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="adult"
+                label="18+ 站点"
+                valuePropName="checked"
+                extra="设置里关闭「显示 18+ 内容」后，它的视频在推荐、找片看、搜索、播放页和共享页都不可见；控制台仍可见。"
+              >
+                <Switch checkedChildren="18+" unCheckedChildren="普通" />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="remark" label="备注">
             <Input.TextArea
               rows={3}

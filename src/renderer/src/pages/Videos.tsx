@@ -23,7 +23,8 @@ import {
   InfoCircleOutlined,
   PictureOutlined,
   ReloadOutlined,
-  RightOutlined
+  RightOutlined,
+  SafetyOutlined
 } from '@ant-design/icons'
 import FallbackImage from '../components/FallbackImage'
 import { formatDateTime } from '../utils/format'
@@ -538,6 +539,24 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
     }
   }
 
+  /**
+   * 手工 18+ 标记：只切人工标记（video_edits.adult），来源站点 / 绑定分类带来的
+   * 18+ 判定不受影响，所以按钮的开关态看 adultManual 而不是 adult。
+   */
+  const toggleAdult = async (item: VideoListItem): Promise<void> => {
+    try {
+      const result = await window.api.videos.update(item.id, { adult: !item.adultManual })
+      if (!result.ok) {
+        message.error('操作失败')
+        return
+      }
+      message.success(item.adultManual ? '已取消 18+ 标记' : '已标记为 18+')
+      await loadPage()
+    } catch {
+      message.error('操作失败')
+    }
+  }
+
   /** 加进推荐页的海报叠层；已经在里面的按钮是禁用的 */
   const addToPoster = async (item: VideoListItem): Promise<void> => {
     try {
@@ -800,6 +819,33 @@ function VideosPanel({ title, desc }: { title: string; desc: string }): React.JS
                   icon={item.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
                   aria-label={item.hidden ? '恢复显示' : '隐藏'}
                   onClick={() => void toggleHidden(item)}
+                />
+              </Tooltip>,
+              <Tooltip
+                key="adult"
+                title={
+                  item.adultManual
+                    ? '取消 18+ 标记'
+                    : item.adult
+                      ? '标记为 18+（来源已标记）'
+                      : '标记为 18+'
+                }
+              >
+                <Button
+                  className={`video-action video-action-adult${item.adultManual ? ' is-on' : ''}`}
+                  type="text"
+                  size="small"
+                  // 未标记时用中性盾牌，只有真的手工标记过才亮出「18+」，
+                  // 免得卡片上一堆「18+」按钮被当成「这条已经是 18+」
+                  icon={
+                    item.adultManual ? (
+                      <span className="video-adult-flag">18+</span>
+                    ) : (
+                      <SafetyOutlined />
+                    )
+                  }
+                  aria-label={item.adultManual ? '取消 18+ 标记' : '标记为 18+'}
+                  onClick={() => void toggleAdult(item)}
                 />
               </Tooltip>
             ]}

@@ -4117,6 +4117,21 @@ body .site-form .ant-form-item-extra {
   opacity: 1;
 }
 
+/* 18+ 行内开关：手工标记后图标才换成「18+」字牌并点亮成警示红（未标记是中性盾牌），
+   红色与分类页、站点卡片上的 18+ 标记同一颗 */
+.video-list .ant-list-item-action .video-action-adult.is-on.ant-btn,
+.video-list .ant-list-item-action .video-action-adult.is-on.ant-btn:hover {
+  color: #e5484d;
+  opacity: 1;
+}
+
+.video-adult-flag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1;
+}
+
 .video-list .ant-list-item-action .ant-list-item-action-split {
   background: color-mix(in srgb, var(--border-strong) 60%, transparent);
 }
