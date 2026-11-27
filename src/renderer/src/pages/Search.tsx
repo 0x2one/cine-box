@@ -286,6 +286,23 @@ function SearchResultRow({
 }
 
 /**
+ * 初始态的动态背景：三团跟随强调色的光斑 + 一层极淡的细网格 + 一颗跟着指针走的光斑。
+ * 纯装饰（aria-hidden、pointer-events: none），所有动作只用 transform / opacity，
+ * 浓度收在 search.css 的 --aurora-* 变量里；提交搜索后随初始态一起卸载。
+ */
+function SearchAurora(): React.JSX.Element {
+  return (
+    <div className="search-aurora" aria-hidden="true">
+      <div className="search-aurora-blob is-a" />
+      <div className="search-aurora-blob is-b" />
+      <div className="search-aurora-blob is-c" />
+      <div className="search-aurora-grid" />
+      <div className="search-aurora-spot" />
+    </div>
+  )
+}
+
+/**
  * 展示端搜索页：按片名检索已采集的视频（只搜展示中的）。
  * 初始态是居中的搜索落地页（搜索历史 / 分类入口 / 片库规模），
  * 提交后搜索条吸顶、结果按控制台「视频」的预览行排版，滚动到底自动取下一页。
@@ -702,6 +719,43 @@ function SearchView({
     }
   }, [])
 
+  /**
+   * 初始态背景里那颗跟着指针走的光斑：只往 .search-view 上写 CSS 变量，
+   * 不 setState，所以鼠标一动不会触发 React 重渲染。
+   * 触摸屏没有「悬停」，开了「减少动态效果」也不动，两种情况都不挂监听。
+   */
+  useEffect(() => {
+    if (keyword) return
+    const root = rootRef.current
+    if (!root) return
+    if (!window.matchMedia('(pointer: fine)').matches) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    let frame = 0
+    let clientX = 0
+    let clientY = 0
+    // 每帧只量一次容器位置（滚动 / 窗口变化后仍然准），写变量不进 React
+    const apply = (): void => {
+      frame = 0
+      const rect = root.getBoundingClientRect()
+      root.style.setProperty('--spot-x', `${clientX - rect.left}px`)
+      root.style.setProperty('--spot-y', `${clientY - rect.top}px`)
+      root.style.setProperty('--spot-live', '1')
+    }
+    const onMove = (event: PointerEvent): void => {
+      clientX = event.clientX
+      clientY = event.clientY
+      if (!frame) frame = window.requestAnimationFrame(apply)
+    }
+    root.addEventListener('pointermove', onMove, { passive: true })
+    return () => {
+      root.removeEventListener('pointermove', onMove)
+      if (frame) window.cancelAnimationFrame(frame)
+      root.style.removeProperty('--spot-x')
+      root.style.removeProperty('--spot-y')
+      root.style.removeProperty('--spot-live')
+    }
+  }, [keyword])
+
   /** 在线结果里的站点名：只用于失败提示，站点已被删除时退化到 id 前缀 */
   const siteLabelOf = (siteId: string): string => {
     const site = sites.find((row) => row.id === siteId)
@@ -762,6 +816,9 @@ function SearchView({
   return (
     <div className="search-view" ref={rootRef}>
       <h1 className="visually-hidden">搜索</h1>
+
+      {/* 动态背景只属于初始态：提交搜索后整层卸载，结果页一点开销都没有 */}
+      {!keyword && <SearchAurora />}
 
       {/* 只有进入结果页才有顶部搜索条；初始态是一个居中的搜索落地页 */}
       {keyword && (
