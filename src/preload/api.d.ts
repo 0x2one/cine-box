@@ -76,12 +76,14 @@ interface PlayerApi {
 }
 
 /**
- * 播放窗需要跟随的外观：播放页固定深色（不跟主窗口明暗主题），
- * 只需要主窗口当前选中的强调色；底色由主进程固定成深色。
+ * 播放窗需要跟随的外观：播放页固定深色（不跟主窗口明暗模式），
+ * 跟着主窗口选中的主题配色走深色那一份，再叠加强调色；窗口底色由主进程固定成深色。
  */
 interface PlayerAppearance {
   /** 强调色 key（见 theme/appearance.ts 的 ACCENTS） */
   accent: string
+  /** 主题配色 key（见 theme/appearance.ts 的 THEMES） */
+  theme: string
 }
 
 interface AppearanceApi {

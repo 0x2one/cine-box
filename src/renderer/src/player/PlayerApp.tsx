@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LeftOutlined, ReloadOutlined, RightOutlined, VideoCameraOutlined } from '@ant-design/icons'
-import { applyPlayerAppearance, findAccent } from '../theme/appearance'
+import { applyPlayerAppearance, findAccent, findTheme } from '../theme/appearance'
 import { formatBytes } from '../utils/format'
 import PlayerPanel, { type PlayerPanelTab } from './PlayerPanel'
 import PlayerTitleBar from './PlayerTitleBar'
@@ -957,7 +957,7 @@ function LocalSession({
 
 /**
  * 独立播放窗口的页面：先取主进程给的播放载荷，再交给按 token 挂载的会话组件。
- * 播放页固定深色，只跟随主窗口的强调色；面板开合状态放在这一层，换片不会重置。
+ * 播放页固定深色，跟随主窗口的强调色与主题配色的深色那一份；面板开合状态放在这一层，换片不会重置。
  */
 function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Element {
   const [payload, setPayload] = useState<PlayerPayload | null>(null)
@@ -996,10 +996,11 @@ function PlayerApp({ initialAccent }: { initialAccent: string }): React.JSX.Elem
     }
   }, [])
 
-  // 主窗口切换强调色：播放页固定深色，只换强调色变量，再更新 ArtPlayer 的主题色
+  // 主窗口切换强调色 / 主题配色：播放页固定深色，换的是深色那一份 CSS 变量，
+  // 再更新 ArtPlayer 的主题色
   useEffect(() => {
     return window.api.appearance.onChange((value) => {
-      applyPlayerAppearance(findAccent(value.accent))
+      applyPlayerAppearance(findAccent(value.accent), findTheme(value.theme))
       setAccentKey(value.accent)
     })
   }, [])

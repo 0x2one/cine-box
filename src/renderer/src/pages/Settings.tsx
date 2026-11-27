@@ -40,7 +40,7 @@ import {
   ThunderboltOutlined,
   UndoOutlined
 } from '@ant-design/icons'
-import { ACCENTS } from '../theme/appearance'
+import { ACCENTS, THEMES } from '../theme/appearance'
 import { useTheme } from '../theme/theme-context'
 import type { ThemeMode } from '../theme/appearance'
 import { clearLastFeed } from '../lib/feed-cache'
@@ -256,13 +256,13 @@ function WindowSizeRow(): React.JSX.Element {
 }
 
 function PreferencesPanel(): React.JSX.Element {
-  const { mode, setMode, accent, setAccent } = useTheme()
+  const { mode, resolved, setMode, theme, setTheme, accent, setAccent } = useTheme()
 
   return (
     <>
-      {/* 外观合并进偏好设置：主题、主题色、界面语言排在启动 / 关闭等开关之前 */}
+      {/* 外观合并进偏好设置：明暗模式、主题配色、强调色排在启动 / 关闭等开关之前 */}
       <SettingsCard>
-        <SettingRow title="主题" description="跟随系统时，明暗会随操作系统自动切换">
+        <SettingRow title="明暗模式" description="跟随系统时，明暗会随操作系统自动切换">
           <Segmented
             value={mode}
             onChange={(value) => setMode(value as ThemeMode)}
@@ -272,6 +272,52 @@ function PreferencesPanel(): React.JSX.Element {
               { value: 'dark', label: '深色', icon: <MoonOutlined /> }
             ]}
           />
+        </SettingRow>
+        <SettingRow
+          stacked
+          title="主题配色"
+          description="窗口底色、卡片与边框；每套都带浅色和深色两份，和强调色可任意搭配"
+        >
+          <div className="theme-swatches">
+            {THEMES.map((item) => {
+              // item 来自常量表，理论上不会为空；这里只是把类型收窄
+              if (!item) return null
+              const selected = item.key === theme.key
+              const palette = item[resolved]
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`theme-swatch${selected ? ' is-active' : ''}`}
+                  title={`${item.name}｜${item.hint}`}
+                  aria-label={item.name}
+                  aria-pressed={selected}
+                  onClick={() => setTheme(item.key)}
+                >
+                  <span
+                    className="theme-swatch-preview"
+                    style={{ background: palette.bg, borderColor: palette.border }}
+                  >
+                    <span
+                      className="theme-swatch-bar"
+                      style={{ background: palette.titlebar, borderColor: palette.border }}
+                    />
+                    <span
+                      className="theme-swatch-card"
+                      style={{ background: palette.surface, borderColor: palette.border }}
+                    >
+                      <span className="theme-swatch-line" style={{ background: palette.text }} />
+                      <span
+                        className="theme-swatch-line is-short"
+                        style={{ background: palette.textMuted }}
+                      />
+                    </span>
+                  </span>
+                  <span className="theme-swatch-name">{item.name}</span>
+                </button>
+              )
+            })}
+          </div>
         </SettingRow>
         <SettingRow stacked title="强调色" description="按钮、选中态与链接使用的主色">
           <div className="accent-swatches">

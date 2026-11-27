@@ -3070,7 +3070,110 @@
   color: var(--accent);
 }
 
-/* ── 主题色 ── */
+/* ── 主题配色 ── */
+
+.theme-swatches {
+  display: grid;
+  width: 100%;
+  /* 固定 4 列：8 套配色正好两行，窗口变窄也不会只掉一个到第二行 */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 10px;
+}
+
+.theme-swatch {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+/* 小预览就按这套配色的真实色值画：标题栏、卡片、两条文字线 */
+.theme-swatch-preview {
+  position: relative;
+  display: block;
+  height: 64px;
+  overflow: hidden;
+  border: 1px solid;
+  border-radius: 9px;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.theme-swatch:hover .theme-swatch-preview {
+  transform: translateY(-1px);
+}
+
+.theme-swatch-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 13px;
+  border-bottom: 1px solid;
+}
+
+.theme-swatch-card {
+  position: absolute;
+  top: 22px;
+  bottom: 9px;
+  left: 10px;
+  display: flex;
+  width: 48%;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid;
+  border-radius: 5px;
+}
+
+.theme-swatch-line {
+  height: 3px;
+  border-radius: 2px;
+  opacity: 0.8;
+}
+
+.theme-swatch-line.is-short {
+  width: 64%;
+  opacity: 0.45;
+}
+
+.theme-swatch-name {
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-swatch.is-active .theme-swatch-name {
+  color: var(--text);
+}
+
+/* 选中环用强调色：和强调色色块一样，表示「当前生效」而不是这套配色本身 */
+.theme-swatch.is-active .theme-swatch-preview {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+
+.theme-swatch:focus-visible {
+  outline: none;
+}
+
+.theme-swatch:focus-visible .theme-swatch-preview {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+/* ── 强调色 ── */
 
 .accent-swatches {
   display: flex;

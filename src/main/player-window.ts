@@ -41,8 +41,9 @@ export interface PlayerOpenResult {
 }
 
 /**
- * 播放窗的固定底色：播放页固定深色（不跟主窗口明暗主题），
- * 和应用深色色板的 bg 一致。主进程不引渲染层的色板，所以在这里写常量。
+ * 播放窗的固定底色：播放页固定深色（不跟主窗口明暗模式），
+ * 取默认配色的深色 bg。渲染层换配色时只改播放页里的 CSS 变量，
+ * 窗口底色保持这个值，避免刚打开时闪一下别的颜色。
  */
 const PLAYER_BG = '#0c0f13'
 
@@ -50,7 +51,7 @@ const PLAYER_BG = '#0c0f13'
  * 独立播放窗口。
  *
  * 只保留一个窗口：再点别的集数时把新载荷推给已经打开的窗口，不堆一屏播放器。
- * 窗口是无边框 + 固定暗色底，标题栏由播放页自己画，所以不会跟应用主题走。
+ * 窗口是无边框 + 固定暗色底，标题栏由播放页自己画；配色只跟主窗口的深色那一份走。
  */
 export function createPlayerWindowManager(options: { preload: string; icon: string }): {
   open: (input: PlayerOpenInput) => PlayerOpenResult
@@ -58,7 +59,7 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
   let playerWindow: BrowserWindow | null = null
   let payload: PlayerPayload | null = null
   let token = 0
-  /** 主窗口当前的强调色：播放窗创建后取一次，之后主窗口每次切换都转发过去 */
+  /** 主窗口当前的强调色与配色：播放窗创建后取一次，之后主窗口每次切换都转发过去 */
   let appearance: PlayerAppearance | null = null
 
   function rendererUrl(): string | null {
@@ -222,10 +223,12 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
   ipcMain.handle('appearance:set', (_event, value: PlayerAppearance) => {
     if (!value) return
     appearance = {
-      accent: typeof value.accent === 'string' && value.accent ? value.accent : 'cine'
+      accent: typeof value.accent === 'string' && value.accent ? value.accent : 'cine',
+      // 配色 key 由渲染层定义，主进程只做透传；播放页查不到会回落到默认色板
+      theme: typeof value.theme === 'string' && value.theme ? value.theme : 'mist'
     }
     if (playerWindow && !playerWindow.isDestroyed()) {
-      // 播放页固定深色底，只把强调色转给已打开的播放窗，不需要重新打开
+      // 播放页固定深色底，只把强调色与配色转给已打开的播放窗，不需要重新打开
       playerWindow.setBackgroundColor(PLAYER_BG)
       playerWindow.webContents.send('appearance:change', appearance)
     }
