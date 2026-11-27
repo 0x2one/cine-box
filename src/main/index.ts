@@ -43,6 +43,8 @@ import { createHomeStore } from './home-store'
 import { createLanService } from './lan/lan-service'
 import { createLanCache } from './lan/lan-cache'
 import { isHlsUrl } from './lan/lan-media-url'
+import { createMcpServer } from './mcp/mcp-server'
+import { MCP_REQUIRED_CHANNELS } from './mcp/channels'
 import type {
   LanBrowsePayload,
   LanBrowseQuery,
@@ -743,6 +745,56 @@ function createWindow(): void {
   }
 }
 
+/* ── 内部 IPC 分发：MCP 工具复用现有 handler，不复制业务逻辑 ── */
+
+type InternalIpcHandler = (event: Electron.IpcMainInvokeEvent, ...args: never[]) => unknown
+
+const internalIpcHandlers = new Map<string, InternalIpcHandler>()
+const registerIpcHandler = ipcMain.handle.bind(ipcMain)
+
+/**
+ * 注册 IPC handler 的同时留一份引用。MCP 工具通过 invokeInternal 调用同一份逻辑，
+ * 保证界面与 MCP 的副作用（缓存失效、推荐重算、采集唤醒等）完全一致。
+ */
+function handleIpc<Args extends unknown[]>(
+  channel: string,
+  listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => unknown
+): void {
+  internalIpcHandlers.set(channel, listener as unknown as InternalIpcHandler)
+  registerIpcHandler(channel, listener)
+}
+
+/**
+ * MCP 侧没有真实 IpcMainInvokeEvent：给一个只实现进度推送所需方法的桩。
+ * 目前只有 cache / 封面同步这类 handler 用 event.sender，MCP 不暴露它们；
+ * 桩仍然把 send 转发到主窗口，避免以后复用这些通道时丢事件。
+ */
+const internalEvent = {
+  sender: {
+    isDestroyed: (): boolean => false,
+    send: (channel: string, ...args: unknown[]): void => sendToRenderer(channel, ...args)
+  }
+} as unknown as Electron.IpcMainInvokeEvent
+
+async function invokeInternal(channel: string, ...args: unknown[]): Promise<unknown> {
+  const listener = internalIpcHandlers.get(channel)
+  if (!listener) throw new Error(`未注册的 IPC 通道：${channel}`)
+  return await (listener as (event: Electron.IpcMainInvokeEvent, ...rest: unknown[]) => unknown)(
+    internalEvent,
+    ...args
+  )
+}
+
+const mcpServer = createMcpServer({
+  settings: {
+    get: () => appSettingsStore.get().mcp,
+    save: (next) => appSettingsStore.setMcp(next).mcp
+  },
+  version: app.getVersion(),
+  invoke: invokeInternal,
+  onChange: (snapshot) => sendToRenderer('mcp:changed', snapshot)
+})
+
 /* ── IPC：窗口控制 ── */
 
 /** 窗口控制按调用方定位：主窗口和播放窗口共用同一套通道 */
@@ -750,11 +802,11 @@ function senderWindow(event: Electron.IpcMainInvokeEvent): BrowserWindow | null 
   return BrowserWindow.fromWebContents(event.sender)
 }
 
-ipcMain.handle('window:minimize', (event) => {
+handleIpc('window:minimize', (event) => {
   senderWindow(event)?.minimize()
 })
 
-ipcMain.handle('window:maximize', (event) => {
+handleIpc('window:maximize', (event) => {
   const window = senderWindow(event)
   if (!window) return
   if (window.isMaximized()) {
@@ -764,21 +816,21 @@ ipcMain.handle('window:maximize', (event) => {
   }
 })
 
-ipcMain.handle('window:close', (event) => {
+handleIpc('window:close', (event) => {
   senderWindow(event)?.close()
 })
 
-ipcMain.handle('window:isMaximized', (event) => senderWindow(event)?.isMaximized() ?? false)
+handleIpc('window:isMaximized', (event) => senderWindow(event)?.isMaximized() ?? false)
 
 /* ── IPC：应用设置 ── */
 
-ipcMain.handle('settings:get', () => appSettingsStore.get())
+handleIpc('settings:get', () => appSettingsStore.get())
 
-ipcMain.handle('settings:setOpenAtLogin', (_event, value: boolean) =>
+handleIpc('settings:setOpenAtLogin', (_event, value: boolean) =>
   appSettingsStore.setOpenAtLogin(Boolean(value))
 )
 
-ipcMain.handle('settings:setCloseToTray', (_event, value: boolean) => {
+handleIpc('settings:setCloseToTray', (_event, value: boolean) => {
   const settings = appSettingsStore.setCloseToTray(Boolean(value))
   syncTrayWithSettings()
   // 关掉「最小化到托盘」时，如果窗口正藏在托盘里就把它拉回来
@@ -788,45 +840,43 @@ ipcMain.handle('settings:setCloseToTray', (_event, value: boolean) => {
   return settings
 })
 
-ipcMain.handle('settings:setAutoDownload', (_event, value: boolean) =>
+handleIpc('settings:setAutoDownload', (_event, value: boolean) =>
   appSettingsStore.setAutoDownload(Boolean(value))
 )
 
 // 18+ 内容开关：改完立刻重建 18+ 过滤（推荐 / 找片看 / 搜索 / 播放页 / 局域网随之生效）
-ipcMain.handle('settings:setAllowAdult', (_event, value: boolean) => {
+handleIpc('settings:setAllowAdult', (_event, value: boolean) => {
   const settings = appSettingsStore.setAllowAdult(Boolean(value))
   refreshAdultVisibility()
   return settings
 })
 
-ipcMain.handle('settings:setShowShortcut', (_event, value: string | null) => {
+handleIpc('settings:setShowShortcut', (_event, value: string | null) => {
   const result = applyShowShortcut(value)
   if (result.ok) appSettingsStore.setShowShortcut(result.shortcut)
   return result
 })
 
-ipcMain.handle('settings:resetShowShortcut', () => {
+handleIpc('settings:resetShowShortcut', () => {
   const result = applyShowShortcut(DEFAULT_SHOW_SHORTCUT)
   if (result.ok) appSettingsStore.setShowShortcut(result.shortcut)
   return result
 })
 
-ipcMain.handle('settings:setStartView', (_event, value: string) =>
-  appSettingsStore.setStartView(value)
-)
+handleIpc('settings:setStartView', (_event, value: string) => appSettingsStore.setStartView(value))
 
-ipcMain.handle('settings:setWindowSize', (_event, value: string) =>
+handleIpc('settings:setWindowSize', (_event, value: string) =>
   appSettingsStore.setWindowSize(value)
 )
 
-ipcMain.handle('settings:setDefaultPicSite', (_event, value: string) => {
+handleIpc('settings:setDefaultPicSite', (_event, value: string) => {
   // 站点可能刚被删掉：失效的 id 直接回落成「不指定」，不让配置指向悬空站点
   const siteId = typeof value === 'string' ? value.trim() : ''
   const valid = siteId && siteStore.list().some((site) => site.id === siteId) ? siteId : ''
   return appSettingsStore.setDefaultPicSite(valid)
 })
 
-ipcMain.handle('settings:setCollectConcurrency', (_event, value: number) => {
+handleIpc('settings:setCollectConcurrency', (_event, value: number) => {
   const settings = appSettingsStore.setCollectConcurrency(value)
   // 调大后立刻把排队任务填进新槽位；调小不打断正在采集的任务
   collector.wake()
@@ -837,7 +887,7 @@ ipcMain.handle('settings:setCollectConcurrency', (_event, value: number) => {
   return settings
 })
 
-ipcMain.handle('settings:setNetwork', async (_event, value: unknown) => {
+handleIpc('settings:setNetwork', async (_event, value: unknown) => {
   const next = normalizeNetworkSettings(value)
   // 自定义模式必须填完整才落盘：不完整的配置会把整台应用的网络切到直连
   if (next.mode === 'custom' && !isValidProxyEndpoint(next)) {
@@ -858,9 +908,15 @@ ipcMain.handle('settings:setNetwork', async (_event, value: unknown) => {
   }
 })
 
-ipcMain.handle('settings:testNetwork', (_event, input?: { settings?: unknown; url?: unknown }) =>
+handleIpc('settings:testNetwork', (_event, input?: { settings?: unknown; url?: unknown }) =>
   networkManager.test(input?.settings, input?.url)
 )
+
+/* ── IPC：MCP 服务 ── */
+
+handleIpc('mcp:get', () => mcpServer.snapshot())
+
+handleIpc('mcp:set', (_event, patch: unknown) => mcpServer.configure(patch))
 
 /* ── IPC：下载中心 ── */
 
@@ -970,10 +1026,10 @@ async function refreshDownloadUrl(record: DownloadRecord): Promise<void> {
   }
 }
 
-ipcMain.handle('downloads:list', () => downloadStore.list())
+handleIpc('downloads:list', () => downloadStore.list())
 
 // 目录占用 + 磁盘容量：设置页的「下载」分区用它画概览，扫描放在 IPC 里不堵界面
-ipcMain.handle('downloads:usage', async () => {
+handleIpc('downloads:usage', async () => {
   try {
     return { ok: true, usage: await readDownloadUsage(downloadStore.ensureDirectory()) }
   } catch {
@@ -981,7 +1037,7 @@ ipcMain.handle('downloads:usage', async () => {
   }
 })
 
-ipcMain.handle('downloads:pickPath', async () => {
+handleIpc('downloads:pickPath', async () => {
   const options: Electron.OpenDialogOptions = {
     title: '选择下载目录',
     defaultPath: appSettingsStore.get().downloadPath,
@@ -994,7 +1050,7 @@ ipcMain.handle('downloads:pickPath', async () => {
   return { ok: true, path: result.filePaths[0] }
 })
 
-ipcMain.handle('downloads:setPath', (_event, value: string) => {
+handleIpc('downloads:setPath', (_event, value: string) => {
   const next = typeof value === 'string' ? value.trim() : ''
   if (!next || !isAbsolute(next)) {
     return { ok: false, error: 'INVALID_PATH', settings: appSettingsStore.get() }
@@ -1008,30 +1064,27 @@ ipcMain.handle('downloads:setPath', (_event, value: string) => {
   return { ok: true, settings: appSettingsStore.setDownloadPath(next) }
 })
 
-ipcMain.handle('downloads:setConcurrency', (_event, value: number) => {
+handleIpc('downloads:setConcurrency', (_event, value: number) => {
   // 下载引擎每次填槽都读一次设置：这里落盘后立刻补槽，不打断正在下载的任务
   const settings = appSettingsStore.setDownloadConcurrency(value)
   downloadEngine.wake()
   return settings
 })
 
-ipcMain.handle('downloads:setSegmentConcurrency', (_event, value: number) => {
+handleIpc('downloads:setSegmentConcurrency', (_event, value: number) => {
   // 每个缓存任务开始时读一次：正在跑的任务不受影响，下一次开始缓存时用新值
   return appSettingsStore.setDownloadSegmentConcurrency(value)
 })
 
-ipcMain.handle(
-  'downloads:remove',
-  async (_event, input: { ids?: string[]; deleteFiles?: boolean }) => {
-    const ids = Array.isArray(input?.ids) ? input.ids.map(String) : []
-    // 先让导出 / 在跑的任务停下来、把文件句柄放掉，再删记录和文件
-    await mp4Export.cancel(ids)
-    await downloadEngine.cancelMany(ids)
-    return downloadStore.remove(ids, { deleteFiles: Boolean(input?.deleteFiles) })
-  }
-)
+handleIpc('downloads:remove', async (_event, input: { ids?: string[]; deleteFiles?: boolean }) => {
+  const ids = Array.isArray(input?.ids) ? input.ids.map(String) : []
+  // 先让导出 / 在跑的任务停下来、把文件句柄放掉，再删记录和文件
+  await mp4Export.cancel(ids)
+  await downloadEngine.cancelMany(ids)
+  return downloadStore.remove(ids, { deleteFiles: Boolean(input?.deleteFiles) })
+})
 
-ipcMain.handle('downloads:clearFinished', async (_event, input?: { deleteFiles?: boolean }) => {
+handleIpc('downloads:clearFinished', async (_event, input?: { deleteFiles?: boolean }) => {
   // 已结束的记录里可能还有正在导出的：先取消，避免删完记录 ffmpeg 还在写
   const finishedIds = downloadStore
     .list()
@@ -1044,7 +1097,7 @@ ipcMain.handle('downloads:clearFinished', async (_event, input?: { deleteFiles?:
   return downloadStore.clearFinished({ deleteFiles: Boolean(input?.deleteFiles) })
 })
 
-ipcMain.handle('downloads:openFolder', async (_event, id?: string) => {
+handleIpc('downloads:openFolder', async (_event, id?: string) => {
   const record = id ? downloadStore.find(String(id)) : null
   // 文件还在就定位到它；hls 缓存包在写 playlist 之前先打开包目录
   if (record && existsSync(record.path)) {
@@ -1067,7 +1120,7 @@ ipcMain.handle('downloads:openFolder', async (_event, id?: string) => {
   }
 })
 
-ipcMain.handle('downloads:play', async (_event, id: string) => {
+handleIpc('downloads:play', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record) return { ok: false, error: 'NOT_FOUND' }
   // 关闭 18+ 时，缓存好的 18+ 视频也不在播放窗里出现
@@ -1098,7 +1151,7 @@ ipcMain.handle('downloads:play', async (_event, id: string) => {
 
 /* ── IPC：播放页离线缓存 ── */
 
-ipcMain.handle('downloads:cache', async (_event, input: CacheEpisodeInput) => {
+handleIpc('downloads:cache', async (_event, input: CacheEpisodeInput) => {
   const resolved = await resolveCacheEpisodes(input)
   if (!resolved.ok) return resolved
   try {
@@ -1111,7 +1164,7 @@ ipcMain.handle('downloads:cache', async (_event, input: CacheEpisodeInput) => {
 })
 
 // 播放页按视频取已缓存 / 缓存中的集：只查内存，不逐条 stat
-ipcMain.handle('downloads:cachedEpisodes', (_event, videoId: number) => {
+handleIpc('downloads:cachedEpisodes', (_event, videoId: number) => {
   const id = Number(videoId)
   if (!Number.isInteger(id) || id <= 0) return { ok: false, items: [] }
   const items: {
@@ -1146,7 +1199,7 @@ ipcMain.handle('downloads:cachedEpisodes', (_event, videoId: number) => {
 })
 
 // 播放页「优先缓存」：拿到本机 playlist 地址；不可播时让页面回退在线地址
-ipcMain.handle('downloads:playbackUrl', async (_event, id: string) => {
+handleIpc('downloads:playbackUrl', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record || record.kind !== 'hls') return { ok: false, error: 'NOT_FOUND' }
   if (record.status !== 'done') return { ok: false, error: 'NOT_READY' }
@@ -1155,14 +1208,14 @@ ipcMain.handle('downloads:playbackUrl', async (_event, id: string) => {
   return url ? { ok: true, url } : { ok: false, error: 'SERVICE_FAILED' }
 })
 
-ipcMain.handle('downloads:cancel', async (_event, id: string) => {
+handleIpc('downloads:cancel', async (_event, id: string) => {
   await downloadEngine.cancel(String(id))
   return { ok: true }
 })
 
-ipcMain.handle('downloads:pause', (_event, id: string) => downloadEngine.pause(String(id)))
+handleIpc('downloads:pause', (_event, id: string) => downloadEngine.pause(String(id)))
 
-ipcMain.handle('downloads:resume', async (_event, id: string) => {
+handleIpc('downloads:resume', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record) return { ok: false, error: 'NOT_FOUND' }
   if (record.status !== 'paused') return { ok: false, error: 'NOT_PAUSED' }
@@ -1170,7 +1223,7 @@ ipcMain.handle('downloads:resume', async (_event, id: string) => {
   return downloadEngine.resume(record.id)
 })
 
-ipcMain.handle('downloads:retry', async (_event, id: string) => {
+handleIpc('downloads:retry', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record) return { ok: false, error: 'NOT_FOUND' }
   // 失败 / 取消的记录重试前也刷一次地址；已暂停走 resume，不走这里
@@ -1182,17 +1235,17 @@ ipcMain.handle('downloads:retry', async (_event, id: string) => {
 
 /* ── IPC：缓存导出 MP4 ── */
 
-ipcMain.handle('downloads:exportMp4', (_event, input?: { ids?: string[]; force?: boolean }) => {
+handleIpc('downloads:exportMp4', (_event, input?: { ids?: string[]; force?: boolean }) => {
   const ids = Array.isArray(input?.ids) ? input.ids.map(String) : []
   return mp4Export.enqueue(ids, { force: Boolean(input?.force) })
 })
 
-ipcMain.handle('downloads:exportMp4:cancel', async (_event, ids?: string[]) => {
+handleIpc('downloads:exportMp4:cancel', async (_event, ids?: string[]) => {
   await mp4Export.cancel(Array.isArray(ids) ? ids.map(String) : [])
   return { ok: true }
 })
 
-ipcMain.handle('downloads:openMp4Folder', async (_event, id: string) => {
+handleIpc('downloads:openMp4Folder', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record?.mp4Path || !existsSync(record.mp4Path)) {
     return { ok: false, error: 'FILE_MISSING' }
@@ -1201,7 +1254,7 @@ ipcMain.handle('downloads:openMp4Folder', async (_event, id: string) => {
   return { ok: true }
 })
 
-ipcMain.handle('downloads:removeMp4', async (_event, id: string) => {
+handleIpc('downloads:removeMp4', async (_event, id: string) => {
   const record = downloadStore.find(String(id))
   if (!record) return { ok: false, error: 'NOT_FOUND' }
   await mp4Export.cancel([record.id])
@@ -1230,13 +1283,13 @@ ipcMain.handle('downloads:removeMp4', async (_event, id: string) => {
 
 /* ── IPC：缓存管理 ── */
 
-ipcMain.handle('cache:scan', (event) =>
+handleIpc('cache:scan', (event) =>
   cacheManager.scan((progress) => {
     if (!event.sender.isDestroyed()) event.sender.send('cache:progress', progress)
   })
 )
 
-ipcMain.handle('cache:clear', (event) =>
+handleIpc('cache:clear', (event) =>
   cacheManager.clear((progress) => {
     if (!event.sender.isDestroyed()) event.sender.send('cache:progress', progress)
   })
@@ -1384,7 +1437,7 @@ function enrichVideoItems(
   }))
 }
 
-ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
+handleIpc('videos:list', (_event, query: VideoListQuery) => {
   if (!videoCacheReady) return { ...cacheUnavailable(), items: [], total: 0, page: 1, pageSize: 10 }
   const { filters, empty } = resolveVideoFilters(query)
   if (empty) return { ok: true, items: [], total: 0, page: 1, pageSize: 10 }
@@ -1398,14 +1451,14 @@ ipcMain.handle('videos:list', (_event, query: VideoListQuery) => {
   }
 })
 
-ipcMain.handle('videos:count', (_event, query: VideoListQuery) => {
+handleIpc('videos:count', (_event, query: VideoListQuery) => {
   if (!videoCacheReady) return { ...cacheUnavailable(), total: 0 }
   const { filters, empty } = resolveVideoFilters(query)
   if (empty) return { ok: true, total: 0 }
   return { ok: true, total: videoStore.countVideos(query ?? {}, filters) }
 })
 
-ipcMain.handle('videos:update', (_event, videoId: number, patch: VideoUpdateInput) => {
+handleIpc('videos:update', (_event, videoId: number, patch: VideoUpdateInput) => {
   if (!videoCacheReady) return { ok: false, error: 'DB' }
   const result = videoStore.updateVideo(Number(videoId), patch ?? {})
   // 隐藏 / 换封面 / 改文案都会改变推荐页上的卡片，展示端缓存作废
@@ -1413,7 +1466,7 @@ ipcMain.handle('videos:update', (_event, videoId: number, patch: VideoUpdateInpu
   return result
 })
 
-ipcMain.handle(
+handleIpc(
   'videos:detail',
   async (_event, videoId: number, options?: { autoFetch?: boolean; includeAdult?: boolean }) => {
     if (!videoCacheReady) return cacheUnavailable()
@@ -1429,7 +1482,7 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle(
+handleIpc(
   'videos:detail:refresh',
   async (_event, videoId: number, options?: { force?: boolean; includeAdult?: boolean }) => {
     if (!videoCacheReady) return { ...cacheUnavailable(), refreshed: 0, failed: 0 }
@@ -1443,12 +1496,12 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('videos:stats', () => {
+handleIpc('videos:stats', () => {
   if (!videoCacheReady) return { videoCount: 0, sourceCount: 0, lastCollectedAt: '' }
   return videoStore.stats()
 })
 
-ipcMain.handle('videos:capacity', (_event, options?: { sites?: boolean }) => {
+handleIpc('videos:capacity', (_event, options?: { sites?: boolean }) => {
   if (!videoCacheReady) {
     return {
       dbBytes: 0,
@@ -1471,7 +1524,7 @@ ipcMain.handle('videos:capacity', (_event, options?: { sites?: boolean }) => {
   return videoStore.capacity(withSites ? siteNameMap() : undefined, withSites)
 })
 
-ipcMain.handle('videos:capacity:scan', async (_event, options?: { fixMissing?: boolean }) => {
+handleIpc('videos:capacity:scan', async (_event, options?: { fixMissing?: boolean }) => {
   if (!videoCacheReady) return { ...cacheUnavailable(), drift: null }
   const drift = await detailCache.scan(Boolean(options?.fixMissing))
   return { ...videoStore.capacity(siteNameMap()), drift }
@@ -1481,14 +1534,14 @@ ipcMain.handle('videos:capacity:scan', async (_event, options?: { fixMissing?: b
  * 容量页的「清理无来源视频」：正常流程（删站点 / 全量替换 / 采集重算）都不会留下这种行，
  * 只有旧版本、中断或手工改库才会出现。一次事务删完，数量很少，所以直接同步返回。
  */
-ipcMain.handle('videos:orphans:clear', () => {
+handleIpc('videos:orphans:clear', () => {
   if (!videoCacheReady) return { ...cacheUnavailable(), videos: 0, edits: 0 }
   const result = videoStore.purgeOrphanVideos()
   if (result.videos > 0) invalidateHomeFeed()
   return { ok: true, ...result }
 })
 
-ipcMain.handle('videos:details:clear', async (_event, options?: { siteId?: string }) => {
+handleIpc('videos:details:clear', async (_event, options?: { siteId?: string }) => {
   if (!videoCacheReady) return cacheUnavailable()
   return detailCache.clear(options?.siteId ? String(options.siteId) : undefined)
 })
@@ -1512,7 +1565,7 @@ function resolvePicRuleSite(requested?: string): string {
   return ''
 }
 
-ipcMain.handle('videos:pics:clean', async (event, input?: { siteId?: string }) => {
+handleIpc('videos:pics:clean', async (event, input?: { siteId?: string }) => {
   if (!videoCacheReady) {
     return {
       ok: false,
@@ -1574,7 +1627,7 @@ ipcMain.handle('videos:pics:clean', async (event, input?: { siteId?: string }) =
   }
 })
 
-ipcMain.handle('videos:pics:clean:status', (): PicCleanStatus => {
+handleIpc('videos:pics:clean:status', (): PicCleanStatus => {
   return {
     ok: true,
     running: picsCleanRunning,
@@ -1586,7 +1639,7 @@ ipcMain.handle('videos:pics:clean:status', (): PicCleanStatus => {
   }
 })
 
-ipcMain.handle('videos:pics:clean:cancel', () => {
+handleIpc('videos:pics:clean:cancel', () => {
   picsCleanCancelled = true
 })
 
@@ -1594,7 +1647,7 @@ ipcMain.handle('videos:pics:clean:cancel', () => {
  * 封面规则统计 + 效果抽样。规则统计扫全库（11 万部约 260ms），按来源缓存 30s；
  * 抽样每次重算（随机换一批），所以「换一批」不需要再等一次全库统计。
  */
-ipcMain.handle('videos:pics:stats', (_event, options?: { siteId?: string }): PicCleanStats => {
+handleIpc('videos:pics:stats', (_event, options?: { siteId?: string }): PicCleanStats => {
   if (!videoCacheReady) {
     return {
       ok: false,
@@ -1638,7 +1691,7 @@ ipcMain.handle('videos:pics:stats', (_event, options?: { siteId?: string }): Pic
  * 采集进度与采集日志一次清掉。站点本身、在线 / 本地分类、绑定与定时计划在业务库里，不动。
  * 走和改地址 / 删站点同一条清理队列（按站点串行），所以采集器入队时也能等到它删完。
  */
-ipcMain.handle(
+handleIpc(
   'videos:site:purge',
   async (_event, input?: { siteId?: string }): Promise<VideoSitePurgeResult> => {
     const empty: VideoSitePurgeResult = {
@@ -1670,7 +1723,7 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('videos:progress', (_event, siteId?: string) => {
+handleIpc('videos:progress', (_event, siteId?: string) => {
   if (!videoCacheReady) return []
   return videoStore.listProgress(siteId ? String(siteId) : undefined)
 })
@@ -1679,7 +1732,7 @@ ipcMain.handle('videos:progress', (_event, siteId?: string) => {
  * 一键清空采集进度：只在没有任务在跑 / 排队时允许。
  * 检索关键词跟着进度一起清，已采集的视频、详情、日志都不动。
  */
-ipcMain.handle('videos:progress:clear', () => {
+handleIpc('videos:progress:clear', () => {
   if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
   const busy = videoStore
     .listProgress()
@@ -1868,7 +1921,7 @@ async function performOnlineSearch(input?: { keyword?: string }): Promise<VideoO
   }
 }
 
-ipcMain.handle('videos:search:online', (_event, input?: { keyword?: string }) =>
+handleIpc('videos:search:online', (_event, input?: { keyword?: string }) =>
   performOnlineSearch(input)
 )
 
@@ -2172,7 +2225,7 @@ function knownPageSize(siteId: string, mode?: CollectMode, fetchRange?: FetchRan
   return rows.find((row) => row.pageSize > 0)?.pageSize ?? 0
 }
 
-ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartInput) => {
+handleIpc('videos:collect:start', async (_event, input: VideoCollectStartInput) => {
   if (!videoCacheReady) return cacheUnavailable()
   const siteId = String(input?.siteId ?? '').trim()
   const isSearch = input?.mode === 'search'
@@ -2204,7 +2257,7 @@ ipcMain.handle('videos:collect:start', async (_event, input: VideoCollectStartIn
   return collector.enqueue({ ...input, pageSize: pageSize || undefined }, 'manual')
 })
 
-ipcMain.handle(
+handleIpc(
   'videos:collect:cancel',
   (
     _event,
@@ -2219,12 +2272,12 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('videos:schedules:list', () => {
+handleIpc('videos:schedules:list', () => {
   if (!videoCacheReady) return { ...cacheUnavailable(), schedules: [] }
   return { ok: true, schedules: scheduleStore.list() }
 })
 
-ipcMain.handle('videos:schedules:save', async (_event, input: VideoScheduleInput) => {
+handleIpc('videos:schedules:save', async (_event, input: VideoScheduleInput) => {
   if (!videoCacheReady) return cacheUnavailable()
   const siteId = String(input?.siteId ?? '').trim()
   const existing = siteId ? scheduleStore.get(siteId) : null
@@ -2235,12 +2288,12 @@ ipcMain.handle('videos:schedules:save', async (_event, input: VideoScheduleInput
   return scheduleStore.save({ ...input, pageSize })
 })
 
-ipcMain.handle('videos:schedules:remove', (_event, siteId: string) => {
+handleIpc('videos:schedules:remove', (_event, siteId: string) => {
   if (!videoCacheReady) return { ok: false, error: 'CACHE_UNAVAILABLE' }
   return { ok: scheduleStore.remove(String(siteId)) }
 })
 
-ipcMain.handle(
+handleIpc(
   'videos:logs:list',
   (
     _event,
@@ -2259,7 +2312,7 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('videos:logs:clear', (_event, options?: { siteId?: string }) => {
+handleIpc('videos:logs:clear', (_event, options?: { siteId?: string }) => {
   if (!videoCacheReady) return { ok: false }
   return {
     ok: true,
@@ -2267,7 +2320,7 @@ ipcMain.handle('videos:logs:clear', (_event, options?: { siteId?: string }) => {
   }
 })
 
-ipcMain.handle('videos:clear', async () => {
+handleIpc('videos:clear', async () => {
   if (!videoCacheReady) return cacheUnavailable()
   collector.suspend()
   scheduler.stop()
@@ -2299,9 +2352,9 @@ ipcMain.handle('videos:clear', async () => {
 
 /* ── IPC：采集站点 ── */
 
-ipcMain.handle('sites:list', () => siteStore.list())
+handleIpc('sites:list', () => siteStore.list())
 
-ipcMain.handle('sites:add', (_event, input: SiteInput) => {
+handleIpc('sites:add', (_event, input: SiteInput) => {
   const result = siteStore.add(input)
   if (result.ok) {
     refreshDisabledSites()
@@ -2311,7 +2364,7 @@ ipcMain.handle('sites:add', (_event, input: SiteInput) => {
   return result
 })
 
-ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
+handleIpc('sites:update', (_event, id: string, input: SiteInput) => {
   const siteId = String(id)
   // 地址 / 格式可能变化，之前抓取的待确认结果随之作废
   pendingCategoryRefresh.delete(siteId)
@@ -2343,7 +2396,7 @@ ipcMain.handle('sites:update', (_event, id: string, input: SiteInput) => {
   return result
 })
 
-ipcMain.handle('sites:remove', (_event, id: string) => {
+handleIpc('sites:remove', (_event, id: string) => {
   const siteId = String(id)
   pendingCategoryRefresh.delete(siteId)
   const result = siteStore.remove(siteId)
@@ -2372,7 +2425,7 @@ ipcMain.handle('sites:remove', (_event, id: string) => {
  * 老部署会静默忽略 `wd` 仍返回整页数据，所以除了「有没有结果」，还要看结果里
  * 有没有片名真的包含关键词：一条都没有基本就是参数没生效。
  */
-ipcMain.handle(
+handleIpc(
   'sites:search:test',
   async (_event, input?: { siteId?: string; keyword?: string }): Promise<SiteSearchTestResult> => {
     const site = siteStore.list().find((row) => row.id === String(input?.siteId ?? '').trim())
@@ -2477,7 +2530,7 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('sites:categories', async (_event, id: string) => {
+handleIpc('sites:categories', async (_event, id: string) => {
   const site = siteStore.list().find((item) => item.id === String(id))
   if (!site) return { ok: false, error: 'NOT_FOUND' }
   // 已入库的直接读库，不再请求采集站
@@ -2489,7 +2542,7 @@ ipcMain.handle('sites:categories', async (_event, id: string) => {
   return { ok: true, categories: siteStore.applyCategories(site.id, result.categories, 'full') }
 })
 
-ipcMain.handle('sites:categories:refresh', async (_event, id: string) => {
+handleIpc('sites:categories:refresh', async (_event, id: string) => {
   const site = siteStore.list().find((item) => item.id === String(id))
   if (!site) return { ok: false, error: 'NOT_FOUND' }
   const result = await fetchSiteCategories(site)
@@ -2501,7 +2554,7 @@ ipcMain.handle('sites:categories:refresh', async (_event, id: string) => {
   return { ok: true, hasChanges, diff }
 })
 
-ipcMain.handle('sites:categories:apply', (_event, id: string, mode: CategoryUpdateMode) => {
+handleIpc('sites:categories:apply', (_event, id: string, mode: CategoryUpdateMode) => {
   const site = siteStore.list().find((item) => item.id === String(id))
   if (!site) return { ok: false, error: 'NOT_FOUND' }
   if (mode !== 'incremental' && mode !== 'full') return { ok: false, error: 'INVALID_MODE' }
@@ -2521,7 +2574,7 @@ ipcMain.handle('sites:categories:apply', (_event, id: string, mode: CategoryUpda
 
 /* ── IPC：视频分类 ── */
 
-ipcMain.handle('categories:list', (_event, options?: { includeAdult?: boolean }) => {
+handleIpc('categories:list', (_event, options?: { includeAdult?: boolean }) => {
   const rows = categoryStore.list()
   // 展示端（找片看 / 搜索的分类入口）看不到 18+ 分类及其子树；控制台要看全部才能管理
   if (!adultHidden || options?.includeAdult === true) return rows
@@ -2529,7 +2582,7 @@ ipcMain.handle('categories:list', (_event, options?: { includeAdult?: boolean })
   return rows.filter((row) => !adult.has(row.id))
 })
 
-ipcMain.handle('categories:create', (_event, input: VideoCategoryInput) => {
+handleIpc('categories:create', (_event, input: VideoCategoryInput) => {
   const result = categoryStore.create(input)
   // 新分类不代表就有轨道，但「推荐在哪几条轨道上」可能变，缓存一并作废
   invalidateHomeFeed()
@@ -2538,7 +2591,7 @@ ipcMain.handle('categories:create', (_event, input: VideoCategoryInput) => {
   return result
 })
 
-ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInput) => {
+handleIpc('categories:update', (_event, id: string, input: VideoCategoryInput) => {
   const result = categoryStore.update(String(id), input)
   // 改了上级分类，视频所属的大类可能跟着变
   if (result.ok && input?.parentId !== undefined) syncHomeRecommendations()
@@ -2548,7 +2601,7 @@ ipcMain.handle('categories:update', (_event, id: string, input: VideoCategoryInp
   return result
 })
 
-ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) => {
+handleIpc('categories:setVisible', (_event, id: string, visible: boolean) => {
   const result = categoryStore.setVisible(String(id), Boolean(visible))
   // 分类的显示开关决定推荐页有没有这条轨道
   invalidateHomeFeed()
@@ -2556,13 +2609,13 @@ ipcMain.handle('categories:setVisible', (_event, id: string, visible: boolean) =
 })
 
 // 18+ 分类开关：父分类打开后整棵子树都算 18+，展示端立刻按新口径过滤
-ipcMain.handle('categories:setAdult', (_event, id: string, adult: boolean) => {
+handleIpc('categories:setAdult', (_event, id: string, adult: boolean) => {
   const result = categoryStore.setAdult(String(id), Boolean(adult))
   refreshAdultVisibility()
   return result
 })
 
-ipcMain.handle(
+handleIpc(
   'categories:move',
   (_event, id: string, targetId: string | null, placement: CategoryPlacement) => {
     const result = categoryStore.move(
@@ -2579,7 +2632,7 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('categories:remove', (_event, id: string) => {
+handleIpc('categories:remove', (_event, id: string) => {
   const result = categoryStore.remove(String(id))
   // 分类删了，绑在它（或子树）上的视频就没有归属了，推荐一并清掉
   if (result.ok) syncHomeRecommendations()
@@ -2590,15 +2643,15 @@ ipcMain.handle('categories:remove', (_event, id: string) => {
 
 /* ── IPC：在线分类与本地分类的绑定 ── */
 
-ipcMain.handle('bindings:forSite', (_event, siteId: string) => bindingStore.forSite(String(siteId)))
+handleIpc('bindings:forSite', (_event, siteId: string) => bindingStore.forSite(String(siteId)))
 
-ipcMain.handle('bindings:forCategory', (_event, categoryId: string) =>
+handleIpc('bindings:forCategory', (_event, categoryId: string) =>
   bindingStore.forCategory(String(categoryId))
 )
 
-ipcMain.handle('bindings:counts', () => bindingStore.counts())
+handleIpc('bindings:counts', () => bindingStore.counts())
 
-ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: string) => {
+handleIpc('bindings:bind', (_event, items: BindingTarget[], categoryId: string) => {
   const result = bindingStore.bind(items, String(categoryId))
   // 绑定关系变了：已推荐到这个在线分类的视频要跟着换大类
   if (result.ok) syncHomeRecommendations()
@@ -2608,7 +2661,7 @@ ipcMain.handle('bindings:bind', (_event, items: BindingTarget[], categoryId: str
   return result
 })
 
-ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => {
+handleIpc('bindings:unbind', (_event, items: BindingTarget[]) => {
   const result = bindingStore.unbind(items)
   // 解绑后视频不再属于原来的大类，推荐会被挪到别处或直接删掉
   if (result.ok) syncHomeRecommendations()
@@ -2620,41 +2673,41 @@ ipcMain.handle('bindings:unbind', (_event, items: BindingTarget[]) => {
 /* ── IPC：首页配置（海报叠层 + 分类推荐） ── */
 
 // 默认给展示端那一份：推荐页是主要入口，控制台显式传 view: 'console'
-ipcMain.handle('home:get', (_event, options?: { view?: HomeFeedView }) =>
+handleIpc('home:get', (_event, options?: { view?: HomeFeedView }) =>
   readHomeFeed(options?.view === 'console' ? 'console' : 'display')
 )
 
-ipcMain.handle('home:posters:add', (_event, videoId: number) => {
+handleIpc('home:posters:add', (_event, videoId: number) => {
   const result = homeStore.addPoster(Number(videoId))
   invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('home:posters:update', (_event, videoId: number, patch: HomeItemPatch) => {
+handleIpc('home:posters:update', (_event, videoId: number, patch: HomeItemPatch) => {
   const result = homeStore.updatePoster(Number(videoId), patch ?? {})
   invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('home:posters:remove', (_event, videoId: number) => {
+handleIpc('home:posters:remove', (_event, videoId: number) => {
   const result = homeStore.removePoster(Number(videoId))
   invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('home:posters:reorder', (_event, videoIds: number[]) => {
+handleIpc('home:posters:reorder', (_event, videoIds: number[]) => {
   const result = homeStore.reorderPosters(Array.isArray(videoIds) ? videoIds : [])
   invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('home:sections:save', (_event, categoryId: string, patch: HomeSectionPatch) => {
+handleIpc('home:sections:save', (_event, categoryId: string, patch: HomeSectionPatch) => {
   const result = homeStore.saveSection(String(categoryId), patch ?? {})
   invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('home:sections:addItem', (_event, categoryId: string, videoId: number) => {
+handleIpc('home:sections:addItem', (_event, categoryId: string, videoId: number) => {
   const target = String(categoryId)
   const vid = Number(videoId)
   // 只能推荐到视频实际绑定的大类；解绑之后推荐会被 syncHomeRecommendations 挪走或删掉
@@ -2667,7 +2720,7 @@ ipcMain.handle('home:sections:addItem', (_event, categoryId: string, videoId: nu
   return result
 })
 
-ipcMain.handle(
+handleIpc(
   'home:sections:updateItem',
   (_event, categoryId: string, videoId: number, patch: HomeItemPatch) => {
     const result = homeStore.updateSectionItem(String(categoryId), Number(videoId), patch ?? {})
@@ -2676,19 +2729,19 @@ ipcMain.handle(
   }
 )
 
-ipcMain.handle('home:sections:removeItem', (_event, categoryId: string, videoId: number) => {
+handleIpc('home:sections:removeItem', (_event, categoryId: string, videoId: number) => {
   const result = homeStore.removeSectionItem(String(categoryId), Number(videoId))
   invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('home:sections:restoreItem', (_event, categoryId: string, videoId: number) => {
+handleIpc('home:sections:restoreItem', (_event, categoryId: string, videoId: number) => {
   const result = homeStore.restoreSectionItem(String(categoryId), Number(videoId))
   invalidateHomeFeed()
   return result
 })
 
-ipcMain.handle('home:sections:reorder', (_event, categoryId: string, videoIds: number[]) => {
+handleIpc('home:sections:reorder', (_event, categoryId: string, videoIds: number[]) => {
   const result = homeStore.reorderSectionItems(
     String(categoryId),
     Array.isArray(videoIds) ? videoIds : []
@@ -2697,14 +2750,14 @@ ipcMain.handle('home:sections:reorder', (_event, categoryId: string, videoIds: n
   return result
 })
 
-ipcMain.handle('home:sections:clear', (_event, categoryId: string) => {
+handleIpc('home:sections:clear', (_event, categoryId: string) => {
   const result = homeStore.clearSectionItems(String(categoryId))
   invalidateHomeFeed()
   return result
 })
 
 // 一级分类在推荐页上的先后顺序：控制台「分类推荐」拖动分组标题时提交
-ipcMain.handle('home:sections:reorderCategories', (_event, categoryIds: string[]) => {
+handleIpc('home:sections:reorderCategories', (_event, categoryIds: string[]) => {
   const result = homeStore.reorderSections(Array.isArray(categoryIds) ? categoryIds : [])
   invalidateHomeFeed()
   return result
@@ -2713,15 +2766,13 @@ ipcMain.handle('home:sections:reorderCategories', (_event, categoryIds: string[]
 /* ── IPC：搜索页底部推荐（没有分类归属） ── */
 
 // 搜索页底部推荐：展示端只放行可见视频，控制台要完整的一份（管理 18+ / 禁用站点的条目）
-ipcMain.handle('home:search:get', (_event, options?: { view?: HomeFeedView }) =>
+handleIpc('home:search:get', (_event, options?: { view?: HomeFeedView }) =>
   readHomeSearch(options?.view === 'console' ? 'console' : 'display')
 )
 
-ipcMain.handle('home:search:save', (_event, patch: HomeSearchPatch) =>
-  homeStore.saveSearch(patch ?? {})
-)
+handleIpc('home:search:save', (_event, patch: HomeSearchPatch) => homeStore.saveSearch(patch ?? {}))
 
-ipcMain.handle('home:search:addItem', (_event, videoId: number) => {
+handleIpc('home:search:addItem', (_event, videoId: number) => {
   if (!videoCacheReady) return cacheUnavailable()
   const vid = Number(videoId)
   // 只接受缓存库里还在的视频；列表页的「推荐」入口本来就来自它
@@ -2734,25 +2785,25 @@ ipcMain.handle('home:search:addItem', (_event, videoId: number) => {
   return homeStore.addSearchItem(vid)
 })
 
-ipcMain.handle('home:search:updateItem', (_event, videoId: number, patch: HomeItemPatch) =>
+handleIpc('home:search:updateItem', (_event, videoId: number, patch: HomeItemPatch) =>
   homeStore.updateSearchItem(Number(videoId), patch ?? {})
 )
 
-ipcMain.handle('home:search:removeItem', (_event, videoId: number) =>
+handleIpc('home:search:removeItem', (_event, videoId: number) =>
   homeStore.removeSearchItem(Number(videoId))
 )
 
-ipcMain.handle('home:search:restoreItem', (_event, videoId: number) =>
+handleIpc('home:search:restoreItem', (_event, videoId: number) =>
   homeStore.restoreSearchItem(Number(videoId))
 )
 
-ipcMain.handle('home:search:reorder', (_event, videoIds: number[]) =>
+handleIpc('home:search:reorder', (_event, videoIds: number[]) =>
   homeStore.reorderSearchItems(Array.isArray(videoIds) ? videoIds : [])
 )
 
-ipcMain.handle('home:search:clear', () => homeStore.clearSearchItems())
+handleIpc('home:search:clear', () => homeStore.clearSearchItems())
 
-ipcMain.handle('home:image:pick', async () => {
+handleIpc('home:image:pick', async () => {
   const options: Electron.OpenDialogOptions = {
     title: '选择首页图片',
     properties: ['openFile'],
@@ -2767,19 +2818,19 @@ ipcMain.handle('home:image:pick', async () => {
 
 /* ── IPC：备份与恢复 ── */
 
-ipcMain.handle('backup:list', () => backupStore.list())
+handleIpc('backup:list', () => backupStore.list())
 
-ipcMain.handle('backup:create', () => backupStore.create())
+handleIpc('backup:create', () => backupStore.create())
 
-ipcMain.handle('backup:remove', (_event, id: string) => backupStore.remove(String(id)))
+handleIpc('backup:remove', (_event, id: string) => backupStore.remove(String(id)))
 
-ipcMain.handle('backup:openFolder', async () => {
+handleIpc('backup:openFolder', async () => {
   // openPath 成功时返回空字符串，失败时返回错误描述
   const error = await shell.openPath(backupStore.directory())
   return error === ''
 })
 
-ipcMain.handle('backup:export', async (_event, id: string) => {
+handleIpc('backup:export', async (_event, id: string) => {
   const record = backupStore.list().records.find((item) => item.id === String(id))
   if (!record) return { ok: false, error: 'NOT_FOUND' }
   const options: Electron.SaveDialogOptions = {
@@ -2794,7 +2845,7 @@ ipcMain.handle('backup:export', async (_event, id: string) => {
   return backupStore.exportTo(record.id, result.filePath)
 })
 
-ipcMain.handle('backup:pick', async () => {
+handleIpc('backup:pick', async () => {
   const options: Electron.OpenDialogOptions = {
     title: '选择备份文件',
     properties: ['openFile'],
@@ -2810,7 +2861,7 @@ ipcMain.handle('backup:pick', async () => {
   return backupStore.inspect(result.filePaths[0])
 })
 
-ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
+handleIpc('backup:restore', async (_event, source: RestoreSource) => {
   const result = backupStore.restore(source)
   // 站点分类被整体替换，之前「重新获取」的待确认结果全部作废
   if (result.ok) {
@@ -2833,16 +2884,16 @@ ipcMain.handle('backup:restore', async (_event, source: RestoreSource) => {
 
 /* ── IPC：局域网服务 ── */
 
-ipcMain.handle('lan:state', () => lanService.state())
+handleIpc('lan:state', () => lanService.state())
 
-ipcMain.handle('lan:start', (_event, input?: { host?: unknown; port?: unknown }) => {
+handleIpc('lan:start', (_event, input?: { host?: unknown; port?: unknown }) => {
   const host = typeof input?.host === 'string' ? input.host : ''
   return lanService.start({ host, port: Number(input?.port) })
 })
 
-ipcMain.handle('lan:stop', () => lanService.stop())
+handleIpc('lan:stop', () => lanService.stop())
 
-ipcMain.handle('lan:open', async () => {
+handleIpc('lan:open', async () => {
   const state = lanService.state()
   if (!state.running || state.urls.length === 0) return false
   await shell.openExternal(state.urls[0])
@@ -2851,7 +2902,7 @@ ipcMain.handle('lan:open', async () => {
 
 /* ── IPC：应用信息 ── */
 
-ipcMain.handle('app:info', () => ({
+handleIpc('app:info', () => ({
   name: '映盒剧场',
   version: app.getVersion(),
   electron: process.versions.electron,
@@ -2867,22 +2918,22 @@ ipcMain.handle('app:info', () => ({
 
 /* ── IPC：自动更新 ── */
 
-ipcMain.handle('updater:check', () => {
+handleIpc('updater:check', () => {
   updater.checkForUpdates()
   return updater.getStatus()
 })
 
-ipcMain.handle('updater:download', () => {
+handleIpc('updater:download', () => {
   updater.downloadUpdate()
   return updater.getStatus()
 })
 
-ipcMain.handle('updater:install', () => {
+handleIpc('updater:install', () => {
   updater.quitAndInstall()
   return true
 })
 
-ipcMain.handle('updater:getStatus', () => updater.getStatus())
+handleIpc('updater:getStatus', () => updater.getStatus())
 
 /* ── 应用生命周期 ── */
 
@@ -2976,6 +3027,15 @@ if (!gotTheLock) {
     updater.init()
     if (videoCacheReady) scheduler.start()
 
+    // MCP 工具复用 IPC handler：启动前确认通道都注册了，缺失只报警不阻塞应用
+    const missingMcpChannels = MCP_REQUIRED_CHANNELS.filter(
+      (channel) => !internalIpcHandlers.has(channel)
+    )
+    if (missingMcpChannels.length > 0) {
+      console.error('[mcp] 以下 IPC 通道未注册：', missingMcpChannels.join(', '))
+    }
+    await mcpServer.init().catch((error) => console.error('[mcp] 初始化失败', error))
+
     app.on('activate', function () {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow()
@@ -3001,6 +3061,8 @@ if (!gotTheLock) {
     void networkManager.dispose()
     // 先关掉局域网监听，别让网页端在数据库关闭后还发请求进来
     lanService.dispose()
+    // MCP 服务也必须在数据库关闭前停止
+    mcpServer.dispose()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护
     if (app.isReady()) globalShortcut.unregisterAll()
     // 日志是异步批量落库的：关库前把队列里剩下的同步写完

@@ -92,6 +92,64 @@ interface AppearanceApi {
   onChange: (callback: (value: PlayerAppearance) => void) => () => void
 }
 
+/** MCP 服务配置：是否开启、监听地址 / 端口、访问令牌 */
+interface McpSettings {
+  enabled: boolean
+  /** 127.0.0.1 / 0.0.0.0 / 本机 IPv4 */
+  host: string
+  /** 1024–65535 */
+  port: number
+  /** 访问令牌；回环监听可为空，非回环监听必须非空 */
+  token: string
+}
+
+type McpError =
+  | 'INVALID_INPUT'
+  | 'INVALID_HOST'
+  | 'INVALID_PORT'
+  | 'TOKEN_REQUIRED'
+  | 'PORT_IN_USE'
+  | 'ADDRESS_UNAVAILABLE'
+  | 'PERMISSION'
+  | 'START_FAILED'
+
+interface McpState {
+  running: boolean
+  /** 运行中是实际监听配置；未运行时是最近一次保存的配置 */
+  host: string
+  port: number
+  /** 形如 http://127.0.0.1:3927/mcp；绑定 0.0.0.0 时列出本机每个 IPv4 */
+  urls: string[]
+  /** 本机 IPv4 地址，监听地址下拉框用 */
+  addresses: LanAddress[]
+  /** 最近一次启动失败的原因码；成功启动 / 停止后清空 */
+  error?: McpError
+  /** ISO 8601；服务没启动时为空串 */
+  startedAt: string
+}
+
+interface McpSnapshot {
+  settings: McpSettings
+  state: McpState
+}
+
+interface McpConfigureResult {
+  ok: boolean
+  error?: McpError
+  message?: string
+  settings: McpSettings
+  state: McpState
+}
+
+interface McpApi {
+  /** 服务配置 + 运行状态 */
+  get: () => Promise<McpSnapshot>
+  /** 保存并应用 enabled / host / port / token */
+  set: (patch: Partial<McpSettings>) => Promise<McpConfigureResult>
+  /** 服务启动 / 停止 / 启动失败时推送最新快照 */
+  onChange: (callback: (snapshot: McpSnapshot) => void) => () => void
+}
+
 interface AppSettings {
   openAtLogin: boolean
   closeToTray: boolean
@@ -119,6 +177,8 @@ interface AppSettings {
   downloadSegmentConcurrency: number
   /** 网络代理配置 */
   network: NetworkSettings
+  /** MCP 服务配置 */
+  mcp: McpSettings
 }
 
 /** 代理模式：禁用 / 跟随系统 / 自定义 */
@@ -1667,6 +1727,7 @@ interface Api {
   cache: CacheApi
   updater: UpdaterApi
   lan: LanApi
+  mcp: McpApi
   windowControls: WindowControls
 }
 

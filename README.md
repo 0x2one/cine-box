@@ -14,6 +14,7 @@
 - **推荐与封面**：海报、分类轨道与搜索推荐分开配置，轨道可选 TOP N 或自定义列表并支持拖动排序；封面可设默认来源、预览同步前后对比并批量重写。
 - **视频库**：按分类、关键词、显示状态筛选；片名 / 备注 / 主演 / 简介 / 封面可人工编辑，也可隐藏或加入推荐位。
 - **局域网影院**：一键把片库发布到局域网，手机或电脑浏览器直接浏览、搜索与播放。
+- **MCP 服务**：在「设置 › MCP」开启后，Claude、Cursor 等 AI 客户端可通过 Streamable HTTP 管理站点、分类、采集、推荐、共享、备份、网络、下载等 78 项操作；默认只监听本机，监听局域网需设置访问令牌。
 - **数据与备份**：站点、分类、绑定与计划存 SQLite，视频缓存独立存放；支持 JSON 备份、导出、校验与整库恢复。
 - **应用外壳**：无边框窗口与自绘操作栏、托盘、全局快捷键、深浅主题与 9 种强调色、启动偏好（默认首页 / 窗口大小）与应用内更新。
 
@@ -45,33 +46,35 @@ pnpm dev       # 启动开发环境（主进程 / 预加载改动会自动重启
 ## 目录结构
 
 ```
-src/main        主进程：窗口、托盘、快捷键、站点 / 分类 / 推荐 / 备份存储、视频缓存与采集、局域网服务、自动更新
+src/main        主进程：窗口、托盘、快捷键、站点 / 分类 / 推荐 / 备份存储、视频缓存与采集、局域网服务、MCP 服务、自动更新
+src/main/mcp    MCP Streamable HTTP 服务、配置校验与按域分组的工具注册
 src/preload     contextBridge 暴露的 API，渲染层类型见 src/preload/api.d.ts
 src/renderer    React 应用（@renderer/* 指向 src/renderer/src）
 src/lanweb      局域网影院的网页端（纯浏览器 JS，由主进程内联提供）
 build/          打包资源：图标源文件与各平台图标
 resources/      运行时窗口 / 托盘图标
-docs/           采集接口、视频缓存与播放器调研文档
+docs/           采集接口、视频缓存、MCP 与播放器调研文档
 out/            electron-vite 产物（git 忽略）
 dist/           electron-builder 产物（git 忽略）
 ```
 
-IPC 接口新增要改三处：主进程 `ipcMain.handle`、`src/preload/index.ts` 的 `ipcRenderer.invoke`、`src/preload/api.d.ts` 里手写的 `Api` 类型。渲染层只允许通过 `window.api` / `window.electron` 访问。
+IPC 接口新增要改三处：主进程 `handleIpc`（内部会同时注册到 `ipcMain`，MCP 工具复用同一份 handler）、`src/preload/index.ts` 的 `ipcRenderer.invoke`、`src/preload/api.d.ts` 里手写的 `Api` 类型。渲染层只允许通过 `window.api` / `window.electron` 访问。
 
 ## 设置与本地数据
 
 - 应用设置存 `app.getPath('userData')/app-settings.json`（Windows 为 `%APPDATA%\cine-box\app-settings.json`），明文 JSON，没有用 electron-store。
 
-| 字段                 | 含义                                                                | 默认值             |
-| -------------------- | ------------------------------------------------------------------- | ------------------ |
-| `openAtLogin`        | 开机自启，以系统登录项为准，每次读取都回读系统                      | `false`            |
-| `closeToTray`        | 关闭窗口时最小化到托盘，而不是退出                                  | `false`            |
-| `autoDownload`       | 检测到新版本后自动下载                                              | `true`             |
-| `showShortcut`       | 全局快捷键，空字符串表示未启用                                      | `Ctrl+Shift+Space` |
-| `startView`          | 默认首页：`home`（推荐）/ `search`（搜索视频）                      | `home`             |
-| `windowSize`         | 启动时窗口大小：`medium` / `large` / `xlarge`（适中 / 大屏 / 超大） | `large`            |
-| `defaultPicSiteId`   | 采集时优先用哪个站点的封面，空串表示不指定                          | `''`               |
-| `collectConcurrency` | 同时采集的站点数，1–4                                               | `2`                |
+| 字段                 | 含义                                                                | 默认值                 |
+| -------------------- | ------------------------------------------------------------------- | ---------------------- |
+| `openAtLogin`        | 开机自启，以系统登录项为准，每次读取都回读系统                      | `false`                |
+| `closeToTray`        | 关闭窗口时最小化到托盘，而不是退出                                  | `false`                |
+| `autoDownload`       | 检测到新版本后自动下载                                              | `true`                 |
+| `showShortcut`       | 全局快捷键，空字符串表示未启用                                      | `Ctrl+Shift+Space`     |
+| `startView`          | 默认首页：`home`（推荐）/ `search`（搜索视频）                      | `home`                 |
+| `windowSize`         | 启动时窗口大小：`medium` / `large` / `xlarge`（适中 / 大屏 / 超大） | `large`                |
+| `defaultPicSiteId`   | 采集时优先用哪个站点的封面，空串表示不指定                          | `''`                   |
+| `collectConcurrency` | 同时采集的站点数，1–4                                               | `2`                    |
+| `mcp`                | MCP 服务：`enabled` / `host` / `port` / `token`                     | 关闭，`127.0.0.1:3927` |
 
 - 外观偏好存在渲染层 `localStorage`：`theme`（`system` / `light` / `dark`）与 `accent`（强调色 key）。
 - 控制台站点存 `app.getPath('userData')/Data/cine-box.db`（SQLite，`sites` 表，WAL 模式），新增时由主进程生成 32 位 UUID（UUID 去掉横线）与 ISO 8601 创建 / 更新时间；字段缺失或手工改坏时按默认值兜底。在线分类存 `site_categories` 表，通过 `site_id` 关联站点，同样带 32 位 ID 与创建 / 更新时间；打开分类弹窗直接读库（没有数据时才抓取 `ac=list` 并入库），「重新获取」会对比出新增 / 改名 / 消失的分类，由用户选择增量（保留消失项）或全量（以本次结果为准）更新。
@@ -161,6 +164,7 @@ Logo 源文件为 [`build/icon.svg`](build/icon.svg)，`src/renderer/src/assets/
 - [`AGENTS.md`](AGENTS.md)：工程约定（命令、目录、IPC、窗口与主题的坑、发版约束）。
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更记录，同时作为 Release 说明与客户端更新说明。
 - [`docs/采集接口参数说明.md`](docs/采集接口参数说明.md)：XML 采集接口的参数说明，解析与采集实现在 `src/main/video-collect-parser.ts`、`video-collector.ts`。
+- [`docs/MCP.md`](docs/MCP.md)：MCP 服务的开启、客户端配置、安全说明与 78 个工具的参数目录。
 - [`docs/迭代待办计划.md`](docs/迭代待办计划.md)：迭代方向、任务拆分、优先级、验收标准与决策记录。
 
 ## License

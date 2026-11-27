@@ -7,6 +7,7 @@ import {
   normalizeNetworkSettings,
   type NetworkSettings
 } from './network/network-types'
+import { DEFAULT_MCP_SETTINGS, normalizeMcpSettings, type McpSettings } from './mcp/mcp-settings'
 
 /** 默认全局快捷键：在任何地方唤起 / 隐藏主窗口 */
 export const DEFAULT_SHOW_SHORTCUT = 'Ctrl+Shift+Space'
@@ -100,6 +101,8 @@ export interface AppSettings {
   downloadSegmentConcurrency: number
   /** 网络代理：禁用 / 系统代理 / 自定义（HTTP、SOCKS5，可选身份验证） */
   network: NetworkSettings
+  /** MCP HTTP 服务：开关、监听地址 / 端口、访问令牌 */
+  mcp: McpSettings
 }
 
 interface StoreFile {
@@ -117,6 +120,7 @@ interface StoreFile {
   downloadConcurrency?: number
   downloadSegmentConcurrency?: number
   network?: Partial<NetworkSettings>
+  mcp?: Partial<McpSettings>
 }
 
 const DEFAULTS: AppSettings = {
@@ -134,7 +138,8 @@ const DEFAULTS: AppSettings = {
   downloadPath: '',
   downloadConcurrency: DEFAULT_DOWNLOAD_CONCURRENCY,
   downloadSegmentConcurrency: DEFAULT_DOWNLOAD_SEGMENT_CONCURRENCY,
-  network: { ...DEFAULT_NETWORK_SETTINGS }
+  network: { ...DEFAULT_NETWORK_SETTINGS },
+  mcp: { ...DEFAULT_MCP_SETTINGS }
 }
 
 export interface AppSettingsStore {
@@ -159,6 +164,8 @@ export interface AppSettingsStore {
   setDownloadSegmentConcurrency: (value: number | null) => AppSettings
   /** 网络代理配置；保存后由主进程立刻套用到 Chromium 网络栈 */
   setNetwork: (value: unknown) => AppSettings
+  /** MCP 服务配置；由 MCP 控制器校验后再调用 */
+  setMcp: (value: unknown) => AppSettings
 }
 
 function loginItemOptions(): { path: string; args: string[] } | undefined {
@@ -214,13 +221,15 @@ export function createAppSettingsStore(): AppSettingsStore {
         downloadSegmentConcurrency: clampDownloadSegmentConcurrency(
           data?.downloadSegmentConcurrency
         ),
-        network: normalizeNetworkSettings(data?.network)
+        network: normalizeNetworkSettings(data?.network),
+        mcp: normalizeMcpSettings(data?.mcp)
       }
     } catch {
       settings = {
         ...DEFAULTS,
         downloadPath: defaultDownloadPath(),
-        network: { ...DEFAULT_NETWORK_SETTINGS }
+        network: { ...DEFAULT_NETWORK_SETTINGS },
+        mcp: { ...DEFAULT_MCP_SETTINGS }
       }
     }
   }
@@ -240,7 +249,8 @@ export function createAppSettingsStore(): AppSettingsStore {
       downloadPath: settings.downloadPath,
       downloadConcurrency: settings.downloadConcurrency,
       downloadSegmentConcurrency: settings.downloadSegmentConcurrency,
-      network: settings.network
+      network: settings.network,
+      mcp: settings.mcp
     }
     try {
       mkdirSync(app.getPath('userData'), { recursive: true })
@@ -333,6 +343,11 @@ export function createAppSettingsStore(): AppSettingsStore {
     },
     setNetwork: (value: unknown) => {
       settings = { ...settings, network: normalizeNetworkSettings(value) }
+      persist()
+      return snapshot()
+    },
+    setMcp: (value: unknown) => {
+      settings = { ...settings, mcp: normalizeMcpSettings(value) }
       persist()
       return snapshot()
     }

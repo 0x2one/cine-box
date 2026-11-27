@@ -67,6 +67,22 @@ const api = {
     testNetwork: (input: NetworkTestInput): Promise<NetworkTestResult> =>
       ipcRenderer.invoke('settings:testNetwork', input)
   },
+  mcp: {
+    /** 服务配置 + 运行状态（含监听地址与访问 URL） */
+    get: (): Promise<McpSnapshot> => ipcRenderer.invoke('mcp:get'),
+    /** 保存并应用 enabled / host / port / token */
+    set: (patch: Partial<McpSettings>): Promise<McpConfigureResult> =>
+      ipcRenderer.invoke('mcp:set', patch),
+    /** 服务启动 / 停止 / 启动失败时推送最新快照 */
+    onChange: (callback: (snapshot: McpSnapshot) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: McpSnapshot): void =>
+        callback(snapshot)
+      ipcRenderer.on('mcp:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('mcp:changed', handler)
+      }
+    }
+  },
   downloads: {
     list: (): Promise<DownloadRecordView[]> => ipcRenderer.invoke('downloads:list'),
     /** 下载目录占用（文件数 / 字节数）与所在磁盘的容量，设置页的「下载」分区用 */
