@@ -153,8 +153,9 @@ export function createMcpServer(options: McpServerOptions): McpServerController 
         return server
       },
       {
+        // 不锁 responseMode：工具都是一问一答，默认 auto 实际只会回单个 JSON body；
+        // 显式写 'json' 只会换来 SDK 那条「丢弃中途通知」的告警
         legacy: 'stateless',
-        responseMode: 'json',
         maxRequestBodySize: MAX_BODY_BYTES,
         onerror: (error) => console.error('[mcp] handler error', error)
       }

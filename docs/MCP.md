@@ -5,7 +5,7 @@
 - 协议：MCP `2026-07-28`（Streamable HTTP），并兼容 2025-era 客户端。
 - 传输：只做 HTTP，不做 stdio；旧版 HTTP+SSE 传输不支持。
 - 能力：只声明 `tools`，没有 resources / prompts / sampling / OAuth。
-- 响应：JSON（`responseMode: 'json'`），不实现服务端 SSE 推送；GET / DELETE 返回 405。
+- 响应：现代请求（2026-07-28）回单个 JSON body——`responseMode` 保持默认 `auto`，服务端不发中途通知（进度 / 日志），所以不会升级成 SSE；2025-era 兼容链路走旧版 Streamable HTTP 传输，仍按 SSE 回，最后一条是结果。GET / DELETE 返回 405。
 
 ## 1. 开启
 
