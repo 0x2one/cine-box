@@ -48,7 +48,7 @@ const SEARCH_CARD_RATIO = 3 / 4
 const POSTER_HINT =
   '顺序就是推荐页叠层的顺序，拖动行或点上 / 下箭头都能调整；「添加到海报」在控制台「视频」页每行的操作里。隐藏的不会出现在推荐页，配置仍保留。'
 const SECTION_HINT =
-  '每个一级分类对应推荐页上的一条轨道。自定义用「视频」页的「推荐」按钮加片；TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图。'
+  '每个一级分类对应推荐页上的一条轨道。自定义用「视频」页的「推荐」按钮加片；TOP 按视频更新时间自动取前 N 部。两种规则都能排序、移除、隐藏、改图；拖动分类名前的把手可以调整分类在推荐页上的先后顺序。'
 const SEARCH_HINT =
   '搜索页初始状态底部的一排带片名海报，默认按更新时间取前 8 部。自定义同样用「视频」页的「推荐」按钮加片；两种规则都能排序、移除、隐藏、改图。'
 
@@ -953,6 +953,9 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
   /** 拖动排序的源行与落点：海报和分类推荐共用，同一时间只会有一个拖动 */
   const [dragId, setDragId] = useState<number | null>(null)
   const [dropTarget, setDropTarget] = useState<{ id: number; edge: DragEdge } | null>(null)
+  /** 分类推荐的分组拖动：拖的是一整个一级分类，落点单独记（视频 id 是数字，这里用分类 id） */
+  const [sectionDragId, setSectionDragId] = useState<string | null>(null)
+  const [sectionDrop, setSectionDrop] = useState<{ id: string; edge: DragEdge } | null>(null)
   /** 展开的分组（默认全收起，展开状态记到 localStorage）；「已移除」列表只在本页 */
   const [expanded, setExpanded] = useState<string[]>(readExpanded)
   const [removedOpen, setRemovedOpen] = useState<string[]>([])
@@ -1116,6 +1119,44 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
     onEnd: clearDrag
   })
 
+  /** 分类推荐里各分组的当前顺序：拖动分类名前的把手调整，结果写进推荐配置 */
+  const sectionIds = sections.map((section) => section.categoryId)
+
+  const clearSectionDrag = (): void => {
+    setSectionDragId(null)
+    setSectionDrop(null)
+  }
+
+  /**
+   * 分组落点：指针在目标分组标题的上半区就插到它前面；
+   * 落到标题下方的内容区时按拖动方向判断 —— 往上拖插到整组前面，
+   * 往下拖插到整组后面，否则「拖上去却落到原处」会让人以为没生效。
+   */
+  const sectionDropEdge = (event: React.DragEvent<HTMLElement>, targetId: string): DragEdge => {
+    const head = event.currentTarget.querySelector('.home-config-section-head')
+    const rect = (head ?? event.currentTarget).getBoundingClientRect()
+    if (event.clientY < rect.top + rect.height / 2) return 'before'
+    const from = sectionIds.indexOf(sectionDragId ?? '')
+    const to = sectionIds.indexOf(targetId)
+    return from >= 0 && to >= 0 && from > to ? 'before' : 'after'
+  }
+
+  const dropIntoSections = (targetId: string, edge: DragEdge): void => {
+    const sourceId = sectionDragId
+    clearSectionDrag()
+    if (!sourceId || sourceId === targetId) return
+    const from = sectionIds.indexOf(sourceId)
+    const to = sectionIds.indexOf(targetId)
+    if (from < 0 || to < 0) return
+    let insert = to + (edge === 'after' ? 1 : 0)
+    if (from < insert) insert -= 1
+    if (insert === from) return
+    const next = [...sectionIds]
+    next.splice(from, 1)
+    next.splice(insert, 0, sourceId)
+    void act(window.api.home.reorderSections(next))
+  }
+
   const movePoster = (videoId: number, delta: number): void => {
     const ids = posters.map((item) => item.videoId)
     const from = ids.indexOf(videoId)
@@ -1232,6 +1273,11 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
 
   const sectionTab = (
     <div className="home-config">
+      {sections.length > 1 && (
+        <p className="home-config-order-hint">
+          按住分类名前的把手上下拖动，可以调整分类在推荐页上的先后顺序。
+        </p>
+      )}
       {sections.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -1241,10 +1287,33 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
         sections.map((section) => {
           const isCollapsed = !expanded.includes(section.categoryId)
           const showRemoved = removedOpen.includes(section.categoryId)
+          const sectionClasses = ['home-config-section']
+          if (isCollapsed) sectionClasses.push('is-collapsed')
+          if (sectionDragId === section.categoryId) sectionClasses.push('is-dragging')
+          if (sectionDrop?.id === section.categoryId) {
+            sectionClasses.push(`is-drop-${sectionDrop.edge}`)
+          }
           return (
             <section
-              className={`home-config-section${isCollapsed ? ' is-collapsed' : ''}`}
+              className={sectionClasses.join(' ')}
               key={section.categoryId}
+              onDragOver={(event) => {
+                // 只有拖分组时才接落点；拖的是组里的卡片时交给卡片自己处理
+                if (!sectionDragId) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+                const edge = sectionDropEdge(event, section.categoryId)
+                setSectionDrop((prev) =>
+                  prev?.id === section.categoryId && prev.edge === edge
+                    ? prev
+                    : { id: section.categoryId, edge }
+                )
+              }}
+              onDrop={(event) => {
+                if (!sectionDragId) return
+                event.preventDefault()
+                dropIntoSections(section.categoryId, sectionDropEdge(event, section.categoryId))
+              }}
             >
               <div
                 className="home-config-section-head"
@@ -1253,7 +1322,7 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                   const target = event.target as HTMLElement
                   if (
                     target.closest(
-                      'button, input, textarea, select, label, a, .ant-radio-group, .ant-switch, .ant-select'
+                      'button, input, textarea, select, label, a, .ant-radio-group, .ant-switch, .ant-select, .home-config-section-grip'
                     )
                   ) {
                     return
@@ -1262,6 +1331,24 @@ function HomeSettingsPanel({ title, desc }: { title: string; desc: string }): Re
                 }}
               >
                 <div className="home-config-section-title">
+                  <span
+                    className="home-config-grip home-config-section-grip"
+                    draggable
+                    title="按住拖动，调整这一组在推荐页上的先后顺序"
+                    aria-label="拖动排序"
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', section.categoryId)
+                      // 拖影用整行标题，只拖一颗小图标看不出在搬哪一组
+                      const head = event.currentTarget.closest('.home-config-section-head')
+                      if (head) event.dataTransfer.setDragImage(head, 16, 16)
+                      setSectionDragId(section.categoryId)
+                      setSectionDrop(null)
+                    }}
+                    onDragEnd={clearSectionDrag}
+                  >
+                    <HolderOutlined />
+                  </span>
                   <button
                     type="button"
                     className="home-config-fold"

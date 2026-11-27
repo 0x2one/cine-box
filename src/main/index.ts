@@ -2703,6 +2703,13 @@ ipcMain.handle('home:sections:clear', (_event, categoryId: string) => {
   return result
 })
 
+// 一级分类在推荐页上的先后顺序：控制台「分类推荐」拖动分组标题时提交
+ipcMain.handle('home:sections:reorderCategories', (_event, categoryIds: string[]) => {
+  const result = homeStore.reorderSections(Array.isArray(categoryIds) ? categoryIds : [])
+  invalidateHomeFeed()
+  return result
+})
+
 /* ── IPC：搜索页底部推荐（没有分类归属） ── */
 
 // 搜索页底部推荐：展示端只放行可见视频，控制台要完整的一份（管理 18+ / 禁用站点的条目）

@@ -41,6 +41,8 @@ interface StoreFile {
   /** 写入时生效的「TOP 默认条数」，用来识别旧默认值并迁移 */
   topDefault?: number
   posters?: unknown
+  /** 一级分类在推荐页上的先后顺序，老文件没有这一段，按分类排序 */
+  sectionOrder?: unknown
   sections?: unknown
   /** 搜索页底部推荐，老文件没有这一段，读成默认的 TOP 8 */
   search?: unknown
@@ -57,6 +59,8 @@ export interface HomeStore {
   updatePoster: (videoId: number, patch: HomeItemPatch) => HomeActionResult
   removePoster: (videoId: number) => HomeActionResult
   reorderPosters: (videoIds: number[]) => HomeActionResult
+  /** 调整一级分类在推荐页上的先后顺序（控制台「分类推荐」拖动排序） */
+  reorderSections: (categoryIds: string[]) => HomeActionResult
   saveSection: (categoryId: string, patch: HomeSectionPatch) => HomeActionResult
   addSectionItem: (categoryId: string, videoId: number) => HomeActionResult
   updateSectionItem: (categoryId: string, videoId: number, patch: HomeItemPatch) => HomeActionResult
@@ -215,6 +219,20 @@ function parseItems(raw: unknown): HomeSectionItem[] {
   return items
 }
 
+/** 解析推荐页的分类顺序：只留非空字符串，去重；顺序就是数组顺序 */
+function parseSectionOrder(raw: unknown): string[] {
+  const order: string[] = []
+  const seen = new Set<string>()
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (typeof entry !== 'string') continue
+    const id = entry.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    order.push(id)
+  }
+  return order
+}
+
 function parseSearch(raw: unknown): HomeSearchConfig {
   const record =
     raw && typeof raw === 'object'
@@ -239,13 +257,14 @@ function parseSearch(raw: unknown): HomeSearchConfig {
 export function createHomeStore(directory: string): HomeStore {
   const file = join(directory, 'home.json')
   const imagesDir = join(directory, 'images')
-  let config: HomeConfig = { posters: [], sections: [], search: defaultSearch() }
+  let config: HomeConfig = { posters: [], sectionOrder: [], sections: [], search: defaultSearch() }
 
   function persist(): void {
     const payload: StoreFile = {
       version: 1,
       topDefault: HOME_DEFAULT_TOP_N,
       posters: config.posters,
+      sectionOrder: config.sectionOrder,
       sections: config.sections,
       search: config.search
     }
@@ -301,7 +320,12 @@ export function createHomeStore(directory: string): HomeStore {
         items
       })
     }
-    return { posters, sections, search: parseSearch(data?.search) }
+    return {
+      posters,
+      sectionOrder: parseSectionOrder(data?.sectionOrder),
+      sections,
+      search: parseSearch(data?.search)
+    }
   }
 
   function findSection(categoryId: string): HomeSectionConfig | null {
@@ -392,7 +416,7 @@ export function createHomeStore(directory: string): HomeStore {
       try {
         config = parseConfig(readFileSync(file, 'utf-8'))
       } catch {
-        config = { posters: [], sections: [], search: defaultSearch() }
+        config = { posters: [], sectionOrder: [], sections: [], search: defaultSearch() }
       }
     },
 
@@ -442,6 +466,27 @@ export function createHomeStore(directory: string): HomeStore {
         if (items.has(rest.videoId)) ordered.push(rest)
       }
       config.posters = ordered
+      persist()
+      return { ok: true }
+    },
+
+    reorderSections: (categoryIds) => {
+      const given: string[] = []
+      const seen = new Set<string>()
+      for (const raw of Array.isArray(categoryIds) ? categoryIds : []) {
+        const id = typeof raw === 'string' ? raw.trim() : ''
+        if (!id || seen.has(id)) continue
+        seen.add(id)
+        given.push(id)
+      }
+      if (given.length === 0) return { ok: false, error: 'INVALID_INPUT' }
+      // 没在顺序里出现的（例如别处新建的分类）接在后面，不丢
+      for (const id of config.sectionOrder) {
+        if (seen.has(id)) continue
+        seen.add(id)
+        given.push(id)
+      }
+      config.sectionOrder = given
       persist()
       return { ok: true }
     },
@@ -731,7 +776,7 @@ export function createHomeStore(directory: string): HomeStore {
     },
 
     clear: () => {
-      config = { posters: [], sections: [], search: defaultSearch() }
+      config = { posters: [], sectionOrder: [], sections: [], search: defaultSearch() }
       persist()
       // 配置清空后这些图片没有引用了，一起删掉免得白占磁盘；目录留着，下次换图直接写
       try {

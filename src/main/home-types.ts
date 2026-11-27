@@ -93,6 +93,11 @@ export interface HomeSearchConfig {
 
 export interface HomeConfig {
   posters: HomePosterItem[]
+  /**
+   * 一级分类在推荐页上的先后顺序（categoryId 数组，控制台「分类推荐」拖动排序写入）。
+   * 空数组表示没排过，按分类自己的 sortOrder 来；没在这里出现的新分类接在后面。
+   */
+  sectionOrder: string[]
   /** 只保存配置过的一级分类，没配置的按默认值（显示 / TOP 12）处理 */
   sections: HomeSectionConfig[]
   search: HomeSearchConfig

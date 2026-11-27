@@ -184,9 +184,19 @@ export function buildHomeFeed(deps: HomeFeedDeps, view: HomeFeedView = 'console'
 
   const posters = config.posters.map((poster) => toView(poster, videos.get(poster.videoId)))
 
+  // 推荐页大类的先后：控制台「分类推荐」拖动排过序的按配置顺序，
+  // 没排过的（以及之后新建的）接在后面，仍按分类自己的 sortOrder
+  const sectionRank = new Map((config.sectionOrder ?? []).map((id, index) => [id, index]))
   const topLevel = categories
     .filter((category) => category.parentId === null)
-    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .sort((left, right) => {
+      const leftRank = sectionRank.get(left.id)
+      const rightRank = sectionRank.get(right.id)
+      if (leftRank !== undefined && rightRank !== undefined) return leftRank - rightRank
+      if (leftRank !== undefined) return -1
+      if (rightRank !== undefined) return 1
+      return left.sortOrder - right.sortOrder
+    })
   const sections: HomeSectionView[] = []
   for (const category of topLevel) {
     const stored = config.sections.find((section) => section.categoryId === category.id)

@@ -5104,6 +5104,34 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   margin-top: 6px;
 }
 
+/* 拖动分组：整组可拖（把手在标题行最前），落点用主色线标在分组的上 / 下沿 */
+.home-config-section.is-dragging {
+  opacity: 0.5;
+}
+
+.home-config-section.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.home-config-section.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.home-config-section-grip {
+  margin-right: -4px;
+  color: var(--text-faint);
+  font-size: 13px;
+  cursor: grab;
+}
+
+.home-config-section-head:hover .home-config-section-grip {
+  color: var(--text-muted);
+}
+
+.home-config-section-grip:active {
+  cursor: grabbing;
+}
+
 /* 收起的分组只剩一行头：去掉列表的底部留白，上下内边距对称才看着居中 */
 .home-config-section.is-collapsed {
   padding-bottom: 14px;
@@ -5228,6 +5256,13 @@ body .ant-modal-root .ant-modal-wrap .ant-modal-body {
   margin: 4px 0 10px;
   color: var(--text-faint);
   font-size: 12.5px;
+}
+
+/* 分类推荐顶部的一行操作提示：拖动分组调整推荐页里的分类顺序 */
+.home-config-order-hint {
+  margin: 4px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
 }
 
 .home-config-removed {

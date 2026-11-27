@@ -1351,6 +1351,8 @@ interface HomeApi {
   reorderSectionItems: (categoryId: string, videoIds: number[]) => Promise<HomeActionResult>
   /** 清空「自定义」轨道的全部推荐 */
   clearSectionItems: (categoryId: string) => Promise<HomeActionResult>
+  /** 调整一级分类在推荐页上的先后顺序（控制台「分类推荐」拖动排序） */
+  reorderSections: (categoryIds: string[]) => Promise<HomeActionResult>
   /** 搜索页底部推荐 */
   getSearch: (options?: { view?: HomeFeedView }) => Promise<HomeSearchResult>
   saveSearch: (patch: HomeSearchPatch) => Promise<HomeActionResult>

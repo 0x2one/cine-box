@@ -231,6 +231,9 @@ const api = {
       ipcRenderer.invoke('home:sections:reorder', categoryId, videoIds),
     clearSectionItems: (categoryId: string): Promise<HomeActionResult> =>
       ipcRenderer.invoke('home:sections:clear', categoryId),
+    /** 调整一级分类在推荐页上的先后顺序（控制台「分类推荐」拖动排序） */
+    reorderSections: (categoryIds: string[]): Promise<HomeActionResult> =>
+      ipcRenderer.invoke('home:sections:reorderCategories', categoryIds),
     getSearch: (options?: { view?: HomeFeedView }): Promise<HomeSearchResult> =>
       ipcRenderer.invoke('home:search:get', options),
     saveSearch: (patch: HomeSearchPatch): Promise<HomeActionResult> =>
