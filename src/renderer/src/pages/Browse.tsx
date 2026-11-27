@@ -471,7 +471,7 @@ function BrowseView({
             <p className="home-empty-title">这个分类的内容全部是 18+</p>
             <p className="home-empty-desc">
               {
-                '设置里关闭了 18+ 内容，所以这里不显示；去「设置 › 内容分级」打开「显示 18+ 内容」后就会出现在这里'
+                '设置里关闭了 18+ 内容，所以这里不显示；去「设置 › 内容」打开「显示 18+ 内容」后就会出现在这里'
               }
             </p>
           </div>

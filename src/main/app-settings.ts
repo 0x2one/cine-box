@@ -123,7 +123,7 @@ const DEFAULTS: AppSettings = {
   openAtLogin: false,
   closeToTray: false,
   autoDownload: true,
-  // 默认关闭：标记为 18+ 的内容在展示端不可见，需要时在「设置 › 内容分级」里打开
+  // 默认关闭：标记为 18+ 的内容在展示端不可见，需要时在「设置 › 内容」里打开
   allowAdult: false,
   showShortcut: DEFAULT_SHOW_SHORTCUT,
   startView: 'home',

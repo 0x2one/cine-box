@@ -54,18 +54,20 @@ const NAV_ITEMS: {
   label: string
   icon: typeof SettingOutlined
 }[] = [
+  // 顺序：通用偏好 → 操作方式 → 网络 → 下载 → 存储 → 内容 → 关于，
+  // 从「怎么用这个应用」一路收到「它从哪来」，最不常改的放在最后。
   { key: 'preferences', label: '偏好设置', icon: SettingOutlined },
-  { key: 'content', label: '内容分级', icon: SafetyCertificateOutlined },
-  { key: 'network', label: '网络', icon: GlobalOutlined },
   { key: 'shortcut', label: '快捷键', icon: ThunderboltOutlined },
+  { key: 'network', label: '网络', icon: GlobalOutlined },
   { key: 'download', label: '下载', icon: CloudDownloadOutlined },
   { key: 'storage', label: '存储', icon: HddOutlined },
+  { key: 'content', label: '内容', icon: SafetyCertificateOutlined },
   { key: 'about', label: '关于', icon: InfoCircleOutlined }
 ]
 
 const SECTION_META: Record<SettingsSection, { title: string; desc: string }> = {
   preferences: { title: '偏好设置', desc: '启动、关闭、更新与外观' },
-  content: { title: '内容分级', desc: '18+ 内容是否在展示端出现' },
+  content: { title: '内容', desc: '18+ 内容是否在展示端出现' },
   network: { title: '网络', desc: '代理与网络连接' },
   shortcut: { title: '快捷键', desc: '在任何应用中唤起映盒剧场' },
   download: { title: '下载', desc: '保存位置与同时下载任务数' },
@@ -316,7 +318,7 @@ function PreferencesPanel(): React.JSX.Element {
   )
 }
 
-/* ── 内容分级 ── */
+/* ── 内容 ── */
 
 /**
  * 18+ 内容总开关：关掉之后，标记过的站点 / 分类 / 视频在推荐、找片看、搜索视频、

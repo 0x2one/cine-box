@@ -233,7 +233,7 @@ function PlayerSession({
           setPhase('error')
           if (result.error === 'ADULT_HIDDEN') {
             setErrorText('该内容已被隐藏')
-            setErrorHint('它被标记为 18+，打开「设置 › 内容分级 › 显示 18+ 内容」后才能播放')
+            setErrorHint('它被标记为 18+，打开「设置 › 内容 › 显示 18+ 内容」后才能播放')
           } else {
             setErrorText(
               result.error === 'CACHE_UNAVAILABLE' ? '视频缓存不可用' : '读取视频详情失败'
