@@ -194,14 +194,19 @@
   margin-top: 2px;
 }
 
+/*
+ * 操作列在整行里垂直居中：一行是标题 + 元信息（下载中再叠一条进度条），
+ * 比 24px 的按钮高不少，跟着行的 flex-start 走就贴在第一行上，看着像「按钮没对齐」。
+ * 图标和正文仍保持顶部对齐，所以只给自己 align-self，不动行的 align-items。
+ */
 .download-record-actions {
   display: flex;
   flex: none;
   flex-wrap: wrap;
+  align-self: center;
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-  padding-top: 1px;
 }
 
 /* 来源站：同一视频可能从不同线路缓存的集，用小胶囊区分 */
@@ -299,12 +304,13 @@
   margin-top: 2px;
 }
 
+/* 分组卡的操作列同理：删除按钮 + › 一起贴在行的垂直中线上 */
 .download-group-actions {
   display: flex;
   flex: none;
+  align-self: center;
   align-items: center;
   gap: 2px;
-  padding-top: 1px;
 }
 
 .download-group-arrow {
