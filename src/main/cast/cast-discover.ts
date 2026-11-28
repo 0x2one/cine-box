@@ -182,23 +182,28 @@ async function readDevice(
   const avTransport = resolve(controlOf(AV_TRANSPORT))
   if (!avTransport) return null
 
-  let host: string
+  let address: URL
   try {
-    host = new URL(entry.location).hostname
+    address = new URL(entry.location)
   } catch {
     return null
   }
+  const host = address.hostname
+  const port = Number(address.port) || 0
 
   const udn = xmlText(xml, 'UDN')
   const model = xmlText(xml, 'modelName')
   const manufacturer = xmlText(xml, 'manufacturer')
+  const modelDescription = xmlText(xml, 'modelDescription')
   const friendly = xmlText(xml, 'friendlyName')
   return {
     id: udn || entry.location,
     name: friendly || model || manufacturer || host,
     model,
     manufacturer,
+    modelDescription,
     host,
+    port,
     location: entry.location,
     avTransport,
     renderingControl: resolve(controlOf(RENDERING_CONTROL)),

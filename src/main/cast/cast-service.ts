@@ -130,8 +130,9 @@ function toView(device: CastDevice): CastDeviceView {
   return {
     id: device.id,
     name: device.name,
-    model: device.model,
-    manufacturer: device.manufacturer
+    modelDescription: device.modelDescription,
+    host: device.host,
+    port: device.port
   }
 }
 

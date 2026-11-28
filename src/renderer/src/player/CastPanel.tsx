@@ -96,9 +96,7 @@ export function CastPanel({
                 disabled={loading}
               >
                 <span className="cast-device-name">{device.name}</span>
-                <span className="cast-device-meta">
-                  {[device.model, device.manufacturer].filter(Boolean).join(' · ') || '局域网设备'}
-                </span>
+                <span className="cast-device-meta">{deviceSubtitle(device)}</span>
               </button>
             ))}
           </div>
@@ -108,6 +106,24 @@ export function CastPanel({
       </div>
     </>
   )
+}
+
+/**
+ * 副标题优先报设备描述里的 modelDescription：那是厂商自己写的型号 / 产品名（坚果写型号、
+ * 小电视写 App 名），比 modelName 有用——modelName 是「跑在这台机器上的渲染器是谁做的」
+ * （坚果投影报的是当贝 MediaRenderer），和硬件品牌无关。个别设备把它填得和 friendlyName
+ * 一模一样（坚果 N3 就是），重复时退回 IP:端口，至少还能区分同一台机器上并存的多个渲染器。
+ */
+function deviceSubtitle(device: CastDevice): string {
+  if (device.modelDescription && device.modelDescription !== device.name) {
+    return device.modelDescription
+  }
+  return deviceAddress(device)
+}
+
+function deviceAddress(device: CastDevice): string {
+  if (!device.host) return '局域网设备'
+  return device.port > 0 ? `${device.host}:${device.port}` : device.host
 }
 
 function formatTime(seconds: number): string {

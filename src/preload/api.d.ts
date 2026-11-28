@@ -1486,8 +1486,12 @@ interface LanApi {
 interface CastDevice {
   id: string
   name: string
-  model: string
-  manufacturer: string
+  /** 副标题：设备描述里的 modelDescription（厂商自报的型号 / 产品名） */
+  modelDescription: string
+  /** modelDescription 为空时副标题退回 IP:端口，同一台机器开多个渲染器时靠端口区分 */
+  host: string
+  /** 设备描述的端口；没写端口时为 0 */
+  port: number
 }
 
 type CastStatus = 'idle' | 'starting' | 'playing' | 'paused' | 'error'

@@ -12,8 +12,12 @@ export interface CastDevice {
   name: string
   model: string
   manufacturer: string
+  /** 厂商自报的型号 / 产品名，通常比 modelName 更能说明是哪台设备 */
+  modelDescription: string
   /** 设备地址里的 host，用来挑同网段的本机 IP */
   host: string
+  /** 设备描述地址里的端口；设备没写端口（默认 80）时为 0 */
+  port: number
   /** 设备描述 XML 的地址 */
   location: string
   avTransport: string
@@ -25,8 +29,10 @@ export interface CastDevice {
 export interface CastDeviceView {
   id: string
   name: string
-  model: string
-  manufacturer: string
+  /** 副标题：厂商自报的型号 / 产品名；为空时副标题退回 host:port */
+  modelDescription: string
+  host: string
+  port: number
 }
 
 export type CastStatus = 'idle' | 'starting' | 'playing' | 'paused' | 'error'
