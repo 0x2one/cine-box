@@ -827,7 +827,8 @@ function PlayerSession({
       />
 
       <div className={`player-body${line && panelOpen ? ' has-panel' : ''}`}>
-        <section className="player-stage">
+        {/* is-cast-open：投屏面板打开期间把控制条钉住（见 player.css），不跟着指针跑到面板上就收起 */}
+        <section className={`player-stage${cast.open ? ' is-cast-open' : ''}`}>
           {/* ArtPlayer 的挂载点：尺寸由外层 section 决定 */}
           <div className="player-stage-art" ref={stageRef} />
 
@@ -1055,7 +1056,8 @@ function LocalSession({
       <PlayerTitleBar title={title} episode={episode} countLabel={hls ? '离线缓存' : '本机文件'} />
 
       <div className="player-body">
-        <section className="player-stage">
+        {/* 下载中心播缓存包时也有同一块投屏面板，钉住控制条的规则一样 */}
+        <section className={`player-stage${cast.open ? ' is-cast-open' : ''}`}>
           <div className="player-stage-art" ref={stageRef} />
 
           {playError && (

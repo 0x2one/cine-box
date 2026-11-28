@@ -1529,12 +1529,28 @@ button {
 
 /* ── 投屏 ── */
 
-/* 打开设备面板时挡住控制条：点面板外面关闭，也不会让「投屏」按钮先关再开 */
+/* 打开设备面板时挡住视频区：点面板外面关闭，也不会让「投屏」按钮先关再开 */
 .cast-backdrop {
   position: absolute;
   inset: 0;
   z-index: 54;
   background: transparent;
+}
+
+/*
+ * 投屏面板打开期间把控制条钉住。面板浮在控制条上方，遮罩一铺上，指针事件就落在遮罩上，
+ * ArtPlayer 判断「指针是否在底栏里」是靠事件路径（`R(event).includes($bottom)`），于是当成
+ * 指针离开了播放器，3 秒后把整条底栏收起来，面板下面会突然空一块。
+ * 控制条本身在遮罩之上（`.art-bottom` 的 z-index 60 > 遮罩 54），所以钉住之后按钮是能点的；
+ * 这条规则只管可见性，关掉面板立刻交回自动收起。
+ */
+.player-stage.is-cast-open .art-video-player .art-bottom {
+  opacity: 1;
+}
+
+.player-stage.is-cast-open .art-video-player .art-bottom .art-controls,
+.player-stage.is-cast-open .art-video-player .art-bottom .art-progress {
+  transform: translateY(0);
 }
 
 .cast-panel {
