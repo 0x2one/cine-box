@@ -27,6 +27,8 @@ import {
   type VideoCategory,
   type VideoCategoryInput
 } from './category-store'
+import { createCastService, type CastMediaInput, type CastService } from './cast/cast-service'
+import type { CastResolveResult, CastStartInput, CastState } from './cast/cast-types'
 import { createCollectLogStore } from './collect-log-store'
 import { createCollectScheduleStore } from './collect-schedule-store'
 import { createCollectScheduler } from './collect-scheduler'
@@ -213,10 +215,16 @@ const pendingCategoryRefresh = new Map<string, { categories: SiteCategoryInput[]
 const PENDING_CATEGORY_TTL = 5 * 60 * 1000
 const updater = createUpdater(sendToRenderer, () => appSettingsStore.get().autoDownload)
 const cacheManager = createCacheManager()
+/** 投屏服务在 lanCache 之后创建；播放窗关闭时要能停掉它，所以先留一个引用 */
+let castService: CastService | null = null
 // 播放页跑在独立的无边框暗色窗口里，不复用主窗口（IPC 由它自己注册）
 const playerWindows = createPlayerWindowManager({
   preload: join(__dirname, '../preload/index.js'),
-  icon
+  icon,
+  // 播放窗关掉就停投，不然电视会一直播下去
+  onClosed: () => {
+    void castService?.stop()
+  }
 })
 
 function sendToRenderer(channel: string, ...args: unknown[]): void {
@@ -1135,6 +1143,7 @@ handleIpc('downloads:play', async (_event, id: string) => {
     return playerWindows.open({
       fileUrl: url,
       hls: true,
+      downloadId: record.id,
       fileName: record.fileName,
       title: record.title,
       episodeName: record.episodeName
@@ -2169,6 +2178,78 @@ async function lanVideoDetail(videoId: number): Promise<LanDetailPayload> {
 }
 
 /**
+ * 投屏片源校验：渲染层只传「videoId + 当前 URL」或「缓存记录 id」，
+ * 主进程回到详情缓存 / 下载记录里确认归属，避免投屏接口变成任意地址转发。
+ */
+async function resolveCastMedia(input: CastMediaInput): Promise<CastResolveResult> {
+  if (!input || (input.kind !== 'remote' && input.kind !== 'cache')) {
+    return { ok: false, error: 'INVALID_INPUT' }
+  }
+
+  if (input.kind === 'remote') {
+    const videoId = Number(input.videoId)
+    const url = typeof input.url === 'string' ? input.url.trim() : ''
+    if (!Number.isInteger(videoId) || videoId <= 0) return { ok: false, error: 'INVALID_INPUT' }
+    if (!isHlsUrl(url)) return { ok: false, error: 'NOT_HLS' }
+    if (!videoCacheReady) return { ok: false, error: 'NOT_FOUND' }
+    try {
+      const result = await detailCache.read(videoId, true)
+      if (!result.ok || !result.video) return { ok: false, error: 'NOT_FOUND' }
+      const video = result.video
+      if (adultHidden && video.adult) return { ok: false, error: 'ADULT_HIDDEN' }
+      let episodeName = ''
+      let matched = false
+      for (const source of video.sources) {
+        for (const line of source.detail?.playLines ?? []) {
+          for (const episode of line.episodes) {
+            if (episode.url.trim() === url) {
+              matched = true
+              episodeName = episode.name.trim()
+              break
+            }
+          }
+          if (matched) break
+        }
+        if (matched) break
+      }
+      if (!matched) return { ok: false, error: 'NOT_FOUND' }
+      return {
+        ok: true,
+        media: { mode: 'hls', title: video.name, episodeName, url }
+      }
+    } catch {
+      return { ok: false, error: 'NOT_FOUND' }
+    }
+  }
+
+  const recordId = typeof input.recordId === 'string' ? input.recordId.trim() : ''
+  if (!/^[0-9a-f]{32}$/i.test(recordId)) return { ok: false, error: 'INVALID_INPUT' }
+  const record = downloadStore.find(recordId)
+  if (
+    !record ||
+    record.kind !== 'hls' ||
+    record.status !== 'done' ||
+    !record.packageDir ||
+    !existsSync(record.path) ||
+    !existsSync(record.packageDir)
+  ) {
+    return { ok: false, error: 'NOT_FOUND' }
+  }
+  if (adultHidden && typeof record.videoId === 'number' && isAdultVideoId(record.videoId)) {
+    return { ok: false, error: 'ADULT_HIDDEN' }
+  }
+  return {
+    ok: true,
+    media: {
+      mode: 'cache',
+      title: record.title,
+      episodeName: record.episodeName,
+      recordId
+    }
+  }
+}
+
+/**
  * 共享页的「本机缓存」：关闭 18+ 时，属于 18+ 视频的缓存记录不出现在列表里，
  * 网页端也就拼不出播放地址（缓存文件本身由 cachedFile 再拦一次）。
  */
@@ -2208,6 +2289,18 @@ const lanService = createLanService({
     },
     onChange: (state) => sendToRenderer('lan:changed', state)
   }
+})
+
+/**
+ * 投屏：发现 / 控制 / 临时 HTTP 服务都在 cast/ 里，这里只注入数据读取器。
+ * 在线集的原始地址只留在主进程，电视拿到的永远是本机地址；上游请求走 net.fetch，
+ * 因此和采集 / 局域网共享共用「设置 › 网络」的代理配置。
+ */
+castService = createCastService({
+  fetch: (url, init) => net.fetch(url, init),
+  resolveMedia: resolveCastMedia,
+  cachedFile: (recordId, relativePath) => lanCache.resolveFile(recordId, relativePath),
+  onChange: (state) => broadcastRenderer('cast:changed', state)
 })
 
 /**
@@ -2900,6 +2993,39 @@ handleIpc('lan:open', async () => {
   return true
 })
 
+/* ── IPC：投屏 ── */
+
+const EMPTY_CAST_STATE: CastState = { active: false, status: 'idle', position: 0, duration: 0 }
+
+handleIpc('cast:devices', (_event, input?: { refresh?: unknown }) => {
+  if (!castService) return { ok: false, devices: [], error: '投屏服务未就绪' }
+  return castService.devices({ refresh: input?.refresh === true })
+})
+
+handleIpc('cast:start', (_event, input?: CastStartInput) => {
+  if (!castService) {
+    return {
+      ok: false,
+      error: 'INVALID_INPUT',
+      message: '投屏服务未就绪',
+      state: EMPTY_CAST_STATE
+    }
+  }
+  return castService.start(input as CastStartInput)
+})
+
+handleIpc('cast:stop', () => castService?.stop() ?? EMPTY_CAST_STATE)
+
+handleIpc('cast:pause', () => castService?.pause() ?? EMPTY_CAST_STATE)
+
+handleIpc('cast:resume', () => castService?.resume() ?? EMPTY_CAST_STATE)
+
+handleIpc('cast:seek', (_event, seconds?: unknown) =>
+  castService?.seek(Number(seconds)) ?? EMPTY_CAST_STATE
+)
+
+handleIpc('cast:state', () => castService?.state() ?? EMPTY_CAST_STATE)
+
 /* ── IPC：应用信息 ── */
 
 handleIpc('app:info', () => ({
@@ -3061,6 +3187,8 @@ if (!gotTheLock) {
     void networkManager.dispose()
     // 先关掉局域网监听，别让网页端在数据库关闭后还发请求进来
     lanService.dispose()
+    // 投屏服务 / ffmpeg 也要在关库前停掉
+    castService?.dispose()
     // MCP 服务也必须在数据库关闭前停止
     mcpServer.dispose()
     // 应用未就绪时调用 globalShortcut 会抛错，这里加一层保护

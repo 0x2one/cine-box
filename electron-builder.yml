@@ -70,6 +70,7 @@ mac:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    - NSLocalNetworkUsageDescription: 映盒剧场需要访问局域网，以便发现电视并投屏。
 
 dmg:
   artifactName: ${name}-${version}-mac-${arch}.${ext}

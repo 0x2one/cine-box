@@ -27,6 +27,11 @@ export interface PlayerOpenInput {
    * 播放页按 HLS 处理，而不是当普通视频文件原生播放。
    */
   hls?: boolean
+  /**
+   * 缓存记录 id（只有 downloads:play 会传）：本机播放页据此投屏。
+   * player:open 的白名单不接受这个字段，渲染层不能借它投任意记录。
+   */
+  downloadId?: string
 }
 
 export interface PlayerPayload extends PlayerOpenInput {
@@ -53,7 +58,12 @@ const PLAYER_BG = '#0c0f13'
  * 只保留一个窗口：再点别的集数时把新载荷推给已经打开的窗口，不堆一屏播放器。
  * 窗口是无边框 + 固定暗色底，标题栏由播放页自己画；配色只跟主窗口的深色那一份走。
  */
-export function createPlayerWindowManager(options: { preload: string; icon: string }): {
+export function createPlayerWindowManager(options: {
+  preload: string
+  icon: string
+  /** 播放窗关闭：投屏会话要跟着结束，不然电视会一直播下去 */
+  onClosed?: () => void
+}): {
   open: (input: PlayerOpenInput) => PlayerOpenResult
 } {
   let playerWindow: BrowserWindow | null = null
@@ -116,6 +126,11 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
 
     window.on('closed', () => {
       if (playerWindow === window) playerWindow = null
+      try {
+        options.onClosed?.()
+      } catch {
+        // 投屏服务已经销毁时忽略
+      }
     })
 
     window.on('maximize', () => {
@@ -175,6 +190,7 @@ export function createPlayerWindowManager(options: { preload: string; icon: stri
       ? {
           fileUrl,
           hls: input?.hls === true,
+          downloadId: typeof input?.downloadId === 'string' ? input.downloadId : undefined,
           fileName: typeof input?.fileName === 'string' ? input.fileName : undefined,
           title: typeof input?.title === 'string' ? input.title : undefined,
           episodeName: typeof input?.episodeName === 'string' ? input.episodeName : undefined,

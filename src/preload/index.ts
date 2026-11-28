@@ -397,6 +397,28 @@ const api = {
       }
     }
   },
+  cast: {
+    /** 搜索局域网 MediaRenderer；refresh 忽略 15 秒缓存 */
+    devices: (input?: { refresh?: boolean }): Promise<CastDeviceListResult> =>
+      ipcRenderer.invoke('cast:devices', input),
+    /** 开始投屏：在线集传 videoId + 当前 URL，缓存集传下载记录 id */
+    start: (input: CastStartInput): Promise<CastStartResult> =>
+      ipcRenderer.invoke('cast:start', input),
+    stop: (): Promise<CastState> => ipcRenderer.invoke('cast:stop'),
+    pause: (): Promise<CastState> => ipcRenderer.invoke('cast:pause'),
+    resume: (): Promise<CastState> => ipcRenderer.invoke('cast:resume'),
+    seek: (seconds: number): Promise<CastState> => ipcRenderer.invoke('cast:seek', seconds),
+    state: (): Promise<CastState> => ipcRenderer.invoke('cast:state'),
+    /** 会话状态变化：起播 / 暂停 / 停止 / 设备离线 */
+    onChange: (callback: (state: CastState) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: CastState): void =>
+        callback(state)
+      ipcRenderer.on('cast:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('cast:changed', handler)
+      }
+    }
+  },
   windowControls: {
     minimize: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
     maximize: (): Promise<void> => ipcRenderer.invoke('window:maximize'),

@@ -61,6 +61,8 @@ interface PlayerPayload extends Omit<PlayerOpenInput, 'videoId'> {
   fileName?: string
   /** fileUrl 是离线缓存包里的 m3u8：播放页按 HLS 处理 */
   hls?: boolean
+  /** 缓存记录 id：本机播放页据此投屏（只有 downloads:play 会填） */
+  downloadId?: string
 }
 
 interface PlayerOpenResult {
@@ -1480,6 +1482,84 @@ interface LanApi {
   onChange: (callback: (state: LanServiceState) => void) => () => void
 }
 
+/** 局域网里发现的一台可投屏设备 */
+interface CastDevice {
+  id: string
+  name: string
+  model: string
+  manufacturer: string
+}
+
+type CastStatus = 'idle' | 'starting' | 'playing' | 'paused' | 'error'
+
+/** 当前投屏会话：播放页据此画设备名、状态卡和暂停 / 继续 / 停止 */
+interface CastState {
+  active: boolean
+  status: CastStatus
+  deviceId?: string
+  deviceName?: string
+  /** hls：在线集经本机代理；cache：本机缓存包 */
+  mode?: 'hls' | 'cache'
+  title?: string
+  episodeName?: string
+  /** 电视上报的播放位置（秒），未知为 0 */
+  position: number
+  /** 电视上报的时长（秒），未知为 0 */
+  duration: number
+  /** 失败原因（中文） */
+  error?: string
+}
+
+type CastStartInput =
+  | {
+      deviceId: string
+      kind: 'remote'
+      videoId: number
+      /** 当前播放的 m3u8 地址，主进程会按 videoId 再校验一次 */
+      url: string
+      /** 本地当前进度（秒）：投屏开始后电视从相近位置续播 */
+      position?: number
+      title?: string
+      episodeName?: string
+    }
+  | {
+      deviceId: string
+      kind: 'cache'
+      /** 下载中心里已完成的 hls 记录 id */
+      recordId: string
+      /** 本地当前进度（秒） */
+      position?: number
+      title?: string
+      episodeName?: string
+    }
+
+interface CastDeviceListResult {
+  ok: boolean
+  devices: CastDevice[]
+  error?: string
+}
+
+interface CastStartResult {
+  ok: boolean
+  error?: string
+  /** 失败时的中文说明 */
+  message?: string
+  state: CastState
+}
+
+interface CastApi {
+  /** 搜索局域网 MediaRenderer；refresh 忽略 15 秒缓存 */
+  devices: (input?: { refresh?: boolean }) => Promise<CastDeviceListResult>
+  start: (input: CastStartInput) => Promise<CastStartResult>
+  stop: () => Promise<CastState>
+  pause: () => Promise<CastState>
+  resume: () => Promise<CastState>
+  seek: (seconds: number) => Promise<CastState>
+  state: () => Promise<CastState>
+  /** 起播 / 暂停 / 停止 / 设备离线时推送 */
+  onChange: (callback: (state: CastState) => void) => () => void
+}
+
 type UpdaterState =
   'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error'
 
@@ -1729,6 +1809,7 @@ interface Api {
   cache: CacheApi
   updater: UpdaterApi
   lan: LanApi
+  cast: CastApi
   mcp: McpApi
   windowControls: WindowControls
 }

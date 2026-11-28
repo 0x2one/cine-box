@@ -3,7 +3,7 @@ import { isIP } from 'node:net'
 import { isHttpUrl } from './lan-media-url'
 import type { LanFetch, LanVideoDetail } from './lan-types'
 
-const USER_AGENT =
+export const PROXY_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const UPSTREAM_TIMEOUT = 20_000
 const IMAGE_TIMEOUT = 30_000
@@ -33,6 +33,8 @@ const FORWARDED_HEADERS = [
 export interface MediaProxy {
   /** 播放页打开详情后登记这份视频的播放地址来源，之后才允许代理 */
   allowDetail: (video: LanVideoDetail) => void
+  /** 直接登记若干播放地址的来源（投屏会话用：只放行当前这一集所在的域） */
+  allowUrls: (urls: string[]) => void
   /** 列表 / 检索 / 详情返回后登记封面来源，网页端的封面代理只放行这些域 */
   allowImages: (payload: unknown) => void
   handlePlaylist: (req: IncomingMessage, res: ServerResponse, target: URL) => Promise<void>
@@ -206,7 +208,7 @@ export function createMediaProxy(fetch: LanFetch): MediaProxy {
     options: { range?: string; accept?: string; noCache?: boolean }
   ): Headers => {
     const headers = new Headers({
-      'User-Agent': USER_AGENT,
+      'User-Agent': PROXY_USER_AGENT,
       Accept: options.accept ?? '*/*',
       'Accept-Language': 'zh-CN,zh;q=0.9',
       Referer: `${target.origin}/`
@@ -273,6 +275,10 @@ export function createMediaProxy(fetch: LanFetch): MediaProxy {
     }
   }
 
+  const allowUrls: MediaProxy['allowUrls'] = (urls) => {
+    for (const url of urls) rememberOrigin(url)
+  }
+
   /**
    * 封面：由主进程取字节再下发，网页端的远程封面因此也走桌面端代理。
    * 只放行列表 / 检索 / 详情里出现过的来源域，且目标不能是本机 / 内网地址。
@@ -292,7 +298,7 @@ export function createMediaProxy(fetch: LanFetch): MediaProxy {
       const response = await fetch(target.href, {
         method: req.method === 'HEAD' ? 'HEAD' : 'GET',
         headers: {
-          'User-Agent': USER_AGENT,
+          'User-Agent': PROXY_USER_AGENT,
           Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9'
         },
@@ -480,5 +486,5 @@ export function createMediaProxy(fetch: LanFetch): MediaProxy {
     }
   }
 
-  return { allowDetail, allowImages, handlePlaylist, handleStream, handleImage }
+  return { allowDetail, allowUrls, allowImages, handlePlaylist, handleStream, handleImage }
 }

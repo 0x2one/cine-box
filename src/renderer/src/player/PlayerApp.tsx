@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { LeftOutlined, ReloadOutlined, RightOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import { applyPlayerAppearance, findAccent, findTheme } from '../theme/appearance'
 import { formatBytes } from '../utils/format'
+import { CastPanel, CastStage } from './CastPanel'
 import PlayerPanel, { type PlayerPanelTab } from './PlayerPanel'
+import { useCastSession } from './useCastSession'
 import PlayerTitleBar from './PlayerTitleBar'
 import {
   analyzeNaming,
@@ -221,6 +223,18 @@ function PlayerSession({
   const promoteTriedRef = useRef<Set<string>>(new Set())
   const noticeRef = useRef<(text: string) => void>(() => {})
   const cacheCurrentRef = useRef<() => void>(() => {})
+  /** 投屏开始时暂停 / 结束回位用的播放器方法：hook 先建立，播放器创建后再填进来 */
+  const playbackRef = useRef<{
+    pause: () => void
+    resume: () => void
+    seekTo: (seconds: number) => void
+    position: () => number
+  }>({
+    pause: () => {},
+    resume: () => {},
+    seekTo: () => {},
+    position: () => 0
+  })
 
   useEffect(() => {
     let alive = true
@@ -529,7 +543,34 @@ function PlayerSession({
     cacheCurrentRef.current = cacheCurrent
   }, [cacheCurrent])
 
-  const { retry, notice, switchSource, position } = useArtPlayer({
+  const cast = useCastSession({
+    currentKey: episodeKey,
+    buildInput: (device) => {
+      if (!episode) return null
+      return decision.mode === 'cache' && decision.recordId && resolvedLocalUrl
+        ? {
+            deviceId: device.id,
+            kind: 'cache',
+            recordId: decision.recordId,
+            position: playbackRef.current.position()
+          }
+        : {
+            deviceId: device.id,
+            kind: 'remote',
+            videoId,
+            url: episode.url,
+            position: playbackRef.current.position()
+          }
+    },
+    onCastStart: () => playbackRef.current.pause(),
+    onCastEnd: (position) => {
+      if (position > 0) playbackRef.current.seekTo(position)
+      playbackRef.current.resume()
+    },
+    notice: (text) => noticeRef.current(text)
+  })
+
+  const { retry, notice, switchSource, position, pause, resume, seekTo } = useArtPlayer({
     containerRef: stageRef,
     // 重试 / 重新加载时旧剧集还在，先别把播放器拆掉，等新数据到了再切
     url: playUrl,
@@ -538,12 +579,23 @@ function PlayerSession({
     onEnded: goNext,
     onError: (message) => setPlayError(message),
     onEpisodes,
-    onCache: () => cacheCurrentRef.current()
+    onCache: () => cacheCurrentRef.current(),
+    onCast: cast.toggle
   })
 
   useEffect(() => {
     noticeRef.current = notice
   }, [notice])
+
+  // 把播放器方法交给投屏 hook：投屏开始暂停本地，停投时按电视位置回位再继续
+  useEffect(() => {
+    playbackRef.current = {
+      pause,
+      resume,
+      seekTo,
+      position: () => position()?.currentTime ?? 0
+    }
+  }, [pause, resume, seekTo, position])
 
   /**
    * 强制刷新：绕过详情缓存，重新向这个视频的所有来源站点要一次详情，
@@ -854,6 +906,26 @@ function PlayerSession({
               </div>
             </div>
           )}
+
+          {cast.state.active && (
+            <CastStage
+              state={cast.state}
+              onPause={cast.pause}
+              onResume={cast.resume}
+              onStop={cast.stop}
+            />
+          )}
+
+          {cast.open && !cast.state.active && (
+            <CastPanel
+              devices={cast.devices}
+              loading={cast.loading}
+              error={cast.error}
+              onRefresh={cast.refresh}
+              onClose={cast.close}
+              onStart={(device) => void cast.start(device)}
+            />
+          )}
         </section>
 
         {line && panelOpen && (
@@ -912,19 +984,59 @@ function LocalSession({
   const title = payload.title?.trim() || payload.fileName?.trim() || '本机视频'
   const episode = payload.episodeName?.trim() ?? ''
   const hls = payload.hls === true
+  const playbackRef = useRef<{
+    pause: () => void
+    resume: () => void
+    seekTo: (seconds: number) => void
+    position: () => number
+  }>({
+    pause: () => {},
+    resume: () => {},
+    seekTo: () => {},
+    position: () => 0
+  })
 
   useEffect(() => {
     document.title = episode ? `${title} · ${episode} — 映盒剧场` : `${title} — 映盒剧场`
   }, [title, episode])
 
-  const { retry } = useArtPlayer({
+  const cast = useCastSession({
+    currentKey: String(payload.token),
+    buildInput: (device) =>
+      payload.downloadId
+        ? {
+            deviceId: device.id,
+            kind: 'cache',
+            recordId: payload.downloadId,
+            position: playbackRef.current.position()
+          }
+        : null,
+    onCastStart: () => playbackRef.current.pause(),
+    onCastEnd: (position) => {
+      if (position > 0) playbackRef.current.seekTo(position)
+      playbackRef.current.resume()
+    },
+    notice: () => {}
+  })
+
+  const { retry, pause, resume, seekTo, position } = useArtPlayer({
     containerRef: stageRef,
     url: payload.fileUrl,
     type: hls ? 'm3u8' : 'auto',
     accent,
     showEpisodes: false,
-    onError: (message) => setPlayError(message)
+    onError: (message) => setPlayError(message),
+    onCast: payload.downloadId ? cast.toggle : undefined
   })
+
+  useEffect(() => {
+    playbackRef.current = {
+      pause,
+      resume,
+      seekTo,
+      position: () => position()?.currentTime ?? 0
+    }
+  }, [pause, resume, seekTo, position])
 
   const retryPlayback = (): void => {
     setPlayError('')
@@ -948,6 +1060,26 @@ function LocalSession({
                 </button>
               </div>
             </div>
+          )}
+
+          {cast.state.active && (
+            <CastStage
+              state={cast.state}
+              onPause={cast.pause}
+              onResume={cast.resume}
+              onStop={cast.stop}
+            />
+          )}
+
+          {cast.open && !cast.state.active && (
+            <CastPanel
+              devices={cast.devices}
+              loading={cast.loading}
+              error={cast.error}
+              onRefresh={cast.refresh}
+              onClose={cast.close}
+              onStart={(device) => void cast.start(device)}
+            />
           )}
         </section>
       </div>

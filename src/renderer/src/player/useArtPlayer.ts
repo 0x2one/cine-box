@@ -33,6 +33,23 @@ const CACHE_ICON =
   '<path d="M4.5 16.1v.8a1.7 1.7 0 0 0 1.7 1.7h9.6a1.7 1.7 0 0 0 1.7-1.7v-.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
   '</svg>'
 
+/**
+ * 控制条「投屏」的图标：一块屏幕 + 左下角一个点和两道信号弧，和缓存 / 选集同一尺寸。
+ * 画布 22×22，墨迹横向 1.6–20.4、纵向 3.2–18.8，和 ArtPlayer 自带图标（齿轮 / 画中画 /
+ * 全屏）一样宽、一样上下居中，外层还会套 `.art-icon` 统一缩放。
+ * 扇形圆心就落在屏幕外框的左下角，屏幕的左 / 下两条边在那里断开：弧线只朝屏幕内侧长，
+ * 不会压在边框上（旧版两道弧画在完整屏幕上，24px 下左下角糊成一团，还比旁边高出一截）。
+ * 屏幕那条描边必须自己写 fill="none"：ArtPlayer 注入的 `.art-video-player svg{fill:…}`
+ * 会盖掉 `<svg fill="none">` 上的表现属性，一旦被填实，整块屏幕就成了白板。
+ */
+const CAST_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">' +
+  '<path d="M13.8 17.8H17.2A2.2 2.2 0 0 0 19.4 15.6V6.4A2.2 2.2 0 0 0 17.2 4.2H4.8A2.2 2.2 0 0 0 2.6 6.4V8.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+  '<path d="M1.6 15.7A3.1 3.1 0 0 1 4.7 18.8Z" fill="currentColor"/>' +
+  '<path d="M1.6 12.2A6.6 6.6 0 0 1 8.2 18.8L6.4 18.8A4.8 4.8 0 0 0 1.6 14Z" fill="currentColor"/>' +
+  '<path d="M1.6 8.9A9.9 9.9 0 0 1 11.5 18.8L9.7 18.8A8.1 8.1 0 0 0 1.6 10.7Z" fill="currentColor"/>' +
+  '</svg>'
+
 function readVolume(): number {
   const stored = Number(localStorage.getItem(VOLUME_KEY))
   return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 0.8
@@ -67,6 +84,8 @@ export interface UseArtPlayerOptions {
   showEpisodes?: boolean
   /** 控制条「缓存本集」：不传就不挂这颗按钮（本机文件播放） */
   onCache?: () => void
+  /** 控制条「投屏」：不传就不挂这颗按钮 */
+  onCast?: () => void
 }
 
 export interface ArtPlayerHandle {
@@ -83,6 +102,12 @@ export interface ArtPlayerHandle {
   switchSource: (nextUrl: string, fallbackUrl?: string, timeoutMs?: number) => Promise<boolean>
   /** 当前播放位置：切源前用来判断「是不是已经快播完了」 */
   position: () => { currentTime: number; duration: number } | null
+  /** 暂停本地播放（投屏开始时用，避免电视和电脑同时出声） */
+  pause: () => void
+  /** 恢复本地播放（停投后回到电脑继续看） */
+  resume: () => void
+  /** 跳转到指定秒数（停投时按电视位置续上） */
+  seekTo: (seconds: number) => void
 }
 
 /**
@@ -100,7 +125,8 @@ export function useArtPlayer({
   onError,
   onEpisodes,
   showEpisodes = true,
-  onCache
+  onCache,
+  onCast
 }: UseArtPlayerOptions): ArtPlayerHandle {
   const artRef = useRef<Artplayer | null>(null)
   const urlRef = useRef(url)
@@ -110,6 +136,7 @@ export function useArtPlayer({
   const errorRef = useRef(onError)
   const episodesRef = useRef(onEpisodes)
   const cacheRef = useRef(onCache)
+  const castRef = useRef(onCast)
   const typeRef = useRef(type)
   const showEpisodesRef = useRef(showEpisodes)
   /**
@@ -130,6 +157,7 @@ export function useArtPlayer({
     errorRef.current = onError
     episodesRef.current = onEpisodes
     cacheRef.current = onCache
+    castRef.current = onCast
     typeRef.current = type
     showEpisodesRef.current = showEpisodes
   })
@@ -173,7 +201,8 @@ export function useArtPlayer({
       // 自定义图标挂在 ArtPlayer 的 icons 上，取出来是带 .art-icon 的元素
       icons: {
         episodes: EPISODES_ICON,
-        cache: CACHE_ICON
+        cache: CACHE_ICON,
+        cast: CAST_ICON
       },
       cssVar: {
         '--art-control-height': '42px',
@@ -274,6 +303,18 @@ export function useArtPlayer({
         index: 24,
         tooltip: '缓存本集',
         click: () => cacheRef.current?.()
+      }))
+    }
+
+    // 控制条「投屏」：打开设备列表 / 当前投屏状态
+    if (castRef.current) {
+      instance.controls.add((art) => ({
+        name: 'cinebox-cast',
+        html: art.icons.cast,
+        position: 'right',
+        index: 26,
+        tooltip: '投屏',
+        click: () => castRef.current?.()
       }))
     }
 
@@ -396,5 +437,21 @@ export function useArtPlayer({
     return { currentTime: instance.currentTime, duration: instance.duration }
   }, [])
 
-  return { retry, notice, switchSource, position }
+  const pause = useCallback(() => {
+    artRef.current?.pause()
+  }, [])
+
+  const resume = useCallback(() => {
+    const instance = artRef.current
+    if (!instance) return
+    void instance.play().catch(() => {})
+  }, [])
+
+  const seekTo = useCallback((seconds: number) => {
+    const instance = artRef.current
+    if (!instance || !Number.isFinite(seconds)) return
+    instance.currentTime = Math.max(0, seconds)
+  }, [])
+
+  return { retry, notice, switchSource, position, pause, resume, seekTo }
 }
