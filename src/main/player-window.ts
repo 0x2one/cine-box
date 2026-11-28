@@ -145,8 +145,9 @@ export function createPlayerWindowManager(options: {
       // 无边框窗口补回「双击标题栏最大化」：只认标题栏那一条，并避开右侧操作区
       const WM_LBUTTONDBLCLK = 0x0203
       const TITLE_BAR_HEIGHT = 46
-      // 右侧三个窗口按钮再留一点余量，双击它们不应改变窗口状态
-      const ACTIONS_ZONE_WIDTH = 300
+      // 右侧操作区（强制刷新 30 + 分隔线 13 + 三个窗口按钮 138 + 间距，实测约 185）再留一点余量：
+      // 双击它们不应改变窗口状态
+      const ACTIONS_ZONE_WIDTH = 200
       window.hookWindowMessage(WM_LBUTTONDBLCLK, () => {
         if (window.isDestroyed()) return
         const cursor = screen.getCursorScreenPoint()

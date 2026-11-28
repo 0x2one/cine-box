@@ -199,41 +199,55 @@ button {
   display: flex;
   height: 100%;
   align-items: center;
-  gap: 4px;
+  /* 和主窗口标题栏一致：动作按钮 / 窗口按钮之间只留 2px，靠分隔线（margin 6px）分组 */
+  gap: 2px;
   -webkit-app-region: no-drag;
 }
 
-/* 标题栏的「强制刷新」：只重拉详情，不动窗口，所以做成小号胶囊而不是窗口按钮 */
+/*
+ * 标题栏的「强制刷新」：维护动作，做成 30×30 纯图标按钮（与主窗口标题栏的 下载 / 控制台 /
+ * 设置 同一套规格：14px 图标、--text-muted、悬停才铺一层底色），不跟片名 / 集数抢重心；
+ * 刷新中禁用并让图标自己转，这时改成强调色——它是标题栏里唯一有动静的东西。
+ */
 .player-refresh-btn {
   display: inline-flex;
+  width: 30px;
   height: 30px;
   align-items: center;
-  gap: 5px;
-  margin-right: 6px;
-  padding: 0 9px;
-  border: 1px solid transparent;
+  justify-content: center;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
-  font-family: inherit;
-  font-size: 11.5px;
-  letter-spacing: 0.01em;
-  cursor: pointer;
+  font-size: 14px;
   transition:
     background-color 120ms ease,
-    border-color 120ms ease,
     color 120ms ease;
 }
 
+/* 悬停 / 按下的底色跟隔壁窗口按钮完全一致（同一行里两簇动作不该有两种反馈） */
 .player-refresh-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
 }
 
+.player-refresh-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+/* 刷新中：图标自己转圈，颜色留在强调色上当进度指示 */
 .player-refresh-btn:disabled {
-  opacity: 0.62;
+  color: var(--accent);
   cursor: default;
+}
+
+/* 刷新按钮和窗口按钮之间断开：一个是维护动作、一个是系统动作，贴着最小化太容易误点 */
+.player-titlebar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--border);
 }
 
 /* macOS 没有右侧窗口按钮，给刷新按钮留出窗口边缘的呼吸位 */

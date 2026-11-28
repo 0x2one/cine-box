@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { LeftOutlined, ReloadOutlined, RightOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import {
+  LeftOutlined,
+  ReloadOutlined,
+  RightOutlined,
+  SyncOutlined,
+  VideoCameraOutlined
+} from '@ant-design/icons'
 import { applyPlayerAppearance, findAccent, findTheme } from '../theme/appearance'
 import { formatBytes } from '../utils/format'
 import { CastPanel, CastStage } from './CastPanel'
@@ -848,20 +854,21 @@ function PlayerSession({
               <div className="player-state-actions">
                 <button
                   type="button"
-                  className="player-btn is-ghost"
+                  className="player-btn"
                   onClick={reload}
                   disabled={refreshing}
                 >
                   <ReloadOutlined />
                   重新加载
                 </button>
+                {/* 强制刷新要挨个问所有来源站点，比重新加载重，所以排在后面、用次要样式 */}
                 <button
                   type="button"
-                  className="player-btn"
+                  className="player-btn is-ghost"
                   onClick={() => void refreshDetails()}
                   disabled={refreshing}
                 >
-                  <ReloadOutlined spin={refreshing} />
+                  <SyncOutlined spin={refreshing} />
                   {refreshing ? '刷新中…' : '强制刷新'}
                 </button>
               </div>
@@ -900,7 +907,7 @@ function PlayerSession({
                   onClick={() => void refreshDetails()}
                   disabled={refreshing}
                 >
-                  <ReloadOutlined spin={refreshing} />
+                  <SyncOutlined spin={refreshing} />
                   {refreshing ? '刷新中…' : '强制刷新'}
                 </button>
               </div>
