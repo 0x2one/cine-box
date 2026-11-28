@@ -21,16 +21,19 @@ const EPISODES_ICON =
 
 /**
  * 控制条「缓存本集」的图标：一根下箭头落进托盘，和标题栏的下载图标同一造型。
- * 画布 22×22，墨迹横向 3.5–18.5、纵向 2.4–19.6，和 ArtPlayer 自带图标（齿轮 / 画中画 /
- * 全屏）一样大、一样上下居中，外层还会套 `.art-icon` 统一缩放。
+ * 画布 22×22，墨迹横向 3.05–18.95、纵向 2.6–18.55，和 ArtPlayer 自带图标（齿轮 / 画中画 /
+ * 全屏）一样宽，外层还会套 `.art-icon` 统一缩放。
+ * 箭头（杆 3.8、头 14.4）比旧版粗一圈，托盘收成一道浅 U（14 宽、1.9 描边），墨迹重心落在
+ * y≈11.4，和齿轮 / 画中画（10.9–11.4）齐平：旧版细箭头 + 又宽又深的托盘把重心压到 12.6，
+ * 24px 下整颗图标看着比同行往下沉半格，上沿和下沿都跟旁边对不齐。
  * 托盘那条必须自己写 fill="none"：ArtPlayer 注入的 `.art-video-player svg{fill:…}`
  * 会盖掉 `<svg fill="none">` 上的表现属性，path 一被填实，箭头就成了实心三角、
  * 托盘成了实心横条，比旁边的图标高出一截，看着不在同一条线上。
  */
 const CACHE_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">' +
-  '<path d="M10 2.4h2v7h4L11 14.4l-5-5h4z" fill="currentColor"/>' +
-  '<path d="M4.5 16.1v.8a1.7 1.7 0 0 0 1.7 1.7h9.6a1.7 1.7 0 0 0 1.7-1.7v-.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+  '<path d="M9.1 2.6h3.8v6.2H18.2L11 14.5 3.8 8.8H9.1z" fill="currentColor"/>' +
+  '<path d="M4 15.9v.3a1.4 1.4 0 0 0 1.4 1.4h11.2a1.4 1.4 0 0 0 1.4-1.4v-.3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>' +
   '</svg>'
 
 /**
