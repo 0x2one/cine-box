@@ -145,7 +145,15 @@ function lastLine(text: string): string {
 /** 把 ffmpeg 的 stderr 收敛成一句中文提示 */
 function describeError(error: unknown): string {
   if (error instanceof Mp4ExportError) {
-    if (error.code === 'DISK' || error.code === 'NO_FFMPEG') return error.message
+    if (error.code === 'DISK') return error.message
+    if (error.code === 'NO_FFMPEG') {
+      // 二进制被截断 / 架构不对时 Windows 报 ERROR_BAD_EXE_FORMAT，Node 侧是 EFTYPE / ENOEXEC
+      // （spawn 会同步抛错，走不到 'error' 事件），这时候不该把 Node 原文抛给用户
+      if (/EFTYPE|ENOEXEC|UNKNOWN|not a valid win32 application/i.test(error.detail)) {
+        return '内置 ffmpeg 文件损坏或不完整，请重新安装应用后重试'
+      }
+      return error.message
+    }
     const detail = error.detail
     if (/no space left|not enough space/i.test(detail)) return '磁盘空间不足'
     if (/permission denied|access is denied/i.test(detail)) return '没有写入权限，检查下载目录'
@@ -161,6 +169,9 @@ function describeError(error: unknown): string {
   const code = (error as NodeJS.ErrnoException)?.code
   if (code === 'ENOSPC') return '磁盘空间不足'
   if (code === 'EACCES' || code === 'EPERM') return '没有写入权限，检查下载目录'
+  if (code === 'EFTYPE' || code === 'ENOEXEC') {
+    return '内置 ffmpeg 文件损坏或不完整，请重新安装应用后重试'
+  }
   return message ? message.slice(0, 160) : 'MP4 转换失败'
 }
 
@@ -186,10 +197,24 @@ function runFfmpeg(
   onProgress: (percent: number) => void
 ): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(binary, args, {
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
+    let child: ChildProcess
+    try {
+      child = spawn(binary, args, {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+    } catch (error) {
+      // 可执行文件被截断 / 不是本平台程序时 spawn 会同步抛错（Windows 上是 EFTYPE），
+      // 走不到下面的 'error' 事件，这里补一层包装，交给 describeError 说人话
+      rejectPromise(
+        new Mp4ExportError(
+          'NO_FFMPEG',
+          '内置 ffmpeg 无法启动，请重新安装应用',
+          (error as Error).message
+        )
+      )
+      return
+    }
     task.child = child
     let stderr = ''
     let buffer = ''
